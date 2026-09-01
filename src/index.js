@@ -45,4 +45,25 @@ async function api(req,env,url){
  if(url.pathname==='/api/admin/audit'&&req.method==='GET'){if(!(await hasPerm(env,s.account_id,'audit.view')))return json({error:'FORBIDDEN'},403);const r=await env.DB.prepare(`SELECT l.*,a.username FROM audit_log l LEFT JOIN accounts a ON a.id=l.actor_account_id ORDER BY l.id DESC LIMIT 300`).all();return json({items:r.results||[]})}
  return json({error:'NOT_FOUND'},404)
 }
-export default{async fetch(request,env){const url=new URL(request.url);if(url.pathname.startsWith('/api/'))return api(request,env,url);if(url.pathname==='/setup'){if(await setupDone(env))return Response.redirect(new URL('/',url),302);return env.ASSETS.fetch(new Request(new URL('/setup.html',url),request))}if(!(await setupDone(env)))return Response.redirect(new URL('/setup',url),302);return env.ASSETS.fetch(request)}};
+export default{async fetch(request,env){const url=new URL(request.url);if(url.pathname.startsWith('/api/'))return api(request,env,url);if(url.pathname==='/setup'){
+  if(await setupDone(env)){
+    return Response.redirect(new URL('/',url),302);
+  }
+
+  const setupUrl = new URL(request.url);
+  setupUrl.pathname = '/setup.html';
+
+  return env.ASSETS.fetch(
+    new Request(setupUrl.toString(), {
+      method: 'GET',
+      headers: request.headers
+    })
+  );
+}
+
+if(!(await setupDone(env))){
+  return Response.redirect(new URL('/setup',url),302);
+}
+
+return env.ASSETS.fetch(request)
+}};
