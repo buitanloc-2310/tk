@@ -7,7 +7,32 @@ const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(
 const sha256=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
 function token(){const a=new Uint8Array(32);crypto.getRandomValues(a);return b64(a).replace(/[+/=]/g,'')}
-async function pbkdf2(password,salt,iterations=100000){const key=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);return b64(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:enc.encode(salt),iterations},key,256))}
+async function verifyPassword(password, salt, iterations, storedHash) {
+  const raw = String(password ?? '');
+
+  const candidates = [
+    raw,
+    raw.normalize('NFC'),
+    raw.normalize('NFKC')
+  ];
+
+  // Phòng trường hợp trình duyệt/clipboard vô tình thêm khoảng trắng.
+  if (raw !== raw.trim()) candidates.push(raw.trim());
+
+  for (const value of [...new Set(candidates)]) {
+    const calculated = await pbkdf2(
+      value,
+      String(salt ?? ''),
+      Number(iterations || 100000)
+    );
+
+    if (calculated === String(storedHash ?? '')) {
+      return true;
+    }
+  }
+
+  return false;
+}
 const cookie=(n,v,d=7)=>`${n}=${v}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${d*86400}`;
 const clearCookie=n=>`${n}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 async function setupDone(env){const r=await env.DB.prepare('SELECT COUNT(*) c FROM accounts').first();return Number(r?.c||0)>0}
@@ -39,7 +64,7 @@ async function api(req,env,url){
   return json({ok:true});
  }
 
- if(url.pathname==='/api/auth/login'&&req.method==='POST'){
+ return json({ok:true,force_password_change:!!a.force_password_change},200,{'set-cookie':cookie('sfn_session',t,7)}); }
   const b=await bodyJson(req),login=clean(b.login,200).toLowerCase(),pw=String(b.password||'');
   const a=await env.DB.prepare(`SELECT a.*,p.status person_status FROM accounts a JOIN people p ON p.id=a.person_id WHERE lower(a.username)=? OR lower(a.email)=? LIMIT 1`).bind(login,login).first();
   if(!a||a.is_locked||a.person_status==='suspended')return json({error:'INVALID_LOGIN'},401);
