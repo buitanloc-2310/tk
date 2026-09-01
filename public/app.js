@@ -29,7 +29,65 @@ function renderLogin(){
   <div class="portal-block"><b>Các cổng của SFN</b><div class="portal-links">${portals()}</div></div>
   <div class="legal"><a href="/terms.html">Điều khoản sử dụng</a> · <a href="/privacy.html">Chính sách bảo mật</a><br>© 2026 Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First (SFN)</div>
  </section></div>`;
- $('#loginForm').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});boot()}catch{$('#msg').textContent='Tên đăng nhập hoặc mật khẩu không đúng.'}}
+$('#loginForm').onsubmit=async e=>{
+  e.preventDefault();
+
+  const msg=$('#msg');
+  const b=Object.fromEntries(new FormData(e.target));
+
+  msg.textContent='Đang kiểm tra tài khoản...';
+
+  try{
+    const result=await api('/api/auth/login',{
+      method:'POST',
+      body:JSON.stringify(b)
+    });
+
+    console.log('LOGIN_OK',result);
+
+    msg.textContent='Đăng nhập thành công...';
+
+    await boot();
+
+  }catch(err){
+    console.error('LOGIN_FAILED',err);
+
+    const code=
+      err?.data?.error||
+      err?.error||
+      err?.message||
+      'UNKNOWN_ERROR';
+
+    const detail=
+      err?.data?.detail||
+      err?.detail||
+      '';
+
+    if(code==='INVALID_LOGIN'){
+      msg.textContent=
+        'Tên đăng nhập hoặc mật khẩu không đúng.';
+    }
+    else if(code==='ACCOUNT_LOCKED'){
+      msg.textContent=
+        'Tài khoản đang bị khóa.';
+    }
+    else if(code==='ACCOUNT_SUSPENDED'){
+      msg.textContent=
+        'Tài khoản đang bị tạm ngưng.';
+    }
+    else if(code==='LOGIN_SYSTEM_ERROR'){
+      msg.textContent=
+        'LỖI HỆ THỐNG ĐĂNG NHẬP: '+
+        (detail||'Không xác định');
+    }
+    else{
+      msg.textContent=
+        'LỖI ĐĂNG NHẬP: '+
+        code+
+        (detail?' — '+detail:'');
+    }
+  }
+};
  $('#requestAccount').onclick=renderAccountRequest;
  $('#checkRequest').onclick=()=>{modal('Tra cứu yêu cầu cấp tài khoản',`<form id="statusForm" class="form-grid"><label>Mã yêu cầu<input name="code" required></label><label>Email đã đăng ký<input type="email" name="email" required></label><button class="primary">Tra cứu</button><div id="statusResult"></div></form>`);$('#statusForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const d=await api(`/api/public/account-request/status?code=${encodeURIComponent(f.get('code'))}&email=${encodeURIComponent(f.get('email'))}`);$('#statusResult').innerHTML=`<div class="request-note"><b>${esc(d.request.full_name)}</b><br>Trạng thái: <b>${esc(d.request.status)}</b>${d.request.admin_note?`<br>Phản hồi: ${esc(d.request.admin_note)}`:''}</div>`}catch{$('#statusResult').textContent='Không tìm thấy yêu cầu phù hợp.'}}};
 }
