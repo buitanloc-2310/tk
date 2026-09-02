@@ -674,23 +674,317 @@ async function api(req,env,url){
     return json({items:r.results||[]});
   }
 
-  if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
-    const b=await bodyJson(req);
-    const fields=['full_name','display_name','date_of_birth','gender','nationality','id_number','id_issue_date','id_issue_place','email','phone','permanent_address','temporary_address','avatar_url','target_org_node_id'];
-    for(const k of fields){if(!clean(b[k],k.includes('address')?500:240))return json({error:'ALL_PERSONAL_FIELDS_REQUIRED',field:k},400)}
-    const email=clean(b.email,200).toLowerCase(),idno=clean(b.id_number,20);
-    if(!/^\S+@\S+\.\S+$/.test(email))return json({error:'EMAIL_INVALID'},400);
-    if(!/^\d{12}$/.test(idno))return json({error:'ID_NUMBER_MUST_BE_12_DIGITS'},400);
-    if(String(b.privacy_consent)!=='1')return json({error:'PRIVACY_CONSENT_REQUIRED'},400);
-    const dob=new Date(clean(b.date_of_birth,20)+'T00:00:00Z'),now=new Date();let age=now.getUTCFullYear()-dob.getUTCFullYear();if(now.getUTCMonth()<dob.getUTCMonth()||(now.getUTCMonth()===dob.getUTCMonth()&&now.getUTCDate()<dob.getUTCDate()))age--;
-    if(age<18){for(const k of ['guardian_full_name','guardian_relationship','guardian_phone','guardian_email'])if(!clean(b[k],240))return json({error:'GUARDIAN_INFORMATION_REQUIRED',field:k},400);if(String(b.guardian_lives_together)!=='1'&&!clean(b.guardian_address,500))return json({error:'GUARDIAN_ADDRESS_REQUIRED'},400)}
-    const org=await env.DB.prepare(`SELECT id FROM org_nodes WHERE id=? AND status='active' AND deleted_at IS NULL`).bind(clean(b.target_org_node_id,100)).first();if(!org)return json({error:'ORG_INVALID'},400);
-    if(await env.DB.prepare(`SELECT 1 FROM accounts WHERE lower(email)=? LIMIT 1`).bind(email).first())return json({error:'ACCOUNT_ALREADY_EXISTS'},409);
-    if(await env.DB.prepare(`SELECT 1 FROM account_requests WHERE status IN ('pending','supplement') AND (lower(email)=? OR id_number=?) LIMIT 1`).bind(email,idno).first())return json({error:'REQUEST_ALREADY_PENDING'},409);
-    const id=uid('request'),code=`SFN-REQ-${String(Date.now()).slice(-8)}-${crypto.randomUUID().slice(0,4).toUpperCase()}`;
-    await env.DB.prepare(`INSERT INTO account_requests(id,request_code,full_name,display_name,date_of_birth,gender,nationality,id_number,id_issue_date,id_issue_place,email,phone,permanent_address,temporary_address,avatar_url,target_org_node_id,guardian_full_name,guardian_relationship,guardian_phone,guardian_email,guardian_lives_together,guardian_address,privacy_consent,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending')`).bind(id,code,clean(b.full_name,160),clean(b.display_name,160),clean(b.date_of_birth,20),clean(b.gender,50),clean(b.nationality,80),idno,clean(b.id_issue_date,20),clean(b.id_issue_place,200),email,clean(b.phone,50),clean(b.permanent_address,500),clean(b.temporary_address,500),clean(b.avatar_url,1200),clean(b.target_org_node_id,100),age<18?clean(b.guardian_full_name,160):null,age<18?clean(b.guardian_relationship,80):null,age<18?clean(b.guardian_phone,50):null,age<18?clean(b.guardian_email,200).toLowerCase():null,age<18&&String(b.guardian_lives_together)==='1'?1:0,age<18&&String(b.guardian_lives_together)!=='1'?clean(b.guardian_address,500):null).run();
-    return json({ok:true,request_code:code,message:'Yêu cầu đã được ghi nhận. SFN dự kiến xử lý trong 60 phút đến 48 giờ, có thể thay đổi tùy số lượng yêu cầu và quá trình xác minh. Vui lòng thường xuyên kiểm tra email và lưu mã yêu cầu để tra cứu trạng thái.'});
+if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
+  const b=await bodyJson(req);
+
+  const fields=[
+    'full_name',
+    'display_name',
+    'date_of_birth',
+    'gender',
+    'nationality',
+    'id_number',
+    'id_issue_date',
+    'id_issue_place',
+    'email',
+    'phone',
+    'permanent_address',
+    'temporary_address',
+    'avatar_url',
+    'target_org_node_id',
+    'education_or_work_type',
+    'school_or_workplace',
+    'education_status'
+  ];
+
+  for(const k of fields){
+    if(!clean(b[k],k.includes('address')?500:240)){
+      return json({
+        error:'ALL_PERSONAL_FIELDS_REQUIRED',
+        field:k
+      },400);
+    }
   }
+
+  const email=clean(b.email,200).toLowerCase();
+  const idno=clean(b.id_number,20);
+
+  if(!/^\S+@\S+\.\S+$/.test(email)){
+    return json({error:'EMAIL_INVALID'},400);
+  }
+
+  if(!/^\d{12}$/.test(idno)){
+    return json({
+      error:'ID_NUMBER_MUST_BE_12_DIGITS'
+    },400);
+  }
+
+  if(String(b.privacy_consent)!=='1'){
+    return json({
+      error:'PRIVACY_CONSENT_REQUIRED'
+    },400);
+  }
+
+  const educationType=
+    clean(b.education_or_work_type,50);
+
+  const allowedEducationTypes=[
+    'Học sinh',
+    'Sinh viên',
+    'Đang đi làm',
+    'Khác'
+  ];
+
+  if(!allowedEducationTypes.includes(educationType)){
+    return json({
+      error:'EDUCATION_OR_WORK_TYPE_INVALID'
+    },400);
+  }
+
+  const educationStatus=
+    clean(b.education_status,80);
+
+  const allowedEducationStatuses=[
+    'Đang học',
+    'Đã tốt nghiệp',
+    'Đang công tác',
+    'Khác'
+  ];
+
+  if(!allowedEducationStatuses.includes(educationStatus)){
+    return json({
+      error:'EDUCATION_STATUS_INVALID'
+    },400);
+  }
+
+  const dob=
+    new Date(
+      clean(b.date_of_birth,20)+'T00:00:00Z'
+    );
+
+  if(Number.isNaN(dob.getTime())){
+    return json({
+      error:'DATE_OF_BIRTH_INVALID'
+    },400);
+  }
+
+  const now=new Date();
+
+  let age=
+    now.getUTCFullYear()-
+    dob.getUTCFullYear();
+
+  if(
+    now.getUTCMonth()<dob.getUTCMonth()||
+    (
+      now.getUTCMonth()===dob.getUTCMonth()&&
+      now.getUTCDate()<dob.getUTCDate()
+    )
+  ){
+    age--;
+  }
+
+  if(age<0){
+    return json({
+      error:'DATE_OF_BIRTH_INVALID'
+    },400);
+  }
+
+  if(age<18){
+    for(const k of [
+      'guardian_full_name',
+      'guardian_relationship',
+      'guardian_phone',
+      'guardian_email'
+    ]){
+      if(!clean(b[k],240)){
+        return json({
+          error:'GUARDIAN_INFORMATION_REQUIRED',
+          field:k
+        },400);
+      }
+    }
+
+    if(
+      String(b.guardian_lives_together)!=='1'&&
+      !clean(b.guardian_address,500)
+    ){
+      return json({
+        error:'GUARDIAN_ADDRESS_REQUIRED'
+      },400);
+    }
+  }
+
+  const org=await env.DB.prepare(`
+    SELECT id
+    FROM org_nodes
+    WHERE id=?
+      AND status='active'
+      AND deleted_at IS NULL
+  `).bind(
+    clean(b.target_org_node_id,100)
+  ).first();
+
+  if(!org){
+    return json({
+      error:'ORG_INVALID'
+    },400);
+  }
+
+  const existingAccount=
+    await env.DB.prepare(`
+      SELECT 1
+      FROM accounts
+      WHERE lower(email)=?
+      LIMIT 1
+    `).bind(email).first();
+
+  if(existingAccount){
+    return json({
+      error:'ACCOUNT_ALREADY_EXISTS'
+    },409);
+  }
+
+  const pending=
+    await env.DB.prepare(`
+      SELECT 1
+      FROM account_requests
+      WHERE status IN ('pending','supplement')
+        AND (
+          lower(email)=?
+          OR id_number=?
+        )
+      LIMIT 1
+    `).bind(
+      email,
+      idno
+    ).first();
+
+  if(pending){
+    return json({
+      error:'REQUEST_ALREADY_PENDING'
+    },409);
+  }
+
+  const id=uid('request');
+
+  const code=
+    `SFN-REQ-`+
+    `${String(Date.now()).slice(-8)}-`+
+    `${crypto.randomUUID()
+      .slice(0,4)
+      .toUpperCase()}`;
+
+  await env.DB.prepare(`
+    INSERT INTO account_requests(
+      id,
+      request_code,
+      full_name,
+      display_name,
+      date_of_birth,
+      gender,
+      nationality,
+      id_number,
+      id_issue_date,
+      id_issue_place,
+      email,
+      phone,
+      permanent_address,
+      temporary_address,
+
+      education_or_work_type,
+      school_or_workplace,
+      class_or_major,
+      education_status,
+
+      avatar_url,
+      target_org_node_id,
+
+      guardian_full_name,
+      guardian_relationship,
+      guardian_phone,
+      guardian_email,
+      guardian_lives_together,
+      guardian_address,
+
+      privacy_consent,
+      status
+    )
+    VALUES(
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+      ?,?,?,?,
+      ?,?,
+      ?,?,?,?,?,?,
+      1,
+      'pending'
+    )
+  `).bind(
+    id,
+    code,
+
+    clean(b.full_name,160),
+    clean(b.display_name,160),
+    clean(b.date_of_birth,20),
+    clean(b.gender,50),
+    clean(b.nationality,80),
+
+    idno,
+
+    clean(b.id_issue_date,20),
+    clean(b.id_issue_place,200),
+
+    email,
+    clean(b.phone,50),
+
+    clean(b.permanent_address,500),
+    clean(b.temporary_address,500),
+
+    educationType,
+    clean(b.school_or_workplace,240),
+    clean(b.class_or_major,240)||null,
+    educationStatus,
+
+    clean(b.avatar_url,1200),
+    clean(b.target_org_node_id,100),
+
+    age<18
+      ?clean(b.guardian_full_name,160)
+      :null,
+
+    age<18
+      ?clean(b.guardian_relationship,80)
+      :null,
+
+    age<18
+      ?clean(b.guardian_phone,50)
+      :null,
+
+    age<18
+      ?clean(b.guardian_email,200).toLowerCase()
+      :null,
+
+    age<18&&
+    String(b.guardian_lives_together)==='1'
+      ?1
+      :0,
+
+    age<18&&
+    String(b.guardian_lives_together)!=='1'
+      ?clean(b.guardian_address,500)
+      :null
+  ).run();
+
+  return json({
+    ok:true,
+    request_code:code,
+    message:
+      'Yêu cầu đã được ghi nhận. '+
+      'SFN dự kiến xử lý trong 60 phút đến 48 giờ, '+
+      'có thể thay đổi tùy số lượng yêu cầu và quá trình xác minh. '+
+      'Vui lòng thường xuyên kiểm tra email và lưu mã yêu cầu '+
+      'để tra cứu trạng thái.'
+  });
+}
 
   if(
     url.pathname==='/api/public/account-request/status'&&
