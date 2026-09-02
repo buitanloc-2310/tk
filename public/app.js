@@ -2569,12 +2569,17 @@ async function renderNotifications(c){
 
 async function renderProfile(c){
 
-  const d=
-    await api('/api/me/profile');
-
   const p=
-    d.person||d;
+    state.me?.person;
 
+  if(!p){
+    c.innerHTML=`
+      <div class="card">
+        Không thể tải hồ sơ thành viên.
+      </div>
+    `;
+    return;
+  }
 
   c.innerHTML=`
     <div class="section-title">
