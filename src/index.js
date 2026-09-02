@@ -3933,7 +3933,56 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(await env.DB.prepare(`SELECT 1 FROM accounts WHERE lower(email)=? LIMIT 1`).bind(r.email).first())return json({error:'ACCOUNT_ALREADY_EXISTS'},409);
     const last=await env.DB.prepare(`SELECT member_code FROM people WHERE member_code LIKE 'SFN-%' ORDER BY CAST(substr(member_code,5) AS INTEGER) DESC LIMIT 1`).first(),nextNo=last?.member_code?Number(last.member_code.slice(4))+1:1,pid=uid('person'),aid=uid('account'),code=memberCode(nextNo),username=code.toLowerCase(),temporaryPassword=`SFN-${crypto.randomUUID().replaceAll('-','').slice(0,14)}`,salt=token(),it=100000,hash=await pbkdf2(temporaryPassword,salt,it);
     await env.DB.batch([
-      env.DB.prepare(`INSERT INTO people(id,member_code,full_name,display_name,date_of_birth,gender,nationality,id_number,id_issue_date,id_issue_place,email,phone,permanent_address,temporary_address,avatar_url,joined_at,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,DATE('now'),'active')`).bind(pid,code,r.full_name,r.display_name,r.date_of_birth,r.gender,r.nationality,r.id_number,r.id_issue_date,r.id_issue_place,r.email,r.phone,r.permanent_address,r.temporary_address,r.avatar_url),
+env.DB.prepare(`
+  INSERT INTO people(
+    id,
+    member_code,
+    full_name,
+    display_name,
+    date_of_birth,
+    gender,
+    nationality,
+    id_number,
+    id_issue_date,
+    id_issue_place,
+    email,
+    phone,
+    permanent_address,
+    temporary_address,
+    education_or_work_type,
+    school_or_workplace,
+    class_or_major,
+    education_status,
+    avatar_url,
+    joined_at,
+    status
+  )
+  VALUES(
+    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+    DATE('now'),
+    'active'
+  )
+`).bind(
+  pid,
+  code,
+  r.full_name,
+  r.display_name,
+  r.date_of_birth,
+  r.gender,
+  r.nationality,
+  r.id_number,
+  r.id_issue_date,
+  r.id_issue_place,
+  r.email,
+  r.phone,
+  r.permanent_address,
+  r.temporary_address,
+  r.education_or_work_type||null,
+  r.school_or_workplace||null,
+  r.class_or_major||null,
+  r.education_status||null,
+  r.avatar_url
+),
       env.DB.prepare(`INSERT INTO accounts(id,person_id,username,email,password_hash,password_salt,password_iterations,force_password_change) VALUES(?,?,?,?,?,?,?,1)`).bind(aid,pid,username,r.email,hash,salt,it),
       env.DB.prepare(`INSERT INTO account_scopes(id,account_id,role_id,org_node_id,active) VALUES(?,?,?,?,1)`).bind(uid('scope'),aid,'role_member',null),
       env.DB.prepare(`INSERT INTO org_memberships(id,person_id,org_node_id,role_label,started_at,status,is_primary) VALUES(?,?,?,?,DATE('now'),'active',1)`).bind(uid('membership'),pid,r.target_org_node_id,'Thành viên'),
