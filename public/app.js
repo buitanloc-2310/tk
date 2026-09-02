@@ -5392,58 +5392,569 @@ function renderAdminMemberTab(
   }
 
 
-  if(tab==='membership'){
+if(tab==='membership'){
 
-    box.innerHTML=`
-      <div class="toolbar">
+  box.innerHTML=`
+    <div class="toolbar">
 
-        <button
-          id="addMembership"
-          class="primary"
-        >
-          Thêm đơn vị / vai trò
-        </button>
+      <button
+        id="addMembership"
+        class="primary"
+      >
+        Thêm đơn vị / vai trò
+      </button>
 
-      </div>
+    </div>
 
 
-      <div class="list">
+    <div class="list">
 
-        ${
-          d.memberships.length
-            ?d.memberships.map(
-                x=>`
-                  <div class="list-item">
+      ${
+        d.memberships.length
+          ?d.memberships.map(
+              x=>`
+                <div class="list-item">
 
-                    <b>
-                      ${esc(
-                        x.title||
-                        x.role_label||
-                        'Thành viên'
-                      )}
-                    </b>
+                  <div
+                    class="section-title"
+                    style="margin:0;align-items:flex-start"
+                  >
 
                     <div>
-                      ${esc(x.org_name)}
+
+                      <b>
+                        ${esc(
+                          x.title||
+                          x.role_label||
+                          'Thành viên'
+                        )}
+                      </b>
+
+                      <div>
+                        ${esc(x.org_name)}
+                      </div>
+
+                      <div class="meta">
+
+                        ${esc(x.started_at||'—')}
+
+                        →
+
+                        ${
+                          x.status==='active'
+                            ?'hiện tại'
+                            :esc(x.ended_at||'đã kết thúc')
+                        }
+
+                        ·
+
+                        ${
+                          x.status==='active'
+                            ?'Đang hiệu lực'
+                            :x.status==='ended'
+                              ?'Đã ngừng hiệu lực'
+                              :x.status==='hidden'
+                                ?'Đã ẩn'
+                                :statusVi(x.status)
+                        }
+
+                        ${
+                          x.decision_ref
+                            ?' · '+esc(x.decision_ref)
+                            :''
+                        }
+
+                      </div>
+
                     </div>
 
-                    <div class="meta">
 
-                      ${esc(x.started_at||'')}
+                    <div class="actions">
 
-                      →
+                      <button
+                        class="secondary"
+                        data-membership-edit="${esc(x.id)}"
+                      >
+                        Chỉnh sửa
+                      </button>
 
-                      ${esc(x.ended_at||'hiện tại')}
-
-                      ·
-
-                      ${esc(x.status)}
 
                       ${
-                        x.decision_ref
-                          ?' · '+esc(x.decision_ref)
+                        x.status==='active'
+                          ?`
+                            <button
+                              class="secondary"
+                              data-membership-end="${esc(x.id)}"
+                            >
+                              Ngừng hiệu lực
+                            </button>
+                          `
                           :''
                       }
+
+
+                      ${
+                        x.status!=='hidden'
+                          ?`
+                            <button
+                              class="secondary"
+                              data-membership-hide="${esc(x.id)}"
+                            >
+                              Ẩn
+                            </button>
+                          `
+                          :`
+                            <button
+                              class="secondary"
+                              data-membership-show="${esc(x.id)}"
+                            >
+                              Hiện lại
+                            </button>
+                          `
+                      }
+
+                    </div>
+
+                  </div>
+
+                </div>
+              `
+            ).join('')
+          :`
+            <div class="empty">
+              Chưa có dữ liệu đơn vị / vai trò.
+            </div>
+          `
+      }
+
+    </div>
+  `;
+
+
+  /* =========================
+     THÊM ĐƠN VỊ / VAI TRÒ
+     ========================= */
+
+  $('#addMembership').onclick=()=>{
+
+    modal(
+      'Thêm đơn vị / vai trò',
+      `
+      <form
+        id="membershipForm"
+        class="form-grid"
+      >
+
+        <label>
+          Đơn vị
+
+          <select
+            name="org_node_id"
+            required
+          >
+
+            ${
+              meta.orgs.map(
+                o=>`
+                  <option value="${esc(o.id)}">
+                    ${esc(o.name)}
+                  </option>
+                `
+              ).join('')
+            }
+
+          </select>
+        </label>
+
+
+        <label>
+          Chức vụ
+
+          <input
+            name="title"
+            placeholder="Ví dụ: Chủ nhiệm, Trưởng ban..."
+          >
+        </label>
+
+
+        <label>
+          Vai trò
+
+          <input
+            name="role_label"
+            placeholder="Ví dụ: Thành viên, Tình nguyện viên..."
+          >
+        </label>
+
+
+        <label>
+          Ngày bắt đầu
+
+          <input
+            type="date"
+            name="started_at"
+          >
+        </label>
+
+
+        <label>
+          Văn bản / quyết định
+
+          <input
+            name="decision_ref"
+            placeholder="Số quyết định hoặc văn bản liên quan"
+          >
+        </label>
+
+
+        <button class="primary">
+          Ghi nhận
+        </button>
+
+      </form>
+      `
+    );
+
+
+    $('#membershipForm').onsubmit=
+      async e=>{
+
+        e.preventDefault();
+
+        try{
+
+          await api(
+            `/api/admin/members/${p.id}/membership`,
+            {
+              method:'POST',
+              body:JSON.stringify(
+                Object.fromEntries(
+                  new FormData(e.target)
+                )
+              )
+            }
+          );
+
+          alert(
+            'Đã thêm đơn vị / vai trò.'
+          );
+
+          $('#modal')?.remove();
+
+          openAdminMember(p.id);
+
+        }catch(err){
+
+          alert(
+            err.data?.error||
+            err.message
+          );
+        }
+      };
+  };
+
+
+  /* =========================
+     CHỈNH SỬA
+     ========================= */
+
+  $$('[data-membership-edit]').forEach(
+    b=>b.onclick=()=>{
+
+      const x=
+        d.memberships.find(
+          m=>m.id===b.dataset.membershipEdit
+        );
+
+      if(!x){
+        return;
+      }
+
+
+      modal(
+        'Chỉnh sửa đơn vị / vai trò',
+        `
+        <form
+          id="membershipEditForm"
+          class="form-grid"
+        >
+
+          <label>
+            Đơn vị
+
+            <select
+              name="org_node_id"
+              required
+            >
+
+              ${
+                meta.orgs.map(
+                  o=>`
+                    <option
+                      value="${esc(o.id)}"
+                      ${o.id===x.org_node_id?'selected':''}
+                    >
+                      ${esc(o.name)}
+                    </option>
+                  `
+                ).join('')
+              }
+
+            </select>
+          </label>
+
+
+          <label>
+            Chức vụ
+
+            <input
+              name="title"
+              value="${esc(x.title||'')}"
+            >
+          </label>
+
+
+          <label>
+            Vai trò
+
+            <input
+              name="role_label"
+              value="${esc(x.role_label||'')}"
+            >
+          </label>
+
+
+          <label>
+            Ngày bắt đầu
+
+            <input
+              type="date"
+              name="started_at"
+              value="${esc(x.started_at||'')}"
+            >
+          </label>
+
+
+          <label>
+            Ngày kết thúc
+
+            <input
+              type="date"
+              name="ended_at"
+              value="${esc(x.ended_at||'')}"
+            >
+          </label>
+
+
+          <label>
+            Văn bản / quyết định
+
+            <input
+              name="decision_ref"
+              value="${esc(x.decision_ref||'')}"
+            >
+          </label>
+
+
+          <button class="primary">
+            Lưu thay đổi
+          </button>
+
+        </form>
+        `
+      );
+
+
+      $('#membershipEditForm').onsubmit=
+        async e=>{
+
+          e.preventDefault();
+
+          try{
+
+            await api(
+              `/api/admin/members/${p.id}/membership/${x.id}`,
+              {
+                method:'PATCH',
+                body:JSON.stringify(
+                  Object.fromEntries(
+                    new FormData(e.target)
+                  )
+                )
+              }
+            );
+
+            alert(
+              'Đã cập nhật đơn vị / vai trò.'
+            );
+
+            $('#modal')?.remove();
+
+            openAdminMember(p.id);
+
+          }catch(err){
+
+            alert(
+              err.data?.error||
+              err.message
+            );
+          }
+        };
+    }
+  );
+
+
+  /* =========================
+     NGỪNG HIỆU LỰC
+     ========================= */
+
+  $$('[data-membership-end]').forEach(
+    b=>b.onclick=async()=>{
+
+      const x=
+        d.memberships.find(
+          m=>m.id===b.dataset.membershipEnd
+        );
+
+      if(!x){
+        return;
+      }
+
+
+      const ok=
+        confirm(
+          'Ngừng hiệu lực vai trò này?\n\n'+
+          'Bản ghi vẫn được giữ lại trong lịch sử công tác.'
+        );
+
+      if(!ok){
+        return;
+      }
+
+
+      try{
+
+        await api(
+          `/api/admin/members/${p.id}/membership/${x.id}/end`,
+          {
+            method:'POST'
+          }
+        );
+
+        alert(
+          'Đã ngừng hiệu lực vai trò.'
+        );
+
+        openAdminMember(p.id);
+
+      }catch(err){
+
+        alert(
+          err.data?.error||
+          err.message
+        );
+      }
+    }
+  );
+
+
+  /* =========================
+     ẨN
+     ========================= */
+
+  $$('[data-membership-hide]').forEach(
+    b=>b.onclick=async()=>{
+
+      const x=
+        d.memberships.find(
+          m=>m.id===b.dataset.membershipHide
+        );
+
+      if(!x){
+        return;
+      }
+
+
+      const ok=
+        confirm(
+          'Ẩn đơn vị / vai trò này khỏi hồ sơ thành viên?\n\n'+
+          'Dữ liệu vẫn được giữ trong hệ thống.'
+        );
+
+      if(!ok){
+        return;
+      }
+
+
+      try{
+
+        await api(
+          `/api/admin/members/${p.id}/membership/${x.id}/hide`,
+          {
+            method:'POST'
+          }
+        );
+
+        alert(
+          'Đã ẩn đơn vị / vai trò.'
+        );
+
+        openAdminMember(p.id);
+
+      }catch(err){
+
+        alert(
+          err.data?.error||
+          err.message
+        );
+      }
+    }
+  );
+
+
+  /* =========================
+     HIỆN LẠI
+     ========================= */
+
+  $$('[data-membership-show]').forEach(
+    b=>b.onclick=async()=>{
+
+      const x=
+        d.memberships.find(
+          m=>m.id===b.dataset.membershipShow
+        );
+
+      if(!x){
+        return;
+      }
+
+
+      try{
+
+        await api(
+          `/api/admin/members/${p.id}/membership/${x.id}/show`,
+          {
+            method:'POST'
+          }
+        );
+
+        alert(
+          'Đã hiện lại đơn vị / vai trò.'
+        );
+
+        openAdminMember(p.id);
+
+      }catch(err){
+
+        alert(
+          err.data?.error||
+          err.message
+        );
+      }
+    }
+  );
+
+}
 
                     </div>
 
