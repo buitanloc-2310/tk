@@ -1,0 +1,4517 @@
+const enc=new TextEncoder();
+const clean=(v,m=1000)=>String(v??'').trim().slice(0,m);
+const uid=(p='id')=>`${p}_${crypto.randomUUID()}`;
+const json=(d,s=200,h={})=>new Response(JSON.stringify(d),{status:s,headers:{'content-type':'application/json; charset=utf-8',...h}});
+const bodyJson=async r=>{try{return await r.json()}catch{return {}}};
+const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+const sha256=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
+const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
+
+function token(){
+  const a=new Uint8Array(32);
+  crypto.getRandomValues(a);
+  return b64(a).replace(/[+/=]/g,'');
+}
+
+async function pbkdf2(password,salt,iterations=100000){
+  const key=await crypto.subtle.importKey(
+    'raw',
+    enc.encode(String(password)),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+
+  const bits=await crypto.subtle.deriveBits(
+    {
+      name:'PBKDF2',
+      hash:'SHA-256',
+      salt:enc.encode(String(salt)),
+      iterations:Number(iterations||100000)
+    },
+    key,
+    256
+  );
+
+  return b64(bits);
+}
+
+async function verifyPassword(password,salt,iterations,storedHash){
+  const raw=String(password??'');
+
+  const candidates=[
+    raw,
+    raw.normalize('NFC'),
+    raw.normalize('NFKC')
+  ];
+
+  if(raw!==raw.trim()){
+    candidates.push(raw.trim());
+  }
+
+  for(const value of [...new Set(candidates)]){
+    const calculated=await pbkdf2(
+      value,
+      String(salt??''),
+      Number(iterations||100000)
+    );
+
+    if(calculated===String(storedHash??'')){
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const cookie=(n,v,d=7)=>
+  `${n}=${v}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${d*86400}`;
+
+const clearCookie=n=>
+  `${n}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+
+async function setupDone(env){
+  const r=await env.DB.prepare('SELECT COUNT(*) c FROM accounts').first();
+  return Number(r?.c||0)>0;
+}
+
+async function getSession(req,env){
+  const raw=(req.headers.get('cookie')||'')
+    .split(';')
+    .map(x=>x.trim())
+    .find(x=>x.startsWith('sfn_session='));
+
+  if(!raw)return null;
+
+  const t=decodeURIComponent(raw.slice('sfn_session='.length));
+  const h=await sha256(t);
+
+  return env.DB.prepare(`
+    SELECT
+      s.id session_id,
+      s.account_id,
+      a.person_id,
+      a.username,
+      a.force_password_change,
+      p.full_name,
+      p.member_code,
+      p.avatar_url,
+      p.status
+    FROM sessions s
+    JOIN accounts a ON a.id=s.account_id
+    LEFT JOIN people p ON p.id=a.person_id
+    WHERE s.token_hash=?
+      AND s.expires_at>CURRENT_TIMESTAMP
+      AND a.is_locked=0
+    LIMIT 1
+  `).bind(h).first();
+}
+
+async function isSuper(env,aid){
+  return !!(await env.DB.prepare(`
+    SELECT 1
+    FROM account_scopes s
+    JOIN roles r ON r.id=s.role_id
+    WHERE s.account_id=?
+      AND s.active=1
+      AND r.code='SUPER_ADMIN'
+    LIMIT 1
+  `).bind(aid).first());
+}
+
+async function isNetworkAdmin(env,aid){
+  return !!(await env.DB.prepare(`
+    SELECT 1
+    FROM account_scopes s
+    JOIN roles r ON r.id=s.role_id
+    WHERE s.account_id=?
+      AND s.active=1
+      AND r.code IN ('SUPER_ADMIN','NETWORK_ADMIN')
+    LIMIT 1
+  `).bind(aid).first());
+}
+
+async function canAccessOrg(env,aid,orgId){
+  if(!orgId)return false;
+  if(await isNetworkAdmin(env,aid))return true;
+
+  return !!(await env.DB.prepare(`
+    WITH RECURSIVE allowed(id) AS (
+      SELECT s.org_node_id
+      FROM account_scopes s
+      JOIN roles r ON r.id=s.role_id
+      WHERE s.account_id=?
+        AND s.active=1
+        AND r.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN')
+        AND s.org_node_id IS NOT NULL
+
+      UNION
+
+      SELECT o.id
+      FROM org_nodes o
+      JOIN allowed a ON o.parent_id=a.id
+    )
+    SELECT 1
+    FROM allowed
+    WHERE id=?
+    LIMIT 1
+  `).bind(aid,orgId).first());
+}
+
+async function canAccessPerson(env,aid,pid){
+  if(await isNetworkAdmin(env,aid))return true;
+
+  return !!(await env.DB.prepare(`
+    WITH RECURSIVE allowed(id) AS (
+      SELECT s.org_node_id
+      FROM account_scopes s
+      JOIN roles r ON r.id=s.role_id
+      WHERE s.account_id=?
+        AND s.active=1
+        AND r.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN')
+        AND s.org_node_id IS NOT NULL
+
+      UNION
+
+      SELECT o.id
+      FROM org_nodes o
+      JOIN allowed a ON o.parent_id=a.id
+    )
+    SELECT 1
+    FROM org_memberships m
+    JOIN allowed a ON a.id=m.org_node_id
+    WHERE m.person_id=?
+    LIMIT 1
+  `).bind(aid,pid).first());
+}
+
+async function visibleOrgs(env,aid){
+  if(await isNetworkAdmin(env,aid)){
+    const r=await env.DB.prepare(`
+      SELECT id,code,name,short_name,node_type,parent_id,status
+      FROM org_nodes
+      WHERE deleted_at IS NULL
+      ORDER BY sort_order,name
+    `).all();
+
+    return r.results||[];
+  }
+
+  const r=await env.DB.prepare(`
+    WITH RECURSIVE allowed(id) AS (
+      SELECT s.org_node_id
+      FROM account_scopes s
+      JOIN roles rr ON rr.id=s.role_id
+      WHERE s.account_id=?
+        AND s.active=1
+        AND rr.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN')
+        AND s.org_node_id IS NOT NULL
+
+      UNION
+
+      SELECT o.id
+      FROM org_nodes o
+      JOIN allowed a ON o.parent_id=a.id
+    )
+    SELECT
+      o.id,
+      o.code,
+      o.name,
+      o.short_name,
+      o.node_type,
+      o.parent_id,
+      o.status
+    FROM org_nodes o
+    JOIN allowed a ON a.id=o.id
+    ORDER BY o.sort_order,o.name
+  `).bind(aid).all();
+
+  return r.results||[];
+}
+
+async function hasPerm(env,aid,code,scope=null){
+  if(await isSuper(env,aid))return true;
+
+  let q=`
+    SELECT 1
+    FROM account_scopes s
+    JOIN role_permissions rp ON rp.role_id=s.role_id
+    JOIN permissions p ON p.id=rp.permission_id
+    WHERE s.account_id=?
+      AND s.active=1
+      AND p.code=?
+  `;
+
+  const b=[aid,code];
+
+  if(scope){
+    q+=` AND (s.org_node_id=? OR s.org_node_id IS NULL)`;
+    b.push(scope);
+  }
+
+  q+=' LIMIT 1';
+
+  return !!(await env.DB.prepare(q).bind(...b).first());
+}
+
+async function audit(env,aid,action,type,id,scope=null,details={}){
+  await env.DB.prepare(`
+    INSERT INTO audit_log(
+      actor_account_id,
+      action,
+      entity_type,
+      entity_id,
+      org_node_id,
+      details_json
+    )
+    VALUES(?,?,?,?,?,?)
+  `).bind(
+    aid||null,
+    action,
+    type,
+    id||null,
+    scope||null,
+    JSON.stringify(details)
+  ).run();
+}
+
+function memberCode(n){
+  return `SFN-${String(n).padStart(6,'0')}`;
+}
+
+function verifyCode(prefix='SFN'){
+  return `${prefix}-${crypto.randomUUID()
+    .replaceAll('-','')
+    .slice(0,12)
+    .toUpperCase()}`;
+}
+
+async function api(req,env,url){
+
+  // =========================================================
+  // SETUP
+  // =========================================================
+
+  if(url.pathname==='/api/setup/status'&&req.method==='GET'){
+    return json({
+      setup_required:!(await setupDone(env))
+    });
+  }
+
+  if(url.pathname==='/api/setup'&&req.method==='POST'){
+    if(await setupDone(env)){
+      return json({error:'SETUP_ALREADY_COMPLETED'},409);
+    }
+
+    const b=await bodyJson(req);
+
+    const name=clean(b.full_name,160);
+    const user=clean(b.username,80).toLowerCase();
+    const email=clean(b.email,200).toLowerCase();
+    const pw=String(b.password||'');
+
+    if(!name||!user||pw.length<10){
+      return json({error:'INVALID_SETUP_DATA'},400);
+    }
+
+    const pid=uid('person');
+    const aid=uid('account');
+    const salt=token();
+    const it=100000;
+    const hash=await pbkdf2(pw,salt,it);
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO people(
+          id,
+          member_code,
+          full_name,
+          email,
+          status
+        )
+        VALUES(?,?,?,?, 'active')
+      `).bind(
+        pid,
+        'SYS-ADMIN-0001',
+        name,
+        email||null
+      ),
+
+      env.DB.prepare(`
+        INSERT INTO accounts(
+          id,
+          person_id,
+          username,
+          email,
+          password_hash,
+          password_salt,
+          password_iterations,
+          force_password_change
+        )
+        VALUES(?,?,?,?,?,?,?,0)
+      `).bind(
+        aid,
+        pid,
+        user,
+        email||null,
+        hash,
+        salt,
+        it
+      ),
+
+      env.DB.prepare(`
+        INSERT INTO account_scopes(
+          id,
+          account_id,
+          role_id,
+          org_node_id,
+          active
+        )
+        VALUES(?,?,?,?,1)
+      `).bind(
+        uid('scope'),
+        aid,
+        'role_super_admin',
+        'org_sfn'
+      ),
+
+      env.DB.prepare(`
+        UPDATE system_settings
+        SET
+          value_json='{"completed":true}',
+          updated_at=CURRENT_TIMESTAMP
+        WHERE key='setup'
+      `)
+    ]);
+
+    await audit(
+      env,
+      aid,
+      'system_setup',
+      'system',
+      'setup',
+      'org_sfn',
+      {username:user}
+    );
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // LOGIN
+  // =========================================================
+
+  if(url.pathname==='/api/auth/login'&&req.method==='POST'){
+    try{
+      const b=await bodyJson(req);
+
+      const login=clean(b.login,200).toLowerCase();
+      const password=String(b.password||'');
+
+      if(!login||!password){
+        return json({error:'INVALID_LOGIN'},401);
+      }
+
+      const a=await env.DB.prepare(`
+        SELECT
+          a.id,
+          a.person_id,
+          a.username,
+          a.email,
+          a.password_hash,
+          a.password_salt,
+          a.password_iterations,
+          a.force_password_change,
+          a.is_locked,
+          p.status AS person_status
+        FROM accounts a
+        LEFT JOIN people p ON p.id=a.person_id
+        WHERE
+          LOWER(TRIM(a.username))=?
+          OR LOWER(TRIM(COALESCE(a.email,'')))=?
+        LIMIT 1
+      `).bind(login,login).first();
+
+      if(!a){
+        return json({error:'INVALID_LOGIN'},401);
+      }
+
+      if(Number(a.is_locked||0)===1){
+        return json({error:'ACCOUNT_LOCKED'},423);
+      }
+
+      if(a.person_status==='suspended'){
+        return json({error:'ACCOUNT_SUSPENDED'},403);
+      }
+
+      const passwordOK=await verifyPassword(
+        password,
+        a.password_salt,
+        a.password_iterations,
+        a.password_hash
+      );
+
+      if(!passwordOK){
+        return json({error:'INVALID_LOGIN'},401);
+      }
+
+      await env.DB.prepare(`
+        DELETE FROM sessions
+        WHERE account_id=?
+          AND expires_at<=CURRENT_TIMESTAMP
+      `).bind(a.id).run();
+
+      const t=token();
+      const h=await sha256(t);
+      const sid=uid('session');
+
+      await env.DB.prepare(`
+        INSERT INTO sessions(
+          id,
+          account_id,
+          token_hash,
+          expires_at,
+          user_agent
+        )
+        VALUES(
+          ?,
+          ?,
+          ?,
+          datetime('now','+7 days'),
+          ?
+        )
+      `).bind(
+        sid,
+        a.id,
+        h,
+        clean(req.headers.get('user-agent'),500)
+      ).run();
+
+      await env.DB.prepare(`
+        UPDATE accounts
+        SET
+          last_login_at=CURRENT_TIMESTAMP,
+          updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).bind(a.id).run();
+
+      await audit(
+        env,
+        a.id,
+        'account_login',
+        'account',
+        a.id,
+        null,
+        {username:a.username}
+      );
+
+      return json(
+        {
+          ok:true,
+          force_password_change:
+            Number(a.force_password_change||0)===1
+        },
+        200,
+        {
+          'set-cookie':cookie('sfn_session',t,7)
+        }
+      );
+
+    }catch(err){
+      console.error('LOGIN_ERROR',err);
+
+      return json(
+        {
+          error:'LOGIN_SYSTEM_ERROR',
+          detail:String(err?.message||err)
+        },
+        500
+      );
+    }
+  }
+
+  // =========================================================
+  // LOGOUT
+  // =========================================================
+
+  if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
+    const s=await getSession(req,env);
+
+    if(s){
+      await env.DB.prepare(
+        'DELETE FROM sessions WHERE id=?'
+      ).bind(s.session_id).run();
+    }
+
+    return json(
+      {ok:true},
+      200,
+      {'set-cookie':clearCookie('sfn_session')}
+    );
+  }
+
+  // =========================================================
+  // PUBLIC VERIFY
+  // =========================================================
+
+  if(url.pathname==='/api/public/verify'&&req.method==='GET'){
+    const code=clean(url.searchParams.get('code'),100);
+
+    if(!code){
+      return json({error:'CODE_REQUIRED'},400);
+    }
+
+    const card=await env.DB.prepare(`
+      SELECT
+        c.card_number,
+        c.status,
+        c.issued_at,
+        c.expires_at,
+        c.title_on_card,
+        p.full_name,
+        p.member_code,
+        p.avatar_url,
+        t.name card_type_name,
+        o.name org_name
+      FROM member_cards c
+      JOIN people p ON p.id=c.person_id
+      JOIN card_types t ON t.id=c.card_type_id
+      LEFT JOIN org_nodes o ON o.id=c.org_node_id
+      WHERE c.verify_token=?
+         OR c.card_number=?
+      LIMIT 1
+    `).bind(code,code).first();
+
+    if(card){
+      return json({
+        type:'card',
+        valid:
+          card.status==='active'&&
+          (!card.expires_at||
+            card.expires_at>=new Date()
+              .toISOString()
+              .slice(0,10)),
+        record:card
+      });
+    }
+
+    const cert=await env.DB.prepare(`
+      SELECT
+        c.certificate_no,
+        c.title,
+        c.issuer,
+        c.issued_at,
+        c.verification_status,
+        p.full_name,
+        p.member_code
+      FROM certificates c
+      JOIN people p ON p.id=c.person_id
+      WHERE c.verify_code=?
+         OR c.certificate_no=?
+      LIMIT 1
+    `).bind(code,code).first();
+
+    if(cert){
+      return json({
+        type:'certificate',
+        valid:cert.verification_status==='verified',
+        record:cert
+      });
+    }
+
+    return json({error:'NOT_FOUND'},404);
+  }
+
+  // =========================================================
+  // PUBLIC ACCOUNT REQUEST
+  // =========================================================
+
+  if(url.pathname==='/api/public/request-avatar'&&req.method==='POST'){
+    const ct=(req.headers.get('content-type')||'').toLowerCase();
+
+    if(!['image/jpeg','image/png','image/webp'].includes(ct)){
+      return json({error:'IMAGE_TYPE_NOT_ALLOWED'},415);
+    }
+
+    const data=await req.arrayBuffer();
+
+    if(!data.byteLength||data.byteLength>900000){
+      return json({error:'IMAGE_TOO_LARGE'},413);
+    }
+
+    const ext=
+      ct==='image/png'
+        ?'png'
+        :ct==='image/webp'
+          ?'webp'
+          :'jpg';
+
+    const key=
+      `requests/avatars/`+
+      `${new Date().toISOString().slice(0,10)}/`+
+      `${crypto.randomUUID()}.${ext}`;
+
+    await env.FILES.put(
+      key,
+      data,
+      {
+        httpMetadata:{
+          contentType:ct,
+          cacheControl:
+            'public, max-age=31536000, immutable'
+        }
+      }
+    );
+
+    return json({
+      ok:true,
+      url:`/files/${key}`
+    });
+  }
+
+  if(url.pathname==='/api/public/org-options'&&req.method==='GET'){
+    const r=await env.DB.prepare(`SELECT id,name,parent_id,node_type FROM org_nodes WHERE status='active' AND deleted_at IS NULL ORDER BY sort_order,name`).all();
+    return json({items:r.results||[]});
+  }
+
+if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
+  const b=await bodyJson(req);
+
+  const fields=[
+    'full_name',
+    'display_name',
+    'date_of_birth',
+    'gender',
+    'nationality',
+    'id_number',
+    'id_issue_date',
+    'id_issue_place',
+    'email',
+    'phone',
+    'permanent_address',
+    'temporary_address',
+    'avatar_url',
+    'target_org_node_id',
+    'education_or_work_type',
+    'school_or_workplace',
+    'education_status'
+  ];
+
+  for(const k of fields){
+    if(!clean(b[k],k.includes('address')?500:240)){
+      return json({
+        error:'ALL_PERSONAL_FIELDS_REQUIRED',
+        field:k
+      },400);
+    }
+  }
+
+  const email=clean(b.email,200).toLowerCase();
+  const idno=clean(b.id_number,20);
+
+  if(!/^\S+@\S+\.\S+$/.test(email)){
+    return json({error:'EMAIL_INVALID'},400);
+  }
+
+  if(!/^\d{12}$/.test(idno)){
+    return json({
+      error:'ID_NUMBER_MUST_BE_12_DIGITS'
+    },400);
+  }
+
+  if(String(b.privacy_consent)!=='1'){
+    return json({
+      error:'PRIVACY_CONSENT_REQUIRED'
+    },400);
+  }
+
+  const educationType=
+    clean(b.education_or_work_type,50);
+
+  const allowedEducationTypes=[
+    'Học sinh',
+    'Sinh viên',
+    'Đang đi làm',
+    'Khác'
+  ];
+
+  if(!allowedEducationTypes.includes(educationType)){
+    return json({
+      error:'EDUCATION_OR_WORK_TYPE_INVALID'
+    },400);
+  }
+
+  const educationStatus=
+    clean(b.education_status,80);
+
+  const allowedEducationStatuses=[
+    'Đang học',
+    'Đã tốt nghiệp',
+    'Đang công tác',
+    'Khác'
+  ];
+
+  if(!allowedEducationStatuses.includes(educationStatus)){
+    return json({
+      error:'EDUCATION_STATUS_INVALID'
+    },400);
+  }
+
+  const dob=
+    new Date(
+      clean(b.date_of_birth,20)+'T00:00:00Z'
+    );
+
+  if(Number.isNaN(dob.getTime())){
+    return json({
+      error:'DATE_OF_BIRTH_INVALID'
+    },400);
+  }
+
+  const now=new Date();
+
+  let age=
+    now.getUTCFullYear()-
+    dob.getUTCFullYear();
+
+  if(
+    now.getUTCMonth()<dob.getUTCMonth()||
+    (
+      now.getUTCMonth()===dob.getUTCMonth()&&
+      now.getUTCDate()<dob.getUTCDate()
+    )
+  ){
+    age--;
+  }
+
+  if(age<0){
+    return json({
+      error:'DATE_OF_BIRTH_INVALID'
+    },400);
+  }
+
+  if(age<18){
+    for(const k of [
+      'guardian_full_name',
+      'guardian_relationship',
+      'guardian_phone',
+      'guardian_email'
+    ]){
+      if(!clean(b[k],240)){
+        return json({
+          error:'GUARDIAN_INFORMATION_REQUIRED',
+          field:k
+        },400);
+      }
+    }
+
+    if(
+      String(b.guardian_lives_together)!=='1'&&
+      !clean(b.guardian_address,500)
+    ){
+      return json({
+        error:'GUARDIAN_ADDRESS_REQUIRED'
+      },400);
+    }
+  }
+
+  const org=await env.DB.prepare(`
+    SELECT id
+    FROM org_nodes
+    WHERE id=?
+      AND status='active'
+      AND deleted_at IS NULL
+  `).bind(
+    clean(b.target_org_node_id,100)
+  ).first();
+
+  if(!org){
+    return json({
+      error:'ORG_INVALID'
+    },400);
+  }
+
+  const existingAccount=
+    await env.DB.prepare(`
+      SELECT 1
+      FROM accounts
+      WHERE lower(email)=?
+      LIMIT 1
+    `).bind(email).first();
+
+  if(existingAccount){
+    return json({
+      error:'ACCOUNT_ALREADY_EXISTS'
+    },409);
+  }
+
+  const pending=
+    await env.DB.prepare(`
+      SELECT 1
+      FROM account_requests
+      WHERE status IN ('pending','supplement')
+        AND (
+          lower(email)=?
+          OR id_number=?
+        )
+      LIMIT 1
+    `).bind(
+      email,
+      idno
+    ).first();
+
+  if(pending){
+    return json({
+      error:'REQUEST_ALREADY_PENDING'
+    },409);
+  }
+
+  const id=uid('request');
+
+  const code=
+    `SFN-REQ-`+
+    `${String(Date.now()).slice(-8)}-`+
+    `${crypto.randomUUID()
+      .slice(0,4)
+      .toUpperCase()}`;
+
+  await env.DB.prepare(`
+    INSERT INTO account_requests(
+      id,
+      request_code,
+      full_name,
+      display_name,
+      date_of_birth,
+      gender,
+      nationality,
+      id_number,
+      id_issue_date,
+      id_issue_place,
+      email,
+      phone,
+      permanent_address,
+      temporary_address,
+
+      education_or_work_type,
+      school_or_workplace,
+      class_or_major,
+      education_status,
+
+      avatar_url,
+      target_org_node_id,
+
+      guardian_full_name,
+      guardian_relationship,
+      guardian_phone,
+      guardian_email,
+      guardian_lives_together,
+      guardian_address,
+
+      privacy_consent,
+      status
+    )
+    VALUES(
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+      ?,?,?,?,
+      ?,?,
+      ?,?,?,?,?,?,
+      1,
+      'pending'
+    )
+  `).bind(
+    id,
+    code,
+
+    clean(b.full_name,160),
+    clean(b.display_name,160),
+    clean(b.date_of_birth,20),
+    clean(b.gender,50),
+    clean(b.nationality,80),
+
+    idno,
+
+    clean(b.id_issue_date,20),
+    clean(b.id_issue_place,200),
+
+    email,
+    clean(b.phone,50),
+
+    clean(b.permanent_address,500),
+    clean(b.temporary_address,500),
+
+    educationType,
+    clean(b.school_or_workplace,240),
+    clean(b.class_or_major,240)||null,
+    educationStatus,
+
+    clean(b.avatar_url,1200),
+    clean(b.target_org_node_id,100),
+
+    age<18
+      ?clean(b.guardian_full_name,160)
+      :null,
+
+    age<18
+      ?clean(b.guardian_relationship,80)
+      :null,
+
+    age<18
+      ?clean(b.guardian_phone,50)
+      :null,
+
+    age<18
+      ?clean(b.guardian_email,200).toLowerCase()
+      :null,
+
+    age<18&&
+    String(b.guardian_lives_together)==='1'
+      ?1
+      :0,
+
+    age<18&&
+    String(b.guardian_lives_together)!=='1'
+      ?clean(b.guardian_address,500)
+      :null
+  ).run();
+
+  return json({
+    ok:true,
+    request_code:code,
+    message:
+      'Yêu cầu đã được ghi nhận. '+
+      'SFN dự kiến xử lý trong 60 phút đến 48 giờ, '+
+      'có thể thay đổi tùy số lượng yêu cầu và quá trình xác minh. '+
+      'Vui lòng thường xuyên kiểm tra email và lưu mã yêu cầu '+
+      'để tra cứu trạng thái.'
+  });
+}
+
+  if(
+    url.pathname==='/api/public/account-request/status'&&
+    req.method==='GET'
+  ){
+    const code=
+      clean(url.searchParams.get('code'),100);
+
+    const email=
+      clean(
+        url.searchParams.get('email'),
+        200
+      ).toLowerCase();
+
+    if(!code||!email){
+      return json({
+        error:'CODE_AND_EMAIL_REQUIRED'
+      },400);
+    }
+
+    const r=await env.DB.prepare(`
+      SELECT
+        request_code,
+        full_name,
+        status,
+        admin_note,
+        reviewed_at,
+        created_at
+      FROM account_requests
+      WHERE request_code=?
+        AND lower(email)=?
+      LIMIT 1
+    `).bind(code,email).first();
+
+    return r
+      ?json({request:r})
+      :json({error:'NOT_FOUND'},404);
+  }
+
+  // =========================================================
+  // AUTHENTICATED
+  // =========================================================
+
+  const s=await getSession(req,env);
+
+  if(!s){
+    return json({error:'UNAUTHORIZED'},401);
+  }
+
+  // =========================================================
+  // MY PROFILE
+  // =========================================================
+
+  if(url.pathname==='/api/me'&&req.method==='GET'){
+    const person=await env.DB.prepare(
+      'SELECT * FROM people WHERE id=?'
+    ).bind(s.person_id).first();
+
+    const memberships=await env.DB.prepare(`
+      SELECT
+        m.*,
+        o.name org_name,
+        o.short_name,
+        o.node_type
+      FROM org_memberships m
+      JOIN org_nodes o
+        ON o.id=m.org_node_id
+      WHERE m.person_id=?
+        AND COALESCE(m.status,'active') NOT IN ('hidden','suspended')
+      ORDER BY
+        m.is_primary DESC,
+        m.started_at DESC
+    `).bind(s.person_id).all();
+
+    const cards=await env.DB.prepare(`
+      SELECT
+        c.*,
+        t.name card_type_name,
+        t.code card_type_code,
+        o.name org_name
+      FROM member_cards c
+      JOIN card_types t
+        ON t.id=c.card_type_id
+      LEFT JOIN org_nodes o
+        ON o.id=c.org_node_id
+      WHERE c.person_id=?
+      ORDER BY
+        c.status='active' DESC,
+        c.issued_at DESC
+    `).bind(s.person_id).all();
+
+    const perms=await env.DB.prepare(`
+      SELECT DISTINCT p.code
+      FROM account_scopes s
+      JOIN role_permissions rp
+        ON rp.role_id=s.role_id
+      JOIN permissions p
+        ON p.id=rp.permission_id
+      WHERE s.account_id=?
+        AND s.active=1
+    `).bind(s.account_id).all();
+
+    const scopes=await env.DB.prepare(`
+      SELECT
+        s.id,
+        r.code role_code,
+        r.name role_name,
+        s.org_node_id,
+        o.name org_name
+      FROM account_scopes s
+      JOIN roles r
+        ON r.id=s.role_id
+      LEFT JOIN org_nodes o
+        ON o.id=s.org_node_id
+      WHERE s.account_id=?
+        AND s.active=1
+    `).bind(s.account_id).all();
+
+    const scopeRows=scopes.results||[];
+
+    const is_member=
+      scopeRows.some(x=>x.role_code==='MEMBER');
+
+    return json({
+      person,
+      memberships:memberships.results||[],
+      cards:cards.results||[],
+      permissions:
+        (perms.results||[]).map(x=>x.code),
+      scopes:scopeRows,
+      is_member,
+      is_super:
+        await isSuper(env,s.account_id),
+      force_password_change:
+        !!s.force_password_change
+    });
+  }
+
+  if(url.pathname==='/api/me'&&req.method==='PATCH'){
+    const b=await bodyJson(req);
+
+    const next={
+      full_name:clean(b.full_name,160),
+      display_name:clean(b.display_name,160),
+      date_of_birth:clean(b.date_of_birth,20),
+      gender:clean(b.gender,50),
+      nationality:clean(b.nationality,80),
+      id_number:clean(b.id_number,80),
+      id_issue_date:clean(b.id_issue_date,20),
+      id_issue_place:clean(b.id_issue_place,200),
+      email:clean(b.email,200).toLowerCase(),
+      phone:clean(b.phone,50),
+      permanent_address:
+        clean(b.permanent_address,500),
+      temporary_address:
+        clean(b.temporary_address,500),
+      education_or_work_type:clean(b.education_or_work_type,50),
+      school_or_workplace:clean(b.school_or_workplace,240),
+      class_or_major:clean(b.class_or_major,240),
+      education_status:clean(b.education_status,80),
+      avatar_url:clean(b.avatar_url,1200)
+    };
+
+    for(const k of [
+      'full_name',
+      'display_name',
+      'date_of_birth',
+      'gender',
+      'nationality',
+      'id_number',
+      'id_issue_date',
+      'id_issue_place',
+      'email',
+      'phone',
+      'permanent_address',
+      'temporary_address',
+      'avatar_url'
+    ]){
+      if(!next[k]){
+        return json({
+          error:'ALL_PERSONAL_FIELDS_REQUIRED',
+          field:k
+        },400);
+      }
+    }
+
+    try{
+      await env.DB.batch([
+        env.DB.prepare(`
+          UPDATE people
+          SET
+            full_name=?,
+            display_name=?,
+            date_of_birth=?,
+            gender=?,
+            nationality=?,
+            id_number=?,
+            id_issue_date=?,
+            id_issue_place=?,
+            email=?,
+            phone=?,
+            permanent_address=?,
+            temporary_address=?,
+            education_or_work_type=?,
+            school_or_workplace=?,
+            class_or_major=?,
+            education_status=?,
+            avatar_url=?,
+            updated_at=CURRENT_TIMESTAMP
+          WHERE id=?
+        `).bind(
+          next.full_name,
+          next.display_name||null,
+          next.date_of_birth||null,
+          next.gender||null,
+          next.nationality||null,
+          next.id_number||null,
+          next.id_issue_date||null,
+          next.id_issue_place||null,
+          next.email||null,
+          next.phone||null,
+          next.permanent_address||null,
+          next.temporary_address||null,
+          next.education_or_work_type||null,
+          next.school_or_workplace||null,
+          next.class_or_major||null,
+          next.education_status||null,
+          next.avatar_url||null,
+          s.person_id
+        ),
+
+        env.DB.prepare(`
+          UPDATE accounts
+          SET
+            email=?,
+            updated_at=CURRENT_TIMESTAMP
+          WHERE id=?
+        `).bind(
+          next.email||null,
+          s.account_id
+        )
+      ]);
+    }catch{
+      return json({
+        error:'PROFILE_UPDATE_FAILED'
+      },409);
+    }
+
+    await audit(
+      env,
+      s.account_id,
+      'profile_updated',
+      'person',
+      s.person_id,
+      null,
+      {fields:Object.keys(next)}
+    );
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // CHANGE PASSWORD
+  // =========================================================
+
+  if(url.pathname==='/api/me/password'&&req.method==='POST'){
+    const b=await bodyJson(req);
+
+    const old=String(b.current_password||'');
+    const pw=String(b.new_password||'');
+
+    if(pw.length<10){
+      return json({
+        error:'PASSWORD_TOO_SHORT'
+      },400);
+    }
+
+    const a=await env.DB.prepare(`
+      SELECT *
+      FROM accounts
+      WHERE id=?
+    `).bind(s.account_id).first();
+
+    const currentOK=await verifyPassword(
+      old,
+      a.password_salt,
+      a.password_iterations,
+      a.password_hash
+    );
+
+    if(!currentOK){
+      return json({
+        error:'CURRENT_PASSWORD_INVALID'
+      },401);
+    }
+
+    const salt=token();
+    const it=100000;
+    const hash=await pbkdf2(pw,salt,it);
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        UPDATE accounts
+        SET
+          password_hash=?,
+          password_salt=?,
+          password_iterations=?,
+          force_password_change=0,
+          updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).bind(
+        hash,
+        salt,
+        it,
+        s.account_id
+      ),
+
+      env.DB.prepare(`
+        DELETE FROM sessions
+        WHERE account_id=?
+          AND id!=?
+      `).bind(
+        s.account_id,
+        s.session_id
+      )
+    ]);
+
+    await audit(
+      env,
+      s.account_id,
+      'password_changed',
+      'account',
+      s.account_id
+    );
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // AVATAR
+  // =========================================================
+
+  if(url.pathname==='/api/me/avatar'&&req.method==='POST'){
+    const ct=
+      (req.headers.get('content-type')||'')
+        .toLowerCase();
+
+    if(![
+      'image/jpeg',
+      'image/png',
+      'image/webp'
+    ].includes(ct)){
+      return json({
+        error:'IMAGE_TYPE_NOT_ALLOWED'
+      },415);
+    }
+
+    const data=await req.arrayBuffer();
+
+    if(
+      !data.byteLength||
+      data.byteLength>900000
+    ){
+      return json({
+        error:'IMAGE_TOO_LARGE'
+      },413);
+    }
+
+    const ext=
+      ct==='image/png'
+        ?'png'
+        :ct==='image/webp'
+          ?'webp'
+          :'jpg';
+
+    const key=
+      `avatars/${s.person_id}/`+
+      `${Date.now()}.${ext}`;
+
+    await env.FILES.put(
+      key,
+      data,
+      {
+        httpMetadata:{
+          contentType:ct,
+          cacheControl:
+            'public, max-age=31536000, immutable'
+        }
+      }
+    );
+
+    const fileUrl=`/files/${key}`;
+
+    await env.DB.prepare(`
+      UPDATE people
+      SET
+        avatar_url=?,
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(
+      fileUrl,
+      s.person_id
+    ).run();
+
+    await audit(
+      env,
+      s.account_id,
+      'avatar_uploaded',
+      'person',
+      s.person_id
+    );
+
+    return json({
+      ok:true,
+      url:fileUrl
+    });
+  }
+
+  // =========================================================
+  // DASHBOARD
+  // =========================================================
+
+  if(url.pathname==='/api/dashboard'&&req.method==='GET'){
+    const [g,t,a,c,h,n]=await Promise.all([
+      env.DB.prepare(`
+        SELECT
+          period_type,
+          ROUND(AVG(progress)) progress
+        FROM goals
+        WHERE person_id=?
+          AND status='active'
+        GROUP BY period_type
+      `).bind(s.person_id).all(),
+
+      env.DB.prepare(`
+        SELECT COUNT(*) total
+        FROM tasks
+        WHERE person_id=?
+          AND status!='cancelled'
+      `).bind(s.person_id).first(),
+
+      env.DB.prepare(`
+        SELECT COUNT(*) total
+        FROM activity_participants
+        WHERE person_id=?
+      `).bind(s.person_id).first(),
+
+      env.DB.prepare(`
+        SELECT COUNT(*) total
+        FROM certificates
+        WHERE person_id=?
+          AND verification_status='verified'
+      `).bind(s.person_id).first(),
+
+      env.DB.prepare(`
+        SELECT COUNT(*) total
+        FROM achievements
+        WHERE person_id=?
+          AND verification_status='verified'
+      `).bind(s.person_id).first(),
+
+      env.DB.prepare(`
+        SELECT COUNT(*) total
+        FROM notifications
+        WHERE person_id=?
+          AND read_at IS NULL
+      `).bind(s.person_id).first()
+    ]);
+
+    return json({
+      goals:g.results||[],
+      tasks:t?.total||0,
+      activities:a?.total||0,
+      certificates:c?.total||0,
+      achievements:h?.total||0,
+      unread:n?.total||0
+    });
+  }
+
+  const selfLists={
+    '/api/me/goals':`
+      SELECT *
+      FROM goals
+      WHERE person_id=?
+      ORDER BY created_at DESC
+      LIMIT 200
+    `,
+
+    '/api/me/tasks':`
+      SELECT *
+      FROM tasks
+      WHERE person_id=?
+      ORDER BY created_at DESC
+      LIMIT 200
+    `,
+
+    '/api/me/certificates':`
+      SELECT *
+      FROM certificates
+      WHERE person_id=?
+      ORDER BY
+        COALESCE(issued_at,created_at) DESC
+      LIMIT 300
+    `,
+
+    '/api/me/achievements':`
+      SELECT *
+      FROM achievements
+      WHERE person_id=?
+      ORDER BY
+        COALESCE(achieved_at,created_at) DESC
+      LIMIT 300
+    `,
+
+    '/api/me/documents':`
+      SELECT *
+      FROM member_documents
+      WHERE person_id=?
+      ORDER BY created_at DESC
+      LIMIT 300
+    `,
+
+    '/api/me/notifications':`
+      SELECT *
+      FROM notifications
+      WHERE person_id=?
+      ORDER BY created_at DESC
+      LIMIT 300
+    `
+  };
+
+  if(
+    selfLists[url.pathname]&&
+    req.method==='GET'
+  ){
+    const r=await env.DB.prepare(
+      selfLists[url.pathname]
+    ).bind(s.person_id).all();
+
+    return json({
+      items:r.results||[]
+    });
+  }
+
+  if(
+    url.pathname==='/api/me/activities'&&
+    req.method==='GET'
+  ){
+    const r=await env.DB.prepare(`
+      SELECT
+        a.*,
+        ap.role_label,
+        ap.result,
+        ap.verification_status,
+        o.name org_name
+      FROM activity_participants ap
+      JOIN activities a
+        ON a.id=ap.activity_id
+      LEFT JOIN org_nodes o
+        ON o.id=a.org_node_id
+      WHERE ap.person_id=?
+      ORDER BY
+        COALESCE(
+          a.starts_at,
+          a.created_at
+        ) DESC
+      LIMIT 300
+    `).bind(s.person_id).all();
+
+    return json({
+      items:r.results||[]
+    });
+  }
+
+  // =========================================================
+  // PERSONAL GOALS
+  // =========================================================
+
+  if(url.pathname==='/api/me/goals'&&req.method==='POST'){
+    const b=await bodyJson(req);
+
+    const period=clean(b.period_type,20);
+    const title=clean(b.title,240);
+
+    if(
+      !['week','month','quarter','year'].includes(period)||
+      !title
+    ){
+      return json({
+        error:'INVALID_DATA'
+      },400);
+    }
+
+    const id=uid('goal');
+
+    await env.DB.prepare(`
+      INSERT INTO goals(
+        id,
+        person_id,
+        org_node_id,
+        period_type,
+        title,
+        description,
+        priority,
+        progress,
+        status,
+        starts_at,
+        due_at,
+        created_by_account_id
+      )
+      VALUES(
+        ?,?,
+        NULL,
+        ?,?,?,?,?,?,?,?,?
+      )
+    `).bind(
+      id,
+      s.person_id,
+      period,
+      title,
+      clean(b.description,2000)||null,
+      clean(b.priority,30)||'normal',
+      Math.max(
+        0,
+        Math.min(100,Number(b.progress||0))
+      ),
+      clean(b.status,30)||'active',
+      clean(b.starts_at,20)||null,
+      clean(b.due_at,20)||null,
+      s.account_id
+    ).run();
+
+    await audit(
+      env,
+      s.account_id,
+      'goal_created',
+      'goal',
+      id,
+      null,
+      {personal:true}
+    );
+
+    return json({ok:true,id});
+  }
+
+  const myGoal=
+    url.pathname.match(
+      /^\/api\/me\/goals\/([^/]+)$/
+    );
+
+  if(myGoal&&req.method==='PATCH'){
+    const id=
+      decodeURIComponent(myGoal[1]);
+
+    const g=await env.DB.prepare(`
+      SELECT *
+      FROM goals
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      id,
+      s.person_id
+    ).first();
+
+    if(!g){
+      return json({error:'NOT_FOUND'},404);
+    }
+
+    const b=await bodyJson(req);
+
+    const progress=
+      Object.prototype.hasOwnProperty.call(
+        b,
+        'progress'
+      )
+        ?Math.max(
+            0,
+            Math.min(100,Number(b.progress))
+          )
+        :g.progress;
+
+    const status=
+      Object.prototype.hasOwnProperty.call(
+        b,
+        'status'
+      )
+        ?clean(b.status,30)
+        :g.status;
+
+    if(![
+      'active',
+      'completed',
+      'cancelled'
+    ].includes(status)){
+      return json({
+        error:'INVALID_STATUS'
+      },400);
+    }
+
+    await env.DB.prepare(`
+      UPDATE goals
+      SET
+        progress=?,
+        status=?,
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      progress,
+      status,
+      id,
+      s.person_id
+    ).run();
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // PERSONAL TASKS
+  // =========================================================
+
+  if(url.pathname==='/api/me/tasks'&&req.method==='POST'){
+    const b=await bodyJson(req);
+    const title=clean(b.title,240);
+
+    if(!title){
+      return json({
+        error:'INVALID_DATA'
+      },400);
+    }
+
+    const id=uid('task');
+
+    await env.DB.prepare(`
+      INSERT INTO tasks(
+        id,
+        person_id,
+        org_node_id,
+        goal_id,
+        title,
+        description,
+        priority,
+        progress,
+        status,
+        due_at,
+        assigned_by_account_id
+      )
+      VALUES(
+        ?,?,
+        NULL,
+        ?,?,?,?,?,?,?,
+        NULL
+      )
+    `).bind(
+      id,
+      s.person_id,
+      clean(b.goal_id,120)||null,
+      title,
+      clean(b.description,2000)||null,
+      clean(b.priority,30)||'normal',
+      Math.max(
+        0,
+        Math.min(100,Number(b.progress||0))
+      ),
+      clean(b.status,30)||'todo',
+      clean(b.due_at,20)||null
+    ).run();
+
+    await audit(
+      env,
+      s.account_id,
+      'task_created',
+      'task',
+      id,
+      null,
+      {personal:true}
+    );
+
+    return json({ok:true,id});
+  }
+
+  const myTask=
+    url.pathname.match(
+      /^\/api\/me\/tasks\/([^/]+)$/
+    );
+
+  if(myTask&&req.method==='PATCH'){
+    const id=
+      decodeURIComponent(myTask[1]);
+
+    const t=await env.DB.prepare(`
+      SELECT *
+      FROM tasks
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      id,
+      s.person_id
+    ).first();
+
+    if(!t){
+      return json({
+        error:'NOT_FOUND'
+      },404);
+    }
+
+    const b=await bodyJson(req);
+
+    const progress=
+      Object.prototype.hasOwnProperty.call(
+        b,
+        'progress'
+      )
+        ?Math.max(
+            0,
+            Math.min(100,Number(b.progress))
+          )
+        :t.progress;
+
+    const status=
+      Object.prototype.hasOwnProperty.call(
+        b,
+        'status'
+      )
+        ?clean(b.status,30)
+        :t.status;
+
+    if(![
+      'todo',
+      'doing',
+      'done',
+      'cancelled'
+    ].includes(status)){
+      return json({
+        error:'INVALID_STATUS'
+      },400);
+    }
+
+    await env.DB.prepare(`
+      UPDATE tasks
+      SET
+        progress=?,
+        status=?,
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      progress,
+      status,
+      id,
+      s.person_id
+    ).run();
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // EXTERNAL CERTIFICATE
+  // =========================================================
+
+  if(
+    url.pathname==='/api/me/certificate-file'&&
+    req.method==='POST'
+  ){
+    const ct=
+      (req.headers.get('content-type')||'')
+        .toLowerCase();
+
+    if(ct!=='application/pdf'){
+      return json({error:'PDF_ONLY'},415);
+    }
+
+    const data=await req.arrayBuffer();
+
+    if(
+      !data.byteLength||
+      data.byteLength>10*1024*1024
+    ){
+      return json({
+        error:'PDF_TOO_LARGE'
+      },413);
+    }
+
+    const key=
+      `certificates/external/`+
+      `${s.person_id}/`+
+      `${new Date().toISOString().slice(0,10)}/`+
+      `${crypto.randomUUID()}.pdf`;
+
+    await env.FILES.put(
+      key,
+      data,
+      {
+        httpMetadata:{
+          contentType:'application/pdf',
+          contentDisposition:'inline'
+        }
+      }
+    );
+
+    return json({
+      ok:true,
+      url:`/files/${key}`
+    });
+  }
+
+  if(
+    url.pathname==='/api/me/certificates/external'&&
+    req.method==='POST'
+  ){
+    const b=await bodyJson(req);
+
+    const title=clean(b.title,240);
+    const issuer=clean(b.issuer,240);
+
+    if(!title||!issuer){
+      return json({
+        error:'INVALID_DATA'
+      },400);
+    }
+
+    const id=uid('certificate');
+
+    await env.DB.prepare(`
+      INSERT INTO certificates(
+        id,
+        person_id,
+        org_node_id,
+        certificate_no,
+        title,
+        issuer,
+        issued_at,
+        source_type,
+        verification_status,
+        file_url,
+        verify_code,
+        metadata_json
+      )
+      VALUES(
+        ?,?,
+        NULL,
+        ?,?,?,?,
+        'external',
+        'pending',
+        ?,
+        NULL,
+        ?
+      )
+    `).bind(
+      id,
+      s.person_id,
+      clean(b.certificate_no,160)||null,
+      title,
+      issuer,
+      clean(b.issued_at,20)||null,
+      clean(b.file_url,1200)||null,
+      JSON.stringify({
+        notes:clean(b.notes,2000)
+      })
+    ).run();
+
+    await audit(
+      env,
+      s.account_id,
+      'external_certificate_submitted',
+      'certificate',
+      id
+    );
+
+    return json({ok:true,id});
+  }
+
+  const readNotif=
+    url.pathname.match(
+      /^\/api\/me\/notifications\/([^/]+)\/read$/
+    );
+
+  if(readNotif&&req.method==='POST'){
+    await env.DB.prepare(`
+      UPDATE notifications
+      SET
+        read_at=
+          COALESCE(
+            read_at,
+            CURRENT_TIMESTAMP
+          )
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      decodeURIComponent(readNotif[1]),
+      s.person_id
+    ).run();
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // SUPPORT
+  // =========================================================
+
+  if(url.pathname==='/api/me/support'&&req.method==='POST'){
+    const b=await bodyJson(req);
+
+    const id=uid('ticket');
+
+    const code=
+      `SP-${new Date().getUTCFullYear()}-`+
+      `${String(Date.now()).slice(-6)}`;
+
+    if(
+      !clean(b.subject,200)||
+      !clean(b.body,3000)
+    ){
+      return json({
+        error:'INVALID_DATA'
+      },400);
+    }
+
+    await env.DB.prepare(`
+      INSERT INTO support_tickets(
+        id,
+        ticket_code,
+        person_id,
+        category,
+        subject,
+        body,
+        status
+      )
+      VALUES(
+        ?,?,?,?,?,?,
+        'received'
+      )
+    `).bind(
+      id,
+      code,
+      s.person_id,
+      clean(b.category,80)||'other',
+      clean(b.subject,200),
+      clean(b.body,3000)
+    ).run();
+
+    return json({
+      ok:true,
+      ticket_code:code
+    });
+  }
+
+  // =========================================================
+  // ADMIN ORG
+  // =========================================================
+
+  if(url.pathname==='/api/admin/org'&&req.method==='GET'){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'org.manage'
+    ))){
+      return json({error:'FORBIDDEN'},403);
+    }
+
+    const r=await env.DB.prepare(`
+      SELECT *
+      FROM org_nodes
+      ORDER BY
+        COALESCE(parent_id,''),
+        sort_order,
+        name
+    `).all();
+
+    return json({
+      items:r.results||[]
+    });
+  }
+
+  if(url.pathname==='/api/admin/org'&&req.method==='POST'){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'org.manage'
+    ))){
+      return json({error:'FORBIDDEN'},403);
+    }
+
+    const b=await bodyJson(req);
+
+    const id=uid('org');
+    const parent=b.parent_id||'org_sfn';
+
+    if(
+      !clean(b.code,80)||
+      !clean(b.name,200)
+    ){
+      return json({
+        error:'INVALID_DATA'
+      },400);
+    }
+
+    if(!(await canAccessOrg(
+      env,
+      s.account_id,
+      parent
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+    await env.DB.prepare(`
+      INSERT INTO org_nodes(
+        id,
+        parent_id,
+        code,
+        name,
+        short_name,
+        node_type,
+        status,
+        sort_order
+      )
+      VALUES(?,?,?,?,?,?,?,?)
+    `).bind(
+      id,
+      parent,
+      clean(b.code,80),
+      clean(b.name,200),
+      clean(b.short_name,80)||null,
+      clean(b.node_type,80)||'unit',
+      'active',
+      Number(b.sort_order||0)
+    ).run();
+
+    await audit(
+      env,
+      s.account_id,
+      'org_created',
+      'org_node',
+      id,
+      parent,
+      {
+        code:b.code,
+        name:b.name
+      }
+    );
+
+    return json({ok:true,id});
+  }
+
+  const orgItem=url.pathname.match(/^\/api\/admin\/org\/([^/]+)$/);
+  if(orgItem&&req.method==='PATCH'){
+    if(!(await hasPerm(env,s.account_id,'org.manage')))return json({error:'FORBIDDEN'},403);const id=decodeURIComponent(orgItem[1]);if(!(await canAccessOrg(env,s.account_id,id)))return json({error:'SCOPE_FORBIDDEN'},403);const b=await bodyJson(req),cur=await env.DB.prepare(`SELECT * FROM org_nodes WHERE id=?`).bind(id).first();if(!cur)return json({error:'NOT_FOUND'},404);const parent=clean(b.parent_id,100)||cur.parent_id;if(parent&&parent!==cur.parent_id&&!(await canAccessOrg(env,s.account_id,parent)))return json({error:'SCOPE_FORBIDDEN'},403);await env.DB.prepare(`UPDATE org_nodes SET parent_id=?,name=?,short_name=?,node_type=?,status=?,description=?,founded_at=?,term_label=?,responsible_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(parent,clean(b.name,200)||cur.name,clean(b.short_name,80)||null,clean(b.node_type,80)||cur.node_type,clean(b.status,30)||cur.status,clean(b.description,2000)||null,clean(b.founded_at,20)||null,clean(b.term_label,100)||null,clean(b.responsible_person_id,100)||null,id).run();await audit(env,s.account_id,'org_updated','org_node',id,parent,{before:{name:cur.name,parent_id:cur.parent_id,status:cur.status}});return json({ok:true})
+  }
+  if(orgItem&&req.method==='DELETE'){
+    if(!(await hasPerm(env,s.account_id,'org.delete')))return json({error:'FORBIDDEN'},403);const id=decodeURIComponent(orgItem[1]);if(id==='org_sfn')return json({error:'ROOT_CANNOT_BE_DELETED'},409);if(!(await canAccessOrg(env,s.account_id,id)))return json({error:'SCOPE_FORBIDDEN'},403);const cur=await env.DB.prepare(`SELECT parent_id FROM org_nodes WHERE id=?`).bind(id).first();if(!cur)return json({error:'NOT_FOUND'},404);const children=await env.DB.prepare(`SELECT COUNT(*) n FROM org_nodes WHERE parent_id=? AND deleted_at IS NULL`).bind(id).first();if(children?.n)return json({error:'ORG_HAS_CHILDREN'},409);await env.DB.prepare(`UPDATE org_nodes SET status='archived',deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(id).run();await audit(env,s.account_id,'org_deleted','org_node',id,cur.parent_id);return json({ok:true})
+  }
+
+  // =========================================================
+  // ADMIN MEMBER LIST
+  // =========================================================
+
+  if(
+    url.pathname==='/api/admin/members'&&
+    req.method==='GET'
+  ){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'member.view'
+    ))){
+      return json({error:'FORBIDDEN'},403);
+    }
+
+    const page=Math.max(
+      1,
+      Number(
+        url.searchParams.get('page')||1
+      )
+    );
+
+    const limit=Math.min(
+      100,
+      Math.max(
+        10,
+        Number(
+          url.searchParams.get('limit')||50
+        )
+      )
+    );
+
+    const q=clean(
+      url.searchParams.get('q'),
+      100
+    );
+
+    const status=clean(
+      url.searchParams.get('status'),
+      30
+    );
+
+    const w=[
+      `EXISTS (
+        SELECT 1
+        FROM accounts am
+        JOIN account_scopes sm
+          ON sm.account_id=am.id
+         AND sm.active=1
+        JOIN roles rm
+          ON rm.id=sm.role_id
+        WHERE am.person_id=p.id
+          AND rm.code='MEMBER'
+      )`
+    ];
+
+    const b=[];
+
+    if(!(await isNetworkAdmin(
+      env,
+      s.account_id
+    ))){
+      w.push(`
+        EXISTS (
+          WITH RECURSIVE allowed(id) AS (
+            SELECT sc.org_node_id
+            FROM account_scopes sc
+            JOIN roles rr
+              ON rr.id=sc.role_id
+            WHERE sc.account_id=?
+              AND sc.active=1
+              AND rr.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN')
+              AND sc.org_node_id IS NOT NULL
+
+            UNION
+
+            SELECT o.id
+            FROM org_nodes o
+            JOIN allowed a
+              ON o.parent_id=a.id
+          )
+          SELECT 1
+          FROM org_memberships om
+          JOIN allowed al
+            ON al.id=om.org_node_id
+          WHERE om.person_id=p.id
+        )
+      `);
+
+      b.push(s.account_id);
+    }
+
+    if(q){
+      w.push(`
+        (
+          p.full_name LIKE ?
+          OR p.member_code LIKE ?
+          OR p.email LIKE ?
+          OR p.phone LIKE ?
+        )
+      `);
+
+      b.push(
+        `%${q}%`,
+        `%${q}%`,
+        `%${q}%`,
+        `%${q}%`
+      );
+    }
+
+    if(status){
+      w.push('p.status=?');
+      b.push(status);
+    }
+
+    const org=clean(url.searchParams.get('org'),100);
+    if(org){w.push(`EXISTS (SELECT 1 FROM org_memberships omf WHERE omf.person_id=p.id AND omf.org_node_id=? AND omf.status='active')`);b.push(org)}
+
+    const where=
+      w.length
+        ?`WHERE ${w.join(' AND ')}`
+        :'';
+
+    const totalRow=
+      await env.DB.prepare(`
+        SELECT COUNT(*) total
+        FROM people p
+        ${where}
+      `).bind(...b).first();
+
+    const total=totalRow?.total||0;
+
+    const r=await env.DB.prepare(`
+      SELECT
+        p.id,
+        p.member_code,
+        p.full_name,
+        p.email,
+        p.phone,
+        p.avatar_url,
+        p.status,
+        p.joined_at,
+        a.username,
+        a.is_locked,
+        (SELECT o.name FROM org_memberships om JOIN org_nodes o ON o.id=om.org_node_id WHERE om.person_id=p.id AND om.status='active' ORDER BY om.is_primary DESC,om.created_at DESC LIMIT 1) org_name,
+        (SELECT COALESCE(om.title,om.role_label) FROM org_memberships om WHERE om.person_id=p.id AND om.status='active' ORDER BY om.is_primary DESC,om.created_at DESC LIMIT 1) org_title
+      FROM people p
+      LEFT JOIN accounts a
+        ON a.person_id=p.id
+      ${where}
+      ORDER BY p.created_at DESC
+      LIMIT ?
+      OFFSET ?
+    `).bind(
+      ...b,
+      limit,
+      (page-1)*limit
+    ).all();
+
+    return json({
+      items:r.results||[],
+      page,
+      limit,
+      total
+    });
+  }
+
+  // =========================================================
+  // ADMIN CREATE MEMBER
+  // =========================================================
+
+  if(
+    url.pathname==='/api/admin/members'&&
+    req.method==='POST'
+  ){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'member.edit'
+    ))){
+      return json({error:'FORBIDDEN'},403);
+    }
+
+    const b=await bodyJson(req);
+    const pw=String(b.password||'');
+
+    const required=[
+      'full_name',
+      'display_name',
+      'date_of_birth',
+      'gender',
+      'nationality',
+      'id_number',
+      'id_issue_date',
+      'id_issue_place',
+      'email',
+      'phone',
+      'permanent_address',
+      'temporary_address',
+      'avatar_url',
+      'username'
+    ];
+
+    for(const k of required){
+      if(!clean(b[k],500)){
+        return json({
+          error:'ALL_PERSONAL_FIELDS_REQUIRED',
+          field:k
+        },400);
+      }
+    }
+
+    if(pw.length<10){
+      return json({
+        error:'INVALID_DATA'
+      },400);
+    }
+
+    if(
+      !(await isNetworkAdmin(
+        env,
+        s.account_id
+      ))&&
+      (
+        !b.org_node_id||
+        !(await canAccessOrg(
+          env,
+          s.account_id,
+          b.org_node_id
+        ))
+      )
+    ){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+    const uname=
+      clean(b.username,80).toLowerCase();
+
+    const mail=
+      clean(b.email,200).toLowerCase();
+
+    const idno=
+      clean(b.id_number,80);
+
+    if(await env.DB.prepare(`
+      SELECT 1
+      FROM accounts
+      WHERE lower(username)=?
+         OR lower(email)=?
+      LIMIT 1
+    `).bind(
+      uname,
+      mail
+    ).first()){
+      return json({
+        error:'ACCOUNT_ALREADY_EXISTS'
+      },409);
+    }
+
+    if(await env.DB.prepare(`
+      SELECT 1
+      FROM people
+      WHERE id_number=?
+      LIMIT 1
+    `).bind(idno).first()){
+      return json({
+        error:'IDENTITY_ALREADY_EXISTS'
+      },409);
+    }
+
+    const last=await env.DB.prepare(`
+      SELECT member_code
+      FROM people
+      WHERE member_code LIKE 'SFN-%'
+      ORDER BY
+        CAST(
+          substr(member_code,5)
+          AS INTEGER
+        ) DESC
+      LIMIT 1
+    `).first();
+
+    const n=
+      last?.member_code
+        ?Number(last.member_code.slice(4))+1
+        :1;
+
+    const code=memberCode(n);
+    const pid=uid('person');
+    const aid=uid('account');
+    const salt=token();
+    const it=100000;
+    const hash=await pbkdf2(
+      pw,
+      salt,
+      it
+    );
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO people(
+          id,
+          member_code,
+          full_name,
+          display_name,
+          date_of_birth,
+          gender,
+          nationality,
+          id_number,
+          id_issue_date,
+          id_issue_place,
+          email,
+          phone,
+          permanent_address,
+          temporary_address,
+          avatar_url,
+          joined_at,
+          status
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+        )
+      `).bind(
+        pid,
+        code,
+        clean(b.full_name,160),
+        clean(b.display_name,160)||null,
+        clean(b.date_of_birth,20)||null,
+        clean(b.gender,50)||null,
+        clean(b.nationality,80)||null,
+        clean(b.id_number,80)||null,
+        clean(b.id_issue_date,20)||null,
+        clean(b.id_issue_place,200)||null,
+        clean(b.email,200)||null,
+        clean(b.phone,50)||null,
+        clean(b.permanent_address,500)||null,
+        clean(b.temporary_address,500)||null,
+        clean(b.avatar_url,1200)||null,
+        b.joined_at||
+          new Date()
+            .toISOString()
+            .slice(0,10),
+        'active'
+      ),
+
+      env.DB.prepare(`
+        INSERT INTO accounts(
+          id,
+          person_id,
+          username,
+          email,
+          password_hash,
+          password_salt,
+          password_iterations,
+          force_password_change
+        )
+        VALUES(?,?,?,?,?,?,?,1)
+      `).bind(
+        aid,
+        pid,
+        uname,
+        mail||null,
+        hash,
+        salt,
+        it
+      ),
+
+      env.DB.prepare(`
+        INSERT INTO account_scopes(
+          id,
+          account_id,
+          role_id,
+          org_node_id,
+          active
+        )
+        VALUES(?,?,?,?,1)
+      `).bind(
+        uid('scope'),
+        aid,
+        'role_member',
+        null
+      )
+    ]);
+
+    if(b.org_node_id){
+      await env.DB.prepare(`
+        INSERT INTO org_memberships(
+          id,
+          person_id,
+          org_node_id,
+          title,
+          role_label,
+          started_at,
+          status,
+          is_primary
+        )
+        VALUES(
+          ?,?,?,?,?,?,
+          'active',
+          1
+        )
+      `).bind(
+        uid('membership'),
+        pid,
+        b.org_node_id,
+        clean(b.title,160)||null,
+        clean(b.role_label,160)||null,
+        b.joined_at||
+          new Date()
+            .toISOString()
+            .slice(0,10)
+      ).run();
+    }
+
+    await audit(
+      env,
+      s.account_id,
+      'member_created',
+      'person',
+      pid,
+      b.org_node_id||null,
+      {member_code:code}
+    );
+
+    return json({
+      ok:true,
+      id:pid,
+      member_code:code
+    });
+  }
+
+  // =========================================================
+  // ADMIN MEMBER DETAIL
+  // =========================================================
+
+  const detailMatch=
+    url.pathname.match(
+      /^\/api\/admin\/members\/([^/]+)$/
+    );
+
+  if(detailMatch&&req.method==='GET'){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'member.view'
+    ))){
+      return json({
+        error:'FORBIDDEN'
+      },403);
+    }
+
+    const pid=
+      decodeURIComponent(
+        detailMatch[1]
+      );
+
+    if(!(await canAccessPerson(
+      env,
+      s.account_id,
+      pid
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+    const person=await env.DB.prepare(`
+      SELECT
+        p.*,
+        a.id account_id,
+        a.username,
+        a.email account_email,
+        a.is_locked,
+        a.force_password_change,
+        a.last_login_at
+      FROM people p
+      LEFT JOIN accounts a
+        ON a.person_id=p.id
+      WHERE p.id=?
+    `).bind(pid).first();
+
+    if(!person){
+      return json({
+        error:'NOT_FOUND'
+      },404);
+    }
+
+    const [
+      memberships,
+      certificates,
+      achievements,
+      cards,
+      documents,
+      scopes,
+      goals,
+      tasks,
+      activities,
+      auditRows
+    ]=await Promise.all([
+      env.DB.prepare(`
+        SELECT
+          m.*,
+          o.name org_name,
+          o.code org_code
+        FROM org_memberships m
+        JOIN org_nodes o
+          ON o.id=m.org_node_id
+        WHERE m.person_id=?
+        ORDER BY m.started_at DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT *
+        FROM certificates
+        WHERE person_id=?
+        ORDER BY
+          COALESCE(
+            issued_at,
+            created_at
+          ) DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT *
+        FROM achievements
+        WHERE person_id=?
+        ORDER BY
+          COALESCE(
+            achieved_at,
+            created_at
+          ) DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT
+          c.*,
+          t.name card_type_name,
+          o.name org_name
+        FROM member_cards c
+        JOIN card_types t
+          ON t.id=c.card_type_id
+        LEFT JOIN org_nodes o
+          ON o.id=c.org_node_id
+        WHERE c.person_id=?
+        ORDER BY c.created_at DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT *
+        FROM member_documents
+        WHERE person_id=?
+        ORDER BY created_at DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT
+          s.*,
+          r.code role_code,
+          r.name role_name,
+          o.name org_name
+        FROM account_scopes s
+        JOIN roles r
+          ON r.id=s.role_id
+        LEFT JOIN org_nodes o
+          ON o.id=s.org_node_id
+        WHERE s.account_id=?
+      `).bind(
+        person.account_id||''
+      ).all(),
+
+      env.DB.prepare(`
+        SELECT *
+        FROM goals
+        WHERE person_id=?
+        ORDER BY created_at DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT *
+        FROM tasks
+        WHERE person_id=?
+        ORDER BY created_at DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT
+          a.*,
+          ap.role_label,
+          ap.result,
+          ap.verification_status,
+          o.name org_name
+        FROM activity_participants ap
+        JOIN activities a
+          ON a.id=ap.activity_id
+        LEFT JOIN org_nodes o
+          ON o.id=a.org_node_id
+        WHERE ap.person_id=?
+        ORDER BY
+          COALESCE(
+            a.starts_at,
+            a.created_at
+          ) DESC
+      `).bind(pid).all(),
+
+      env.DB.prepare(`
+        SELECT
+          l.*,
+          aa.username
+        FROM audit_log l
+        LEFT JOIN accounts aa
+          ON aa.id=l.actor_account_id
+        WHERE l.entity_id=?
+           OR json_extract(
+                l.details_json,
+                '$.person_id'
+              )=?
+        ORDER BY l.id DESC
+        LIMIT 200
+      `).bind(pid,pid).all()
+    ]);
+
+    return json({
+      person,
+      memberships:
+        memberships.results||[],
+      certificates:
+        certificates.results||[],
+      achievements:
+        achievements.results||[],
+      cards:
+        cards.results||[],
+      documents:
+        documents.results||[],
+      scopes:
+        scopes.results||[],
+      goals:
+        goals.results||[],
+      tasks:
+        tasks.results||[],
+      activities:
+        activities.results||[],
+      audit:
+        auditRows.results||[]
+    });
+  }
+
+  if(detailMatch&&req.method==='PATCH'){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'member.edit'
+    ))){
+      return json({
+        error:'FORBIDDEN'
+      },403);
+    }
+
+    const pid=
+      decodeURIComponent(
+        detailMatch[1]
+      );
+
+    if(!(await canAccessPerson(
+      env,
+      s.account_id,
+      pid
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+    const b=await bodyJson(req);
+
+    const p=await env.DB.prepare(`
+      SELECT *
+      FROM people
+      WHERE id=?
+    `).bind(pid).first();
+
+    if(!p){
+      return json({
+        error:'NOT_FOUND'
+      },404);
+    }
+
+    const v=(k,m=1000)=>
+      Object.prototype
+        .hasOwnProperty.call(b,k)
+          ?clean(b[k],m)
+          :(p[k]??'');
+
+    await env.DB.prepare(`
+      UPDATE people
+      SET
+        full_name=?,
+        display_name=?,
+        date_of_birth=?,
+        gender=?,
+        nationality=?,
+        id_number=?,
+        id_issue_date=?,
+        id_issue_place=?,
+        email=?,
+        phone=?,
+        permanent_address=?,
+        temporary_address=?,
+        education_or_work_type=?,
+        school_or_workplace=?,
+        class_or_major=?,
+        education_status=?,
+        avatar_url=?,
+        joined_at=?,
+        ended_at=?,
+        status=?,
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(
+      v('full_name',160),
+      v('display_name',160)||null,
+      v('date_of_birth',20)||null,
+      v('gender',50)||null,
+      v('nationality',80)||null,
+      v('id_number',80)||null,
+      v('id_issue_date',20)||null,
+      v('id_issue_place',200)||null,
+      v('email',200)||null,
+      v('phone',50)||null,
+      v('permanent_address',500)||null,
+      v('temporary_address',500)||null,
+      v('education_or_work_type',50)||null,
+      v('school_or_workplace',240)||null,
+      v('class_or_major',240)||null,
+      v('education_status',80)||null,
+      v('avatar_url',1200)||null,
+      v('joined_at',20)||null,
+      v('ended_at',20)||null,
+      v('status',30)||'active',
+      pid
+    ).run();
+
+    await audit(
+      env,
+      s.account_id,
+      'member_updated',
+      'person',
+      pid,
+      null,
+      {}
+    );
+
+    return json({ok:true});
+  }
+
+  // =========================================================
+  // ADMIN CERTIFICATE PDF UPLOAD
+  // =========================================================
+
+  const certFileMatch=
+    url.pathname.match(
+      /^\/api\/admin\/members\/([^/]+)\/certificate-file$/
+    );
+
+  if(
+    certFileMatch&&
+    req.method==='POST'
+  ){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'certificate.manage'
+    ))){
+      return json({
+        error:'FORBIDDEN'
+      },403);
+    }
+
+    const pid=
+      decodeURIComponent(
+        certFileMatch[1]
+      );
+
+    if(!(await canAccessPerson(
+      env,
+      s.account_id,
+      pid
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+    if(!(await env.DB.prepare(`
+      SELECT 1
+      FROM people
+      WHERE id=?
+    `).bind(pid).first())){
+      return json({
+        error:'NOT_FOUND'
+      },404);
+    }
+
+    const ct=
+      (req.headers.get('content-type')||'')
+        .toLowerCase();
+
+    if(ct!=='application/pdf'){
+      return json({
+        error:'PDF_ONLY'
+      },415);
+    }
+
+    const data=await req.arrayBuffer();
+
+    if(
+      !data.byteLength||
+      data.byteLength>10*1024*1024
+    ){
+      return json({
+        error:'PDF_TOO_LARGE'
+      },413);
+    }
+
+    const key=
+      `certificates/${pid}/`+
+      `${new Date().toISOString().slice(0,10)}/`+
+      `${crypto.randomUUID()}.pdf`;
+
+    await env.FILES.put(
+      key,
+      data,
+      {
+        httpMetadata:{
+          contentType:'application/pdf',
+          contentDisposition:'inline'
+        }
+      }
+    );
+
+    return json({
+      ok:true,
+      url:`/files/${key}`
+    });
+  }
+
+  // =========================================================
+  // ADMIN MEMBER SUB ACTIONS
+  // =========================================================
+
+  const subMatch=
+    url.pathname.match(
+      /^\/api\/admin\/members\/([^/]+)\/(certificate|achievement|membership|card|document|goal|task|activity|reset-password|lock|scope)$/
+    );
+
+  if(subMatch&&req.method==='POST'){
+    const pid=
+      decodeURIComponent(
+        subMatch[1]
+      );
+
+    const op=subMatch[2];
+    const b=await bodyJson(req);
+
+    if(!(await canAccessPerson(
+      env,
+      s.account_id,
+      pid
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+    const person=await env.DB.prepare(`
+      SELECT
+        p.*,
+        a.id account_id
+      FROM people p
+      LEFT JOIN accounts a
+        ON a.person_id=p.id
+      WHERE p.id=?
+    `).bind(pid).first();
+
+    if(!person){
+      return json({
+        error:'NOT_FOUND'
+      },404);
+    }
+
+    if(op==='goal'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'goal.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(
+        b.org_node_id&&
+        !(await canAccessOrg(
+          env,
+          s.account_id,
+          b.org_node_id
+        ))
+      ){
+        return json({
+          error:'SCOPE_FORBIDDEN'
+        },403);
+      }
+
+      const period=
+        clean(b.period_type,20);
+
+      const title=
+        clean(b.title,240);
+
+      if(
+        ![
+          'week',
+          'month',
+          'quarter',
+          'year'
+        ].includes(period)||
+        !title
+      ){
+        return json({
+          error:'INVALID_DATA'
+        },400);
+      }
+
+      const id=uid('goal');
+
+      await env.DB.prepare(`
+        INSERT INTO goals(
+          id,
+          person_id,
+          org_node_id,
+          period_type,
+          title,
+          description,
+          priority,
+          progress,
+          status,
+          starts_at,
+          due_at,
+          created_by_account_id
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,?,?,?,?,?
+        )
+      `).bind(
+        id,
+        pid,
+        b.org_node_id||null,
+        period,
+        title,
+        clean(b.description,2000)||null,
+        clean(b.priority,30)||'normal',
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(b.progress||0)
+          )
+        ),
+        clean(b.status,30)||'active',
+        clean(b.starts_at,20)||null,
+        clean(b.due_at,20)||null,
+        s.account_id
+      ).run();
+
+      await env.DB.prepare(`
+        INSERT INTO notifications(
+          id,
+          person_id,
+          org_node_id,
+          type,
+          title,
+          body
+        )
+        VALUES(
+          ?,?,?,
+          'goal',
+          'Mục tiêu mới',
+          ?
+        )
+      `).bind(
+        uid('notification'),
+        pid,
+        b.org_node_id||null,
+        title
+      ).run();
+
+      await audit(
+        env,
+        s.account_id,
+        'goal_assigned',
+        'goal',
+        id,
+        b.org_node_id||null,
+        {person_id:pid}
+      );
+
+      return json({ok:true,id});
+    }
+
+    if(op==='task'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'task.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(
+        b.org_node_id&&
+        !(await canAccessOrg(
+          env,
+          s.account_id,
+          b.org_node_id
+        ))
+      ){
+        return json({
+          error:'SCOPE_FORBIDDEN'
+        },403);
+      }
+
+      const title=
+        clean(b.title,240);
+
+      if(!title){
+        return json({
+          error:'INVALID_DATA'
+        },400);
+      }
+
+      const id=uid('task');
+
+      await env.DB.prepare(`
+        INSERT INTO tasks(
+          id,
+          person_id,
+          org_node_id,
+          goal_id,
+          title,
+          description,
+          priority,
+          progress,
+          status,
+          due_at,
+          assigned_by_account_id
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,?,?,?,?
+        )
+      `).bind(
+        id,
+        pid,
+        b.org_node_id||null,
+        clean(b.goal_id,120)||null,
+        title,
+        clean(b.description,2000)||null,
+        clean(b.priority,30)||'normal',
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(b.progress||0)
+          )
+        ),
+        clean(b.status,30)||'todo',
+        clean(b.due_at,20)||null,
+        s.account_id
+      ).run();
+
+      await env.DB.prepare(`
+        INSERT INTO notifications(
+          id,
+          person_id,
+          org_node_id,
+          type,
+          title,
+          body
+        )
+        VALUES(
+          ?,?,?,
+          'task',
+          'Công việc mới',
+          ?
+        )
+      `).bind(
+        uid('notification'),
+        pid,
+        b.org_node_id||null,
+        title
+      ).run();
+
+      await audit(
+        env,
+        s.account_id,
+        'task_assigned',
+        'task',
+        id,
+        b.org_node_id||null,
+        {person_id:pid}
+      );
+
+      return json({ok:true,id});
+    }
+
+    if(op==='activity'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'activity.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(
+        b.org_node_id&&
+        !(await canAccessOrg(
+          env,
+          s.account_id,
+          b.org_node_id
+        ))
+      ){
+        return json({
+          error:'SCOPE_FORBIDDEN'
+        },403);
+      }
+
+      const name=
+        clean(b.name,240);
+
+      if(!name){
+        return json({
+          error:'INVALID_DATA'
+        },400);
+      }
+
+      const id=uid('activity');
+
+      await env.DB.batch([
+        env.DB.prepare(`
+          INSERT INTO activities(
+            id,
+            code,
+            name,
+            org_node_id,
+            starts_at,
+            ends_at,
+            status,
+            description
+          )
+          VALUES(
+            ?,?,?,?,?,?,?,?
+          )
+        `).bind(
+          id,
+          clean(b.code,120)||null,
+          name,
+          b.org_node_id||null,
+          clean(b.starts_at,20)||null,
+          clean(b.ends_at,20)||null,
+          clean(b.status,30)||'completed',
+          clean(b.description,2000)||null
+        ),
+
+        env.DB.prepare(`
+          INSERT INTO activity_participants(
+            activity_id,
+            person_id,
+            role_label,
+            result,
+            verification_status
+          )
+          VALUES(?,?,?,?,?)
+        `).bind(
+          id,
+          pid,
+          clean(b.role_label,160)||
+            'Thành viên',
+          clean(b.result,1000)||null,
+          'confirmed'
+        )
+      ]);
+
+      await audit(
+        env,
+        s.account_id,
+        'activity_recorded',
+        'activity',
+        id,
+        b.org_node_id||null,
+        {person_id:pid}
+      );
+
+      return json({ok:true,id});
+    }
+
+    if(op==='certificate'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'certificate.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(
+        b.org_node_id&&
+        !(await canAccessOrg(
+          env,
+          s.account_id,
+          b.org_node_id
+        ))
+      ){
+        return json({
+          error:'SCOPE_FORBIDDEN'
+        },403);
+      }
+
+      const id=uid('cert');
+
+      const verify=
+        clean(b.verify_code,100)||
+        verifyCode('GCN');
+
+      const meta={
+        recognition:
+          clean(b.recognition,2000),
+        notes:
+          clean(b.notes,1500)
+      };
+
+      if(
+        !clean(b.title,240)||
+        !clean(b.issuer,240)
+      ){
+        return json({
+          error:'INVALID_DATA'
+        },400);
+      }
+
+      await env.DB.batch([
+        env.DB.prepare(`
+          INSERT INTO certificates(
+            id,
+            person_id,
+            org_node_id,
+            certificate_no,
+            title,
+            issuer,
+            issued_at,
+            source_type,
+            verification_status,
+            file_url,
+            verify_code,
+            metadata_json
+          )
+          VALUES(
+            ?,?,?,?,?,?,?,
+            'internal',
+            'verified',
+            ?,?,?
+          )
+        `).bind(
+          id,
+          pid,
+          b.org_node_id||null,
+          clean(b.certificate_no,120)||
+            verify,
+          clean(b.title,240),
+          clean(b.issuer,240),
+          clean(b.issued_at,20)||
+            new Date()
+              .toISOString()
+              .slice(0,10),
+          clean(b.file_url,1200)||null,
+          verify,
+          JSON.stringify(meta)
+        ),
+
+        env.DB.prepare(`
+          INSERT INTO notifications(
+            id,
+            person_id,
+            org_node_id,
+            type,
+            title,
+            body
+          )
+          VALUES(
+            ?,?,?,
+            'certificate',
+            'Bạn có chứng nhận mới',
+            ?
+          )
+        `).bind(
+          uid('notice'),
+          pid,
+          b.org_node_id||null,
+          `Chứng nhận "${clean(
+            b.title,
+            240
+          )}" đã được cấp trên Cổng Thành viên Sky First Network.`
+        )
+      ]);
+
+      await audit(
+        env,
+        s.account_id,
+        'certificate_issued',
+        'certificate',
+        id,
+        b.org_node_id||null,
+        {
+          person_id:pid,
+          verify_code:verify
+        }
+      );
+
+      return json({
+        ok:true,
+        id,
+        verify_code:verify
+      });
+    }
+
+    if(op==='achievement'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'achievement.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      const id=uid('achievement');
+
+      if(!clean(b.title,240)){
+        return json({
+          error:'INVALID_DATA'
+        },400);
+      }
+
+      await env.DB.prepare(`
+        INSERT INTO achievements(
+          id,
+          person_id,
+          org_node_id,
+          title,
+          achievement_type,
+          issuer,
+          achieved_at,
+          verification_status,
+          source_type,
+          description
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,
+          'verified',
+          'internal',
+          ?
+        )
+      `).bind(
+        id,
+        pid,
+        b.org_node_id||null,
+        clean(b.title,240),
+        clean(b.achievement_type,120)||null,
+        clean(b.issuer,240)||'SFN',
+        clean(b.achieved_at,20)||null,
+        clean(b.description,2000)||null
+      ).run();
+
+      await audit(
+        env,
+        s.account_id,
+        'achievement_added',
+        'achievement',
+        id,
+        b.org_node_id||null,
+        {person_id:pid}
+      );
+
+      return json({ok:true,id});
+    }
+
+    if(op==='membership'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'member.edit'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(!b.org_node_id){
+        return json({
+          error:'ORG_REQUIRED'
+        },400);
+      }
+
+      if(!(await canAccessOrg(
+        env,
+        s.account_id,
+        b.org_node_id
+      ))){
+        return json({
+          error:'SCOPE_FORBIDDEN'
+        },403);
+      }
+
+      const id=uid('membership');
+
+      await env.DB.prepare(`
+        INSERT INTO org_memberships(
+          id,
+          person_id,
+          org_node_id,
+          title,
+          role_label,
+          started_at,
+          ended_at,
+          status,
+          is_primary,
+          decision_ref
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,?,?,?
+        )
+      `).bind(
+        id,
+        pid,
+        b.org_node_id,
+        clean(b.title,160)||null,
+        clean(b.role_label,160)||null,
+        clean(b.started_at,20)||null,
+        clean(b.ended_at,20)||null,
+        clean(b.status,30)||'active',
+        b.is_primary?1:0,
+        clean(b.decision_ref,240)||null
+      ).run();
+
+      await audit(
+        env,
+        s.account_id,
+        'membership_added',
+        'membership',
+        id,
+        b.org_node_id,
+        {person_id:pid}
+      );
+
+      return json({ok:true,id});
+    }
+/* =========================================================
+   ADMIN - EDIT / END / HIDE / SHOW MEMBERSHIP
+   ========================================================= */
+
+const membershipActionMatch=
+  url.pathname.match(
+    /^\/api\/admin\/members\/([^/]+)\/membership\/([^/]+)(?:\/(end|hide|show))?$/
+  );
+
+if(membershipActionMatch){
+
+  const pid=
+    decodeURIComponent(
+      membershipActionMatch[1]
+    );
+
+  const membershipId=
+    decodeURIComponent(
+      membershipActionMatch[2]
+    );
+
+  const action=
+    membershipActionMatch[3]||null;
+
+
+  if(!(await hasPerm(
+    env,
+    s.account_id,
+    'member.edit'
+  ))){
+    return json({
+      error:'FORBIDDEN'
+    },403);
+  }
+
+
+  if(!(await canAccessPerson(
+    env,
+    s.account_id,
+    pid
+  ))){
+    return json({
+      error:'SCOPE_FORBIDDEN'
+    },403);
+  }
+
+
+  const membership=
+    await env.DB.prepare(`
+      SELECT *
+      FROM org_memberships
+      WHERE id=?
+        AND person_id=?
+      LIMIT 1
+    `).bind(
+      membershipId,
+      pid
+    ).first();
+
+
+  if(!membership){
+    return json({
+      error:'MEMBERSHIP_NOT_FOUND'
+    },404);
+  }
+
+
+  if(!(await canAccessOrg(
+    env,
+    s.account_id,
+    membership.org_node_id
+  ))){
+    return json({
+      error:'SCOPE_FORBIDDEN'
+    },403);
+  }
+
+
+  /* =========================
+     CHỈNH SỬA
+     PATCH
+     ========================= */
+
+  if(
+    req.method==='PATCH'&&
+    !action
+  ){
+
+    const b=
+      await bodyJson(req);
+
+
+    const orgNodeId=
+      clean(
+        b.org_node_id,
+        100
+      )||
+      membership.org_node_id;
+
+
+    if(!(await canAccessOrg(
+      env,
+      s.account_id,
+      orgNodeId
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET
+        org_node_id=?,
+        title=?,
+        role_label=?,
+        started_at=?,
+        ended_at=?,
+        decision_ref=?
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+
+      orgNodeId,
+
+      clean(
+        b.title,
+        160
+      )||null,
+
+      clean(
+        b.role_label,
+        160
+      )||null,
+
+      clean(
+        b.started_at,
+        20
+      )||null,
+
+      clean(
+        b.ended_at,
+        20
+      )||null,
+
+      clean(
+        b.decision_ref,
+        240
+      )||null,
+
+      membershipId,
+      pid
+
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_updated',
+      'membership',
+      membershipId,
+      orgNodeId,
+      {
+        person_id:pid
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:'updated'
+    });
+  }
+
+
+  /* =========================
+     NGỪNG HIỆU LỰC
+     ========================= */
+
+  if(
+    req.method==='POST'&&
+    action==='end'
+  ){
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET
+        status='ended',
+        ended_at=COALESCE(
+          ended_at,
+          DATE('now')
+        )
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      membershipId,
+      pid
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_ended',
+      'membership',
+      membershipId,
+      membership.org_node_id,
+      {
+        person_id:pid
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:'ended'
+    });
+  }
+
+
+  /* =========================
+     ẨN
+     ========================= */
+
+  if(
+    req.method==='POST'&&
+    action==='hide'
+  ){
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET status='suspended'
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      membershipId,
+      pid
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_hidden',
+      'membership',
+      membershipId,
+      membership.org_node_id,
+      {
+        person_id:pid
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:'hidden'
+    });
+  }
+
+
+  /* =========================
+     HIỆN LẠI
+     ========================= */
+
+  if(
+    req.method==='POST'&&
+    action==='show'
+  ){
+
+    const newStatus=
+      membership.ended_at
+        ?'ended'
+        :'active';
+
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET status=?
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      newStatus,
+      membershipId,
+      pid
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_restored',
+      'membership',
+      membershipId,
+      membership.org_node_id,
+      {
+        person_id:pid,
+        status:newStatus
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:newStatus
+    });
+  }
+
+
+  return json({
+    error:'METHOD_NOT_ALLOWED'
+  },405);
+}
+    if(op==='card'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'card.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(
+        b.org_node_id&&
+        !(await canAccessOrg(
+          env,
+          s.account_id,
+          b.org_node_id
+        ))
+      ){
+        return json({
+          error:'SCOPE_FORBIDDEN'
+        },403);
+      }
+
+      const id=uid('card');
+
+      const verify=
+        verifyCode('CARD');
+
+      const number=
+        clean(b.card_number,120)||
+        `SFN-CARD-${String(
+          Date.now()
+        ).slice(-8)}`;
+
+      await env.DB.prepare(`
+        INSERT INTO member_cards(
+          id,
+          person_id,
+          card_type_id,
+          org_node_id,
+          card_number,
+          title_on_card,
+          issued_at,
+          expires_at,
+          status,
+          verify_token
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,?,?,?
+        )
+      `).bind(
+        id,
+        pid,
+        b.card_type_id||'card_member',
+        b.org_node_id||'org_sfn',
+        number,
+        clean(b.title_on_card,180)||null,
+        clean(b.issued_at,20)||
+          new Date()
+            .toISOString()
+            .slice(0,10),
+        clean(b.expires_at,20)||null,
+        clean(b.status,30)||'active',
+        verify
+      ).run();
+
+      await audit(
+        env,
+        s.account_id,
+        'card_issued',
+        'member_card',
+        id,
+        b.org_node_id||'org_sfn',
+        {
+          person_id:pid,
+          verify_token:verify
+        }
+      );
+
+      return json({
+        ok:true,
+        id,
+        verify_token:verify
+      });
+    }
+
+    if(op==='document'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'member.edit'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      const id=uid('doc');
+
+      await env.DB.prepare(`
+        INSERT INTO member_documents(
+          id,
+          person_id,
+          org_node_id,
+          document_type,
+          title,
+          file_url,
+          issued_at,
+          visibility
+        )
+        VALUES(
+          ?,?,?,?,?,?,?,
+          'private'
+        )
+      `).bind(
+        id,
+        pid,
+        b.org_node_id||null,
+        clean(b.document_type,100)||'other',
+        clean(b.title,240),
+        clean(b.file_url,1200)||null,
+        clean(b.issued_at,20)||null
+      ).run();
+
+      return json({ok:true,id});
+    }
+
+    if(op==='reset-password'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'account.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      const pw=
+        String(b.password||'');
+
+      if(pw.length<10){
+        return json({
+          error:'PASSWORD_TOO_SHORT'
+        },400);
+      }
+
+      const salt=token();
+      const it=100000;
+      const hash=await pbkdf2(
+        pw,
+        salt,
+        it
+      );
+
+      await env.DB.batch([
+        env.DB.prepare(`
+          UPDATE accounts
+          SET
+            password_hash=?,
+            password_salt=?,
+            password_iterations=?,
+            force_password_change=1,
+            updated_at=CURRENT_TIMESTAMP
+          WHERE person_id=?
+        `).bind(
+          hash,
+          salt,
+          it,
+          pid
+        ),
+
+        env.DB.prepare(`
+          DELETE FROM sessions
+          WHERE account_id=?
+        `).bind(
+          person.account_id||''
+        )
+      ]);
+
+      await audit(
+        env,
+        s.account_id,
+        'password_reset',
+        'account',
+        person.account_id
+      );
+
+      return json({ok:true});
+    }
+
+    if(op==='lock'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'account.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      const locked=
+        b.locked?1:0;
+
+      await env.DB.prepare(`
+        UPDATE accounts
+        SET
+          is_locked=?,
+          updated_at=CURRENT_TIMESTAMP
+        WHERE person_id=?
+      `).bind(
+        locked,
+        pid
+      ).run();
+
+      if(
+        locked&&
+        person.account_id
+      ){
+        await env.DB.prepare(`
+          DELETE FROM sessions
+          WHERE account_id=?
+        `).bind(
+          person.account_id
+        ).run();
+      }
+
+      await audit(
+        env,
+        s.account_id,
+        locked
+          ?'account_locked'
+          :'account_unlocked',
+        'account',
+        person.account_id
+      );
+
+      return json({
+        ok:true,
+        is_locked:locked
+      });
+    }
+
+    if(op==='scope'){
+      if(!(await hasPerm(
+        env,
+        s.account_id,
+        'role.manage'
+      ))){
+        return json({
+          error:'FORBIDDEN'
+        },403);
+      }
+
+      if(
+        !person.account_id||
+        !b.role_id
+      ){
+        return json({
+          error:'INVALID_DATA'
+        },400);
+      }
+
+      const id=uid('scope');
+
+      await env.DB.prepare(`
+        INSERT INTO account_scopes(
+          id,
+          account_id,
+          role_id,
+          org_node_id,
+          active
+        )
+        VALUES(?,?,?,?,1)
+      `).bind(
+        id,
+        person.account_id,
+        b.role_id,
+        b.org_node_id||null
+      ).run();
+
+      await audit(
+        env,
+        s.account_id,
+        'scope_granted',
+        'account_scope',
+        id,
+        b.org_node_id||null,
+        {
+          person_id:pid,
+          role_id:b.role_id
+        }
+      );
+
+      return json({ok:true,id});
+    }
+  }
+
+  // =========================================================
+  // ACCOUNT REQUEST ADMIN
+  // =========================================================
+  if(url.pathname==='/api/admin/account-requests'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'request.manage')))return json({error:'FORBIDDEN'},403);
+    const status=clean(url.searchParams.get('status'),30)||'pending',params=[],where=[];
+    if(status!=='all'){where.push('ar.status=?');params.push(status)}
+    if(!(await isNetworkAdmin(env,s.account_id))){where.push(`ar.target_org_node_id IN (WITH RECURSIVE allowed(id) AS (SELECT sc.org_node_id FROM account_scopes sc JOIN roles rr ON rr.id=sc.role_id WHERE sc.account_id=? AND sc.active=1 AND rr.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN') AND sc.org_node_id IS NOT NULL UNION SELECT o.id FROM org_nodes o JOIN allowed a ON o.parent_id=a.id) SELECT id FROM allowed)`);params.push(s.account_id)}
+    const r=await env.DB.prepare(`SELECT ar.*,o.name org_name,a.username reviewer_username,CAST((julianday('now')-julianday(ar.date_of_birth))/365.2425 AS INTEGER) age FROM account_requests ar LEFT JOIN org_nodes o ON o.id=ar.target_org_node_id LEFT JOIN accounts a ON a.id=ar.reviewed_by_account_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY ar.created_at DESC LIMIT 500`).bind(...params).all();return json({items:r.results||[]});
+  }
+  const reqReview=url.pathname.match(/^\/api\/admin\/account-requests\/([^/]+)\/(approve|reject|supplement)$/);
+  if(reqReview&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'request.manage')))return json({error:'FORBIDDEN'},403);
+    const rid=decodeURIComponent(reqReview[1]),op=reqReview[2],b=await bodyJson(req),r=await env.DB.prepare(`SELECT * FROM account_requests WHERE id=? AND status IN ('pending','supplement')`).bind(rid).first();
+    if(!r)return json({error:'REQUEST_NOT_PENDING'},409);if(!(await canAccessOrg(env,s.account_id,r.target_org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);
+    if(op==='reject'||op==='supplement'){const note=clean(b.admin_note,1000);if(!note)return json({error:'ADMIN_NOTE_REQUIRED'},400);const next=op==='reject'?'rejected':'supplement';await env.DB.prepare(`UPDATE account_requests SET status=?,admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,note,s.account_id,rid).run();await audit(env,s.account_id,op==='reject'?'account_request_rejected':'account_request_supplement_requested','account_request',rid,r.target_org_node_id,{note});return json({ok:true,status:next})}
+    if(await env.DB.prepare(`SELECT 1 FROM accounts WHERE lower(email)=? LIMIT 1`).bind(r.email).first())return json({error:'ACCOUNT_ALREADY_EXISTS'},409);
+    const last=await env.DB.prepare(`SELECT member_code FROM people WHERE member_code LIKE 'SFN-%' ORDER BY CAST(substr(member_code,5) AS INTEGER) DESC LIMIT 1`).first(),nextNo=last?.member_code?Number(last.member_code.slice(4))+1:1,pid=uid('person'),aid=uid('account'),code=memberCode(nextNo),username=code.toLowerCase(),temporaryPassword=`SFN-${crypto.randomUUID().replaceAll('-','').slice(0,14)}`,salt=token(),it=100000,hash=await pbkdf2(temporaryPassword,salt,it);
+    await env.DB.batch([
+env.DB.prepare(`
+  INSERT INTO people(
+    id,
+    member_code,
+    full_name,
+    display_name,
+    date_of_birth,
+    gender,
+    nationality,
+    id_number,
+    id_issue_date,
+    id_issue_place,
+    email,
+    phone,
+    permanent_address,
+    temporary_address,
+    education_or_work_type,
+    school_or_workplace,
+    class_or_major,
+    education_status,
+    avatar_url,
+    joined_at,
+    status
+  )
+  VALUES(
+    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+    DATE('now'),
+    'active'
+  )
+`).bind(
+  pid,
+  code,
+  r.full_name,
+  r.display_name,
+  r.date_of_birth,
+  r.gender,
+  r.nationality,
+  r.id_number,
+  r.id_issue_date,
+  r.id_issue_place,
+  r.email,
+  r.phone,
+  r.permanent_address,
+  r.temporary_address,
+  r.education_or_work_type||null,
+  r.school_or_workplace||null,
+  r.class_or_major||null,
+  r.education_status||null,
+  r.avatar_url
+),
+      env.DB.prepare(`INSERT INTO accounts(id,person_id,username,email,password_hash,password_salt,password_iterations,force_password_change) VALUES(?,?,?,?,?,?,?,1)`).bind(aid,pid,username,r.email,hash,salt,it),
+      env.DB.prepare(`INSERT INTO account_scopes(id,account_id,role_id,org_node_id,active) VALUES(?,?,?,?,1)`).bind(uid('scope'),aid,'role_member',null),
+      env.DB.prepare(`INSERT INTO org_memberships(id,person_id,org_node_id,role_label,started_at,status,is_primary) VALUES(?,?,?,?,DATE('now'),'active',1)`).bind(uid('membership'),pid,r.target_org_node_id,'Thành viên'),
+      env.DB.prepare(`UPDATE account_requests SET status='approved',admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,approved_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(clean(b.admin_note,1000)||'Đã phê duyệt',s.account_id,pid,rid)
+    ]);await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code});return json({ok:true,member_code:code,username,temporary_password:temporaryPassword,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
+  }
+
+  // =========================================================
+  // CALENDAR
+  // =========================================================
+  if(url.pathname==='/api/me/calendar'&&req.method==='GET'){
+    if(!s.person_id)return json({items:[]});const r=await env.DB.prepare(`SELECT e.*,o.name org_name FROM calendar_events e LEFT JOIN org_nodes o ON o.id=e.org_node_id WHERE e.status='active' AND (e.target_person_id=? OR (e.target_person_id IS NULL AND e.org_node_id IS NULL) OR e.org_node_id IN (SELECT org_node_id FROM org_memberships WHERE person_id=? AND status='active')) ORDER BY e.starts_at`).bind(s.person_id,s.person_id).all();return json({items:r.results||[]});
+  }
+  if(url.pathname==='/api/admin/calendar'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'calendar.view')))return json({error:'FORBIDDEN'},403);const orgs=await visibleOrgs(env,s.account_id),ids=orgs.map(x=>x.id);let r;if(await isNetworkAdmin(env,s.account_id))r=await env.DB.prepare(`SELECT e.*,o.name org_name FROM calendar_events e LEFT JOIN org_nodes o ON o.id=e.org_node_id ORDER BY e.starts_at DESC LIMIT 500`).all();else if(ids.length)r=await env.DB.prepare(`SELECT e.*,o.name org_name FROM calendar_events e LEFT JOIN org_nodes o ON o.id=e.org_node_id WHERE e.org_node_id IN (${ids.map(()=>'?').join(',')}) ORDER BY e.starts_at DESC LIMIT 500`).bind(...ids).all();else return json({items:[]});return json({items:r.results||[]});
+  }
+  if(url.pathname==='/api/admin/calendar'&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'calendar.manage')))return json({error:'FORBIDDEN'},403);const b=await bodyJson(req),org=clean(b.org_node_id,100)||null;if(org&&!(await canAccessOrg(env,s.account_id,org)))return json({error:'SCOPE_FORBIDDEN'},403);if(!clean(b.title,200)||!clean(b.starts_at,40))return json({error:'INVALID_DATA'},400);const id=uid('calendar');await env.DB.prepare(`INSERT INTO calendar_events(id,title,event_type,description,starts_at,ends_at,org_node_id,target_person_id,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?)`).bind(id,clean(b.title,200),clean(b.event_type,50)||'other',clean(b.description,2000)||null,clean(b.starts_at,40),clean(b.ends_at,40)||null,org,clean(b.target_person_id,100)||null,s.account_id).run();await audit(env,s.account_id,'calendar_created','calendar_event',id,org);return json({ok:true,id});
+  }
+  const calDel=url.pathname.match(/^\/api\/admin\/calendar\/([^/]+)$/);if(calDel&&req.method==='DELETE'){if(!(await hasPerm(env,s.account_id,'calendar.manage')))return json({error:'FORBIDDEN'},403);const id=decodeURIComponent(calDel[1]),e=await env.DB.prepare(`SELECT org_node_id FROM calendar_events WHERE id=?`).bind(id).first();if(!e)return json({error:'NOT_FOUND'},404);if(e.org_node_id&&!(await canAccessOrg(env,s.account_id,e.org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);await env.DB.prepare(`DELETE FROM calendar_events WHERE id=?`).bind(id).run();await audit(env,s.account_id,'calendar_deleted','calendar_event',id,e.org_node_id);return json({ok:true})}
+
+  // =========================================================
+  // ADMIN META
+  // =========================================================
+
+  if(
+    url.pathname==='/api/admin/meta'&&
+    req.method==='GET'
+  ){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'member.view'
+    ))){
+      return json({
+        error:'FORBIDDEN'
+      },403);
+    }
+
+    const [
+      orgs,
+      cards,
+      roles
+    ]=await Promise.all([
+      visibleOrgs(
+        env,
+        s.account_id
+      ),
+
+      env.DB.prepare(`
+        SELECT id,code,name
+        FROM card_types
+        WHERE active=1
+        ORDER BY name
+      `).all(),
+
+      env.DB.prepare(`
+        SELECT id,code,name
+        FROM roles
+        ORDER BY name
+      `).all()
+    ]);
+
+    return json({
+      orgs,
+      card_types:
+        cards.results||[],
+      roles:
+        roles.results||[]
+    });
+  }
+
+  if(
+    url.pathname==='/api/admin/audit'&&
+    req.method==='GET'
+  ){
+    if(!(await hasPerm(
+      env,
+      s.account_id,
+      'audit.view'
+    ))){
+      return json({
+        error:'FORBIDDEN'
+      },403);
+    }
+
+    const r=await env.DB.prepare(`
+      SELECT
+        l.*,
+        a.username
+      FROM audit_log l
+      LEFT JOIN accounts a
+        ON a.id=l.actor_account_id
+      ORDER BY l.id DESC
+      LIMIT 500
+    `).all();
+
+    return json({
+      items:r.results||[]
+    });
+  }
+
+  return json({
+    error:'NOT_FOUND'
+  },404);
+}
+
+// =========================================================
+// WORKER
+// =========================================================
+
+export default{
+  async fetch(request,env){
+    const url=new URL(request.url);
+
+    if(url.pathname.startsWith('/files/')){
+      const key=
+        decodeURIComponent(
+          url.pathname.slice(7)
+        );
+
+      const o=
+        await env.FILES.get(key);
+
+      if(!o){
+        return new Response(
+          'Not found',
+          {status:404}
+        );
+      }
+
+      const h=new Headers();
+
+      o.writeHttpMetadata(h);
+
+      h.set(
+        'etag',
+        o.httpEtag
+      );
+
+      h.set(
+        'x-content-type-options',
+        'nosniff'
+      );
+
+      return new Response(
+        o.body,
+        {headers:h}
+      );
+    }
+
+    if(url.pathname.startsWith('/api/')){
+      return api(
+        request,
+        env,
+        url
+      );
+    }
+
+    if(url.pathname==='/setup'){
+      if(await setupDone(env)){
+        return Response.redirect(
+          new URL('/',url),
+          302
+        );
+      }
+
+      const u=
+        new URL(request.url);
+
+      u.pathname='/setup.html';
+
+      return env.ASSETS.fetch(
+        new Request(
+          u.toString(),
+          {
+            method:'GET',
+            headers:request.headers
+          }
+        )
+      );
+    }
+
+    if(url.pathname==='/verify'){
+      const u=
+        new URL(request.url);
+
+      u.pathname='/verify.html';
+
+      return env.ASSETS.fetch(
+        new Request(
+          u.toString(),
+          {
+            method:'GET',
+            headers:request.headers
+          }
+        )
+      );
+    }
+
+    if(!(await setupDone(env))){
+      return Response.redirect(
+        new URL('/setup',url),
+        302
+      );
+    }
+
+    return env.ASSETS.fetch(request);
+  }
+};
