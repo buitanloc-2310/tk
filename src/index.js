@@ -3613,7 +3613,328 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
       return json({ok:true,id});
     }
+/* =========================================================
+   ADMIN - EDIT / END / HIDE / SHOW MEMBERSHIP
+   ========================================================= */
 
+const membershipActionMatch=
+  url.pathname.match(
+    /^\/api\/admin\/members\/([^/]+)\/membership\/([^/]+)(?:\/(end|hide|show))?$/
+  );
+
+if(membershipActionMatch){
+
+  const pid=
+    decodeURIComponent(
+      membershipActionMatch[1]
+    );
+
+  const membershipId=
+    decodeURIComponent(
+      membershipActionMatch[2]
+    );
+
+  const action=
+    membershipActionMatch[3]||null;
+
+
+  if(!(await hasPerm(
+    env,
+    s.account_id,
+    'member.edit'
+  ))){
+    return json({
+      error:'FORBIDDEN'
+    },403);
+  }
+
+
+  if(!(await canAccessPerson(
+    env,
+    s.account_id,
+    pid
+  ))){
+    return json({
+      error:'SCOPE_FORBIDDEN'
+    },403);
+  }
+
+
+  const membership=
+    await env.DB.prepare(`
+      SELECT *
+      FROM org_memberships
+      WHERE id=?
+        AND person_id=?
+      LIMIT 1
+    `).bind(
+      membershipId,
+      pid
+    ).first();
+
+
+  if(!membership){
+    return json({
+      error:'MEMBERSHIP_NOT_FOUND'
+    },404);
+  }
+
+
+  if(!(await canAccessOrg(
+    env,
+    s.account_id,
+    membership.org_node_id
+  ))){
+    return json({
+      error:'SCOPE_FORBIDDEN'
+    },403);
+  }
+
+
+  /* =========================
+     CHỈNH SỬA
+     PATCH
+     ========================= */
+
+  if(
+    req.method==='PATCH'&&
+    !action
+  ){
+
+    const b=
+      await bodyJson(req);
+
+
+    const orgNodeId=
+      clean(
+        b.org_node_id,
+        100
+      )||
+      membership.org_node_id;
+
+
+    if(!(await canAccessOrg(
+      env,
+      s.account_id,
+      orgNodeId
+    ))){
+      return json({
+        error:'SCOPE_FORBIDDEN'
+      },403);
+    }
+
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET
+        org_node_id=?,
+        title=?,
+        role_label=?,
+        started_at=?,
+        ended_at=?,
+        decision_ref=?
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+
+      orgNodeId,
+
+      clean(
+        b.title,
+        160
+      )||null,
+
+      clean(
+        b.role_label,
+        160
+      )||null,
+
+      clean(
+        b.started_at,
+        20
+      )||null,
+
+      clean(
+        b.ended_at,
+        20
+      )||null,
+
+      clean(
+        b.decision_ref,
+        240
+      )||null,
+
+      membershipId,
+      pid
+
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_updated',
+      'membership',
+      membershipId,
+      orgNodeId,
+      {
+        person_id:pid
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:'updated'
+    });
+  }
+
+
+  /* =========================
+     NGỪNG HIỆU LỰC
+     ========================= */
+
+  if(
+    req.method==='POST'&&
+    action==='end'
+  ){
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET
+        status='ended',
+        ended_at=COALESCE(
+          ended_at,
+          DATE('now')
+        )
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      membershipId,
+      pid
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_ended',
+      'membership',
+      membershipId,
+      membership.org_node_id,
+      {
+        person_id:pid
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:'ended'
+    });
+  }
+
+
+  /* =========================
+     ẨN
+     ========================= */
+
+  if(
+    req.method==='POST'&&
+    action==='hide'
+  ){
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET status='hidden'
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      membershipId,
+      pid
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_hidden',
+      'membership',
+      membershipId,
+      membership.org_node_id,
+      {
+        person_id:pid
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:'hidden'
+    });
+  }
+
+
+  /* =========================
+     HIỆN LẠI
+     ========================= */
+
+  if(
+    req.method==='POST'&&
+    action==='show'
+  ){
+
+    const newStatus=
+      membership.ended_at
+        ?'ended'
+        :'active';
+
+
+    await env.DB.prepare(`
+      UPDATE org_memberships
+
+      SET status=?
+
+      WHERE id=?
+        AND person_id=?
+    `).bind(
+      newStatus,
+      membershipId,
+      pid
+    ).run();
+
+
+    await audit(
+      env,
+      s.account_id,
+      'membership_restored',
+      'membership',
+      membershipId,
+      membership.org_node_id,
+      {
+        person_id:pid,
+        status:newStatus
+      }
+    );
+
+
+    return json({
+      ok:true,
+      status:newStatus
+    });
+  }
+
+
+  return json({
+    error:'METHOD_NOT_ALLOWED'
+  },405);
+}
     if(op==='card'){
       if(!(await hasPerm(
         env,
