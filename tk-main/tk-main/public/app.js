@@ -195,7 +195,6 @@ function renderLogin(){
           <div id="authRegisterPane" hidden>
             <div class="auth-heading"><span>MEMBER REGISTRATION</span><h2>Đăng ký thành viên.</h2><p>Hồ sơ được gửi đến Sky First để xác minh trước khi tài khoản được kích hoạt.</p></div>
             <div class="register-preview"><div><b>01</b><span>Cá nhân &amp; định danh</span></div><div><b>02</b><span>Học tập &amp; công việc</span></div><div><b>03</b><span>Đơn vị Sky First</span></div><div><b>04</b><span>Xác minh &amp; cam kết</span></div></div>
-            <div class="minor-note">Ngày sinh được hệ thống tự kiểm tra. Người chưa đủ 18 tuổi sẽ có thêm phần thông tin cha/mẹ/người đại diện.</div>
             <button type="button" id="startRegistration" class="primary auth-submit">BẮT ĐẦU ĐĂNG KÝ <span>→</span></button>
             <button type="button" id="checkRequestRegister" class="link-button register-lookup">Tra cứu đăng ký đã gửi</button>
           </div>
