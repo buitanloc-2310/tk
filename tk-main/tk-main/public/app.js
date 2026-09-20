@@ -4149,8 +4149,10 @@ async function renderAdminMembers(c){
         );
 
 
-      $('#membersBox').outerHTML=`
-        <div id="membersBox">
+      const membersBox=$('#membersBox');
+      if(!membersBox) return;
+      membersBox.innerHTML=`
+        <div>
 
           <div class="table-wrap">
 
@@ -4349,7 +4351,8 @@ async function renderAdminMembers(c){
       );
 
 
-      $('#bulkExport').onclick=()=>{
+      const bulkExport=$('#bulkExport');
+      if(bulkExport) bulkExport.onclick=()=>{
 
         const ids=
           $$('[data-member-check]:checked')
@@ -4442,7 +4445,8 @@ async function renderAdminMembers(c){
 
     }catch(err){
 
-      $('#membersBox').textContent=
+      const membersBox=$('#membersBox');
+      if(membersBox) membersBox.textContent=
         'Không có quyền hoặc không thể tải dữ liệu.';
     }
   };

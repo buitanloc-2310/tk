@@ -1,6 +1,14 @@
 {
-  "name": "sfn-member-portal-deploy-root",
+  "name": "sfn-member-portal",
+  "version": "4.0.0",
   "private": true,
-  "scripts": {"deploy":"wrangler deploy","check":"node --check tk-main/src/index.js && node --check tk-main/public/app.js"},
-  "devDependencies": {"wrangler":"^4.0.0"}
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:remote": "wrangler d1 migrations apply tk --remote",
+    "check": "node --check src/index.js && node --check public/app.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
 }
