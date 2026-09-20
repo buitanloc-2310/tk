@@ -40,11 +40,11 @@ const api=async(url,opt={})=>{
 const logo='/sfn-logo.png?v=final-20260901';
 
 const PORTALS=[
-  ['Cổng chính Sky First Network','https://skyfirst.io.vn'],
+  ['Sky First Network','https://skyfirst.io.vn'],
   ['Cổng Thông tin','https://ctt.skyfirst.io.vn'],
   ['Cổng Tình nguyện viên','https://tnv.skyfirst.io.vn'],
-  ['Cổng SFEC','https://ctt.sfec.skyfirst.io.vn'],
-  ['Nhà Hán Ngữ','https://ctt.nhahanngu.io.vn'],
+  ['SFEC','https://sfec.skyfirst.io.vn'],
+  ['SLC VPLUS','https://slc.skyfirst.io.vn']
 ];
 
 const state={
@@ -166,43 +166,78 @@ async function boot(){
 
 function renderLogin(){
   $('#app').innerHTML=`
-    <div class="member-auth-shell">
-      <section class="member-auth-brand">
-        <div class="sky-orbit sky-orbit-a"></div><div class="sky-orbit sky-orbit-b"></div>
-        <div class="sky-star">✦</div>
-        <div class="member-brand-top"><img src="${logo}" alt="Sky First Network"><div><b>SKY FIRST NETWORK</b><span>MEMBER IDENTITY</span></div></div>
-        <div class="member-brand-copy">
-          <div class="member-kicker">CỔNG THÀNH VIÊN · MEMBER PORTAL</div>
-          <h1>Một danh tính.<br>Một hành trình.<br><em>Một hồ sơ Sky First.</em></h1>
-          <p>Hồ sơ, vai trò, hoạt động, thành tích và những dấu mốc của bạn trong Sky First Network được kết nối tại một nơi.</p>
-          <div class="identity-pills"><span>Hồ sơ số</span><span>Thẻ thành viên</span><span>CV & thành tích</span><span>QR xác minh</span></div>
+    <div class="member-login">
+      <section class="member-login-brand" aria-label="Sky First Member Identity">
+        <div class="brand-topline">
+          <img src="${logo}" alt="Sky First Network" class="brand-hero-logo">
+          <div class="brand-values">PEOPLE<br>EDUCATION<br>COMMUNITY<br>FOR A BRIGHTER TOMORROW</div>
         </div>
-        <div class="member-brand-foot"><span>DREAM · LEARN · CONNECT</span><b>MAKE AN IMPACT.</b></div>
+        <div class="brand-copy">
+          <div class="brand-kicker">CỔNG THÀNH VIÊN</div>
+          <h1>SKY FIRST<br>NETWORK</h1>
+          <h2>MỘT DANH TÍNH. MỘT HÀNH TRÌNH. MỘT CỘNG ĐỒNG.</h2>
+          <p>Hồ sơ, hoạt động, vai trò, thành tích và những dấu mốc của bạn trong Sky First Network được kết nối tại một nơi.</p>
+          <div class="identity-pillars">
+            <div><span>◫</span><b>GIÁO DỤC<br>& ĐÀO TẠO</b></div>
+            <div><span>◎</span><b>PHÁT TRIỂN<br>CỘNG ĐỒNG</b></div>
+            <div><span>↗</span><b>KIẾN TẠO<br>GIÁ TRỊ</b></div>
+            <div><span>✦</span><b>VƯƠN TỚI<br>TƯƠNG LAI</b></div>
+          </div>
+        </div>
+        <div class="sky-orbit" aria-hidden="true">
+          <i class="orbit o1"></i><i class="orbit o2"></i><i class="orbit o3"></i>
+          <i class="node n1"></i><i class="node n2"></i><i class="node n3"></i><i class="node n4"></i>
+          <div class="orbit-caption">SKY FIRST · PEOPLE · EDUCATION · COMMUNITY</div>
+        </div>
       </section>
-      <section class="member-auth-panel">
+
+      <section class="member-login-side">
         <div class="member-login-card">
-          <div class="login-mark"><img src="${logo}" alt="SFN"><div><b>SKY FIRST</b><span>CỔNG THÀNH VIÊN</span></div></div>
-          <div class="login-eyebrow">MEMBER ACCESS</div>
-          <h2>Chào mừng trở lại</h2>
-          <p class="login-lead">Đăng nhập để tiếp tục hành trình của bạn tại Sky First Network.</p>
-          <form id="loginForm" class="form-grid member-login-form">
-            <label>Tên đăng nhập / Email<input name="login" required autocomplete="username" placeholder="Tên đăng nhập hoặc email"></label>
-            <label>Mật khẩu<div class="password-field"><input id="loginPassword" name="password" type="password" required autocomplete="current-password" placeholder="Nhập mật khẩu"><button id="togglePassword" type="button" aria-label="Hiện hoặc ẩn mật khẩu">Hiện</button></div></label>
-            <button class="primary member-login-button">ĐĂNG NHẬP <span>→</span></button>
+          <div class="login-brandline">
+            <img src="${logo}" alt="Sky First Network">
+            <div class="login-brand-divider"></div>
+            <div><strong>CỔNG THÀNH VIÊN</strong><span>MEMBER PORTAL</span></div>
+          </div>
+          <div class="login-welcome"><b>Đăng nhập</b><span>Chào mừng bạn trở lại!</span></div>
+          <form id="loginForm" class="login-form">
+            <label><span>Tên đăng nhập / Email</span><div class="input-shell"><span class="field-icon">✉</span><input name="login" required autocomplete="username" placeholder="Tên đăng nhập / Email"></div></label>
+            <label><span>Mật khẩu</span><div class="input-shell"><span class="field-icon">⌑</span><input id="loginPassword" name="password" type="password" required autocomplete="current-password" placeholder="Mật khẩu"><button id="togglePassword" type="button" class="password-toggle" aria-label="Hiện hoặc ẩn mật khẩu">◉</button></div></label>
+            <div class="login-options"><label class="remember"><input type="checkbox" name="remember"> Ghi nhớ đăng nhập</label><a href="/support.html">Quên mật khẩu?</a></div>
+            <button class="login-primary">ĐĂNG NHẬP <span>→</span></button>
           </form>
-          <p id="msg" class="msg"></p>
-          <div class="member-access-actions"><button type="button" id="requestAccount" class="secondary">YÊU CẦU CẤP TÀI KHOẢN</button><button type="button" id="checkRequest" class="ghost">TRA CỨU YÊU CẦU</button></div>
-          <div class="member-support">Không thể đăng nhập? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></div>
-          <details class="ecosystem"><summary>Hệ sinh thái Sky First <span>＋</span></summary><div class="portal-links">${portals()}</div></details>
-          <div class="legal"><a href="/terms.html">Điều khoản sử dụng</a> · <a href="/privacy.html">Chính sách bảo mật</a><br>© 2026 Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First (SFN)</div>
+          <p id="msg" class="login-msg" role="status"></p>
+          <div class="login-separator"><span>hoặc</span></div>
+          <div class="login-actions"><button type="button" id="requestAccount" class="login-secondary">♙ &nbsp; YÊU CẦU CẤP TÀI KHOẢN</button><button type="button" id="checkRequest" class="login-secondary subtle">▣ &nbsp; TRA CỨU YÊU CẦU</button></div>
+          <details class="ecosystem"><summary><span class="ecosystem-icon">▦</span><span><b>Hệ sinh thái Sky First</b><small>Truy cập các cổng và nền tảng khác của SFN</small></span><strong>›</strong></summary><div class="ecosystem-links">${portals()}</div></details>
+          <div class="login-footer"><div><a href="/support.html">Trung tâm hỗ trợ</a><a href="/contact.html">Thông tin liên hệ</a><a href="/privacy.html">Chính sách bảo mật</a><a href="/terms.html">Điều khoản sử dụng</a></div><p>© 2026 Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First (SFN)</p></div>
         </div>
+        <div class="login-signature"><span>Sky First</span><b>MORE PEOPLE<br>BRIGHTER TOMORROWS</b></div>
       </section>
     </div>`;
 
-  $('#togglePassword').onclick=()=>{const i=$('#loginPassword');const show=i.type==='password';i.type=show?'text':'password';$('#togglePassword').textContent=show?'Ẩn':'Hiện'};
-  $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang kiểm tra tài khoản...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});msg.textContent='Đăng nhập thành công...';await boot()}catch(err){const code=err?.data?.error||err?.error||err?.message||'UNKNOWN_ERROR';if(code==='INVALID_LOGIN')msg.textContent='Tên đăng nhập hoặc mật khẩu không đúng.';else if(code==='ACCOUNT_LOCKED')msg.textContent='Tài khoản đang bị khóa.';else if(code==='ACCOUNT_SUSPENDED')msg.textContent='Tài khoản đang bị tạm ngưng.';else msg.textContent='Không thể đăng nhập lúc này. Vui lòng thử lại sau.'}};
+  $('#togglePassword').onclick=()=>{const i=$('#loginPassword');i.type=i.type==='password'?'text':'password'};
+  $('#loginForm').onsubmit=async e=>{
+    e.preventDefault();
+    const msg=$('#msg');
+    const b=Object.fromEntries(new FormData(e.target));
+    msg.textContent='Đang xác minh tài khoản…';
+    try{
+      await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});
+      msg.textContent='Đăng nhập thành công.';
+      await boot();
+    }catch(err){
+      const code=err?.data?.error||err?.message||'';
+      if(code==='INVALID_LOGIN') msg.textContent='Tên đăng nhập hoặc mật khẩu không đúng.';
+      else if(code==='ACCOUNT_LOCKED') msg.textContent='Tài khoản đang bị khóa. Vui lòng liên hệ hỗ trợ.';
+      else if(code==='ACCOUNT_SUSPENDED') msg.textContent='Tài khoản đang tạm ngưng. Vui lòng liên hệ hỗ trợ.';
+      else msg.textContent='Chưa thể đăng nhập lúc này. Vui lòng thử lại sau.';
+    }
+  };
   $('#requestAccount').onclick=renderAccountRequest;
-  $('#checkRequest').onclick=()=>{modal('Tra cứu yêu cầu cấp tài khoản',`<form id="statusForm" class="form-grid"><div class="request-note">Nhập mã yêu cầu và email đã đăng ký. Hệ thống chỉ hiển thị thông tin cần thiết cho việc tra cứu.</div><label>Mã yêu cầu<input name="code" required placeholder="SFN-REQ-..."></label><label>Email đã đăng ký<input type="email" name="email" required></label><button class="primary">Tra cứu</button><div id="statusResult"></div></form>`);$('#statusForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const d=await api(`/api/public/account-request/status?code=${encodeURIComponent(f.get('code'))}&email=${encodeURIComponent(f.get('email'))}`);$('#statusResult').innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <b>${statusVi(d.request.status)}</b>${d.request.admin_note?`<br>Phản hồi: ${esc(d.request.admin_note)}`:''}</div>`}catch{$('#statusResult').textContent='Không tìm thấy yêu cầu phù hợp.'}}};
+  $('#checkRequest').onclick=()=>{
+    modal('Tra cứu yêu cầu cấp tài khoản',`<form id="statusForm" class="form-grid"><label>Mã yêu cầu<input name="code" required placeholder="SFN-REQ-..."></label><label>Email đã đăng ký<input type="email" name="email" required></label><button class="primary">Tra cứu</button><div id="statusResult"></div></form>`);
+    $('#statusForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const d=await api(`/api/public/account-request/status?code=${encodeURIComponent(f.get('code'))}&email=${encodeURIComponent(f.get('email'))}`);$('#statusResult').innerHTML=`<div class="request-note"><b>${esc(d.request.full_name)}</b><br>Trạng thái: <b>${statusVi(d.request.status)}</b>${d.request.admin_note?`<br>Phản hồi: ${esc(d.request.admin_note)}`:''}</div>`}catch{$('#statusResult').textContent='Không tìm thấy yêu cầu phù hợp.'}};
+  };
 }
 
 
@@ -1302,10 +1337,6 @@ function renderApp(){
                     'Hồ sơ của tôi'
                   )}
 
-                  ${navButton('public-profile','Trang công khai')}
-
-                  ${navButton('qr-scanner','Quét QR')}
-
                   ${navButton(
                     'goals',
                     'Mục tiêu & Tiến độ'
@@ -1924,10 +1955,6 @@ async function renderView(){
     if(state.view==='profile'){
       return renderProfile(c);
     }
-
-    if(state.view==='public-profile'){ return renderPublicProfileEditor(c); }
-
-    if(state.view==='qr-scanner'){ return renderQRScanner(c); }
 
     if(state.view==='goals'){
       return renderGoals(c);
@@ -2565,17 +2592,6 @@ function printCardWindow(x,p){
   w.document.close();
 }
 
-async function exportCardPng(x,p){
-  const canvas=document.createElement('canvas');canvas.width=1016;canvas.height=638;const ctx=canvas.getContext('2d');
-  const g=ctx.createLinearGradient(0,0,1016,638);g.addColorStop(0,'#071426');g.addColorStop(.55,'#0876e8');g.addColorStop(1,'#16bff2');ctx.fillStyle=g;ctx.fillRect(0,0,1016,638);
-  ctx.strokeStyle='rgba(255,255,255,.18)';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(850,520,260,130,-.4,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.ellipse(850,520,340,180,-.4,0,Math.PI*2);ctx.stroke();
-  ctx.fillStyle='#fff';ctx.font='700 20px Arial';ctx.fillText('SKY FIRST NETWORK · MEMBER IDENTITY',55,62);ctx.font='800 34px Arial';ctx.fillText(String(x.card_type_name||'THẺ THÀNH VIÊN').toUpperCase(),55,120);
-  const load=src=>new Promise(resolve=>{if(!src)return resolve(null);const i=new Image();i.crossOrigin='anonymous';i.onload=()=>resolve(i);i.onerror=()=>resolve(null);i.src=src});
-  const [photo,qr]=await Promise.all([load(p.avatar_url||'/sfn-logo.png'),load(cardQrSrc(x,260))]);if(photo){ctx.save();ctx.beginPath();ctx.roundRect(55,165,215,270,24);ctx.clip();ctx.drawImage(photo,55,165,215,270);ctx.restore()}
-  ctx.fillStyle='#fff';ctx.font='800 30px Arial';ctx.fillText(String(p.display_name||p.full_name||'').slice(0,34),310,205);ctx.font='20px Arial';ctx.fillStyle='rgba(255,255,255,.9)';const rows=[p.member_code,x.card_number,x.org_name||'Sky First Network',x.title_on_card||'',`${x.issued_at||'—'} → ${x.expires_at||'Không thời hạn'}`].filter(Boolean);rows.forEach((v,i)=>ctx.fillText(String(v).slice(0,48),310,252+i*38));if(qr){ctx.fillStyle='#fff';ctx.roundRect(775,170,180,180,18);ctx.fill();ctx.drawImage(qr,790,185,150,150)}ctx.fillStyle='#fff';ctx.font='800 20px Arial';ctx.fillText(statusVi(x.status).toUpperCase(),55,530);ctx.font='14px Arial';ctx.fillStyle='rgba(255,255,255,.78)';ctx.fillText('Quét QR để xác minh trạng thái hiện tại của thẻ.',55,572);const a=document.createElement('a');a.download='Sky-First-Member-Card-'+String(x.card_number||p.member_code||'member').replace(/[^a-z0-9-]/gi,'_')+'.png';a.href=canvas.toDataURL('image/png');a.click();
-}
-
-
 function renderCards(c){
   c.innerHTML=`<div class="section-title"><h1>Thẻ của tôi</h1></div><div class="notice">Ảnh trên thẻ, bản in/PDF và trang xác minh lấy từ ảnh hồ sơ thành viên hiện tại. QR của mỗi thẻ dẫn tới đúng bản ghi xác minh công khai.</div><div id="cardsBox" class="card">Đang tải...</div>`;
   api('/api/me/cards').then(d=>{
@@ -2593,11 +2609,10 @@ function renderCards(c){
         <div class="small">Hiệu lực: ${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</div>
         <img src="${esc(cardQrSrc(x,170))}" alt="QR xác minh" style="position:absolute;right:22px;top:88px;width:92px;height:92px;background:#fff;padding:4px;border-radius:8px">
         <div class="card-status">${statusVi(x.status)}</div>
-        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||x.card_number)}">Xác minh</button><button data-card-print="${esc(x.id)}">In / Xuất PDF</button><button data-card-png="${esc(x.id)}">Xuất PNG</button></div>
+        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||x.card_number)}">Xác minh</button><button data-card-print="${esc(x.id)}">In / Xuất PDF</button></div>
       </div>`).join(''):'<div class="empty">Chưa có thẻ điện tử.</div>'}</div>`;
     $$('[data-card-verify]').forEach(b=>b.onclick=()=>window.open('/verify?code='+encodeURIComponent(b.dataset.cardVerify),'_blank'));
     $$('[data-card-print]').forEach(b=>b.onclick=()=>{const x=d.items.find(v=>v.id===b.dataset.cardPrint);if(x)printCardWindow(x,p)});
-    $$('[data-card-png]').forEach(b=>b.onclick=()=>{const x=d.items.find(v=>v.id===b.dataset.cardPng);if(x)exportCardPng(x,p)});
   }).catch(err=>{$('#cardsBox').textContent='Không thể tải thẻ: '+(err.data?.message||err.data?.error||err.message)});
 }
 
@@ -2818,16 +2833,6 @@ async function renderList(
 }
 
 
-async function renderPublicProfileEditor(c){
-  c.innerHTML='<div class="section-title"><div><h1>Trang công khai</h1><p class="muted">Bạn quyết định nội dung nào được xuất hiện bên ngoài Cổng Thành viên.</p></div></div><div class="card">Đang tải…</div>';
-  try{const d=await api('/api/me/public-profile');const p=d.profile||{};c.innerHTML=`<div class="section-title"><div><h1>Trang công khai</h1><p class="muted">Hồ sơ số để giới thiệu hành trình của bạn mà không công khai dữ liệu nhạy cảm.</p></div>${p.enabled?`<button id="openPublic" class="secondary">Xem trang đã xuất bản</button>`:''}</div><div class="public-builder"><form id="publicProfileForm" class="card form-grid"><label class="toggle-row"><span><b>Xuất bản hồ sơ</b><small>Cho phép người có đường dẫn xem trang công khai.</small></span><input type="checkbox" name="enabled" ${p.enabled?'checked':''}></label><label>Đường dẫn cá nhân<div class="slug-field"><span>/u/</span><input name="slug" required minlength="3" value="${esc(p.slug||'')}"></div></label><label>Tiêu đề ngắn<input name="headline" maxlength="180" value="${esc(p.headline||'')}"></label><label>Giới thiệu<textarea name="bio" rows="6" maxlength="1600">${esc(p.bio||'')}</textarea></label><label>Phong cách<select name="theme"><option value="sky" ${p.theme==='sky'?'selected':''}>Sky Identity</option><option value="midnight" ${p.theme==='midnight'?'selected':''}>Midnight Network</option><option value="minimal" ${p.theme==='minimal'?'selected':''}>Minimal</option></select></label><div class="privacy-grid"><label><input type="checkbox" name="show_memberships" ${p.show_memberships?'checked':''}> Quá trình tham gia</label><label><input type="checkbox" name="show_activities" ${p.show_activities?'checked':''}> Hoạt động</label><label><input type="checkbox" name="show_certificates" ${p.show_certificates?'checked':''}> Chứng nhận</label><label><input type="checkbox" name="show_achievements" ${p.show_achievements?'checked':''}> Thành tích</label><label><input type="checkbox" name="show_email" ${p.show_email?'checked':''}> Email</label><label><input type="checkbox" name="show_phone" ${p.show_phone?'checked':''}> Số điện thoại</label></div><div class="privacy-warning"><b>Luôn riêng tư:</b> CCCD, địa chỉ, ngày sinh, giấy tờ tải lên và dữ liệu quản trị không được đưa vào trang công khai.</div><button class="primary">Lưu & cập nhật trang</button><div id="publicProfileMsg" class="muted"></div></form><aside class="card public-builder-preview"><div class="eyebrow">SKY FIRST MEMBER IDENTITY</div>${avatar(state.me.person,'avatar large')}<h2>${esc(state.me.person.display_name||state.me.person.full_name)}</h2><p>${esc(p.headline||'Hành trình của tôi tại Sky First Network')}</p><div class="identity-pills"><span>Hồ sơ số</span><span>Vai trò</span><span>Hoạt động</span><span>Ghi nhận</span></div><small>${esc(d.url||'')}</small></aside></div>`;$('#openPublic')?.addEventListener('click',()=>window.open(d.url,'_blank'));$('#publicProfileForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),b=Object.fromEntries(fd);for(const k of ['enabled','show_email','show_phone','show_memberships','show_activities','show_certificates','show_achievements'])b[k]=fd.has(k);const m=$('#publicProfileMsg');m.textContent='Đang lưu…';try{const r=await api('/api/me/public-profile',{method:'PATCH',body:JSON.stringify(b)});m.innerHTML=`Đã cập nhật. <a href="${esc(r.url)}" target="_blank">Mở trang công khai</a>`}catch{m.textContent='Không thể lưu lúc này. Vui lòng kiểm tra đường dẫn và thử lại.'}}}catch{c.innerHTML='<h1>Trang công khai</h1><div class="card empty">Chưa thể mở trình chỉnh sửa lúc này.</div>'}
-}
-
-async function renderQRScanner(c){
-  c.innerHTML=`<div class="section-title"><div><h1>Quét QR</h1><p class="muted">Quét QR trên thẻ thành viên hoặc mã xác minh Sky First.</p></div></div><div class="qr-center"><div class="card qr-scanner-card"><video id="qrVideo" playsinline muted></video><div class="qr-scan-frame"></div><div class="toolbar"><button id="startQr" class="primary">Mở camera</button><button id="stopQr" class="secondary">Dừng</button></div><p id="qrMsg" class="muted">Camera chỉ được dùng trên thiết bị của bạn để đọc mã QR.</p></div><div class="card"><h2>Nhập mã thủ công</h2><form id="manualVerify" class="form-grid"><label>Mã thẻ / mã xác minh<input name="code" required autocomplete="off"></label><button class="primary">Xác minh</button></form></div></div>`;
-  let stream=null,timer=null;const video=$('#qrVideo'),msg=$('#qrMsg');const stop=()=>{if(timer)clearInterval(timer);timer=null;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null};const openCode=code=>{stop();location.href='/verify?code='+encodeURIComponent(code)};$('#manualVerify').onsubmit=e=>{e.preventDefault();openCode(new FormData(e.target).get('code'))};$('#stopQr').onclick=stop;$('#startQr').onclick=async()=>{if(!('BarcodeDetector'in window)){msg.textContent='Trình duyệt này chưa hỗ trợ quét QR trực tiếp. Bạn vẫn có thể nhập mã thủ công.';return}try{const detector=new BarcodeDetector({formats:['qr_code']});stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});video.srcObject=stream;await video.play();msg.textContent='Đưa QR vào giữa khung hình…';timer=setInterval(async()=>{try{const codes=await detector.detect(video);if(codes[0]?.rawValue){let v=codes[0].rawValue;try{const u=new URL(v);const code=u.searchParams.get('code');if(code)return openCode(code)}catch{}openCode(v)}}catch{}},500)}catch{msg.textContent='Không thể mở camera. Hãy cấp quyền camera hoặc nhập mã thủ công.'}};
-}
-
 async function renderCV(c){
 
   try{
@@ -2863,14 +2868,19 @@ async function renderCV(c){
         </p>
       </div>
 
-      <div class="cv-controls"><select id="cvTheme"><option value="sky">Sky Identity</option><option value="minimal">Tối giản</option><option value="midnight">Midnight</option></select><button id="printCV" class="primary">In / Lưu PDF</button><button id="cvPng" class="secondary">Xuất ảnh PNG</button></div>
+      <button
+        id="printCV"
+        class="primary"
+      >
+        In / Lưu PDF
+      </button>
 
     </div>
 
 
     <div
       id="cvSheet"
-      class="card cv-export-sheet cv-theme-sky"
+      class="card"
     >
 
       <div class="profile-head">
@@ -3056,14 +3066,14 @@ async function renderCV(c){
   `;
 
 
-  $('#printCV').onclick=()=>window.print();
-  $('#cvTheme').onchange=e=>{$('#cvSheet').className='card cv-export-sheet cv-theme-'+e.target.value};
-  $('#cvPng').onclick=async()=>{
-    const sheet=$('#cvSheet'),w=1240,h=Math.max(1754,sheet.scrollHeight*1.15),canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,h);ctx.fillStyle='#0879e8';ctx.fillRect(0,0,w,190);ctx.fillStyle='#ffffff';ctx.font='700 22px Arial';ctx.fillText('SKY FIRST NETWORK · MEMBER IDENTITY',70,62);ctx.font='800 44px Arial';ctx.fillText((p.display_name||p.full_name||'THÀNH VIÊN').slice(0,38),70,125);ctx.fillStyle='#12345b';ctx.font='700 22px Arial';ctx.fillText('HỒ SƠ NĂNG LỰC THÀNH VIÊN',70,245);ctx.font='18px Arial';let y=295;const lines=[['Mã thành viên',p.member_code],['Email',p.email],['Đơn vị học tập/công tác',p.school_or_workplace],['Lớp / ngành / vị trí',p.class_or_major]];for(const [a,b] of lines){ctx.fillStyle='#6b8298';ctx.fillText(a,70,y);ctx.fillStyle='#173c64';ctx.font='700 18px Arial';ctx.fillText(String(b||'—').slice(0,75),330,y);ctx.font='18px Arial';y+=42}const section=(title,arr,fn)=>{y+=24;ctx.fillStyle='#0879e8';ctx.font='800 20px Arial';ctx.fillText(title.toUpperCase(),70,y);y+=34;ctx.font='17px Arial';for(const x of arr.slice(0,12)){const t=fn(x);ctx.fillStyle='#173c64';ctx.fillText('• '+String(t).slice(0,100),86,y);y+=31;if(y>h-100)break}};section('Hành trình Sky First',memberships,x=>(x.title||x.role_label||'Thành viên')+' · '+(x.org_name||'SFN'));section('Hoạt động',activities,x=>x.name+' · '+(x.role_label||'Thành viên'));section('Chứng nhận',certificates,x=>x.title+' · '+(x.issuer||'SFN'));section('Thành tích & ghi nhận',achievements,x=>x.title+' · '+(x.issuer||'SFN'));ctx.fillStyle='#7890a7';ctx.font='14px Arial';ctx.fillText('Hồ sơ được tạo từ Cổng Thành viên Sky First Network · Không bao gồm CCCD/địa chỉ.',70,h-55);const a=document.createElement('a');a.download='Sky-First-CV-'+String(p.member_code||'member').replace(/[^a-z0-9-]/gi,'_')+'.png';a.href=canvas.toDataURL('image/png');a.click();
+  $('#printCV').onclick=()=>{
+
+    window.print();
+
   };
   }catch(err){
     console.error('CV_LOAD_ERROR',err);
-    c.innerHTML=`<h1>CV / Hồ sơ năng lực</h1><div class="card"><b>Không thể tải CV.</b><p class="muted">Không thể tải dữ liệu lúc này. Vui lòng thử lại.</p><button class="secondary" onclick="location.reload()">Tải lại</button></div>`;
+    c.innerHTML=`<h1>CV / Hồ sơ năng lực</h1><div class="card"><b>Không thể tải CV.</b><p class="muted">${esc(err.data?.error||err.message)}</p><button class="secondary" onclick="location.reload()">Tải lại</button></div>`;
   }
 }
 function renderSupport(c){
@@ -3128,7 +3138,7 @@ function renderSupport(c){
         <p>
           <b>Email hỗ trợ:</b>
           <a href="mailto:support@skyfirst.io.vn">
-            hotro.sfn@gmail.com
+            support@skyfirst.io.vn
           </a>
         </p>
 

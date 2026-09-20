@@ -71,24 +71,19 @@ const clearCookie=n=>
   `${n}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 
 
-const htmlEsc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function requestEmailHtml({name,code,status='Đã gửi',time}){
-  const n=htmlEsc(name),c=htmlEsc(code),st=htmlEsc(status),tm=htmlEsc(time||new Date().toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}));
-  return `<!doctype html><html><body style="margin:0;background:#eef8ff;font-family:Arial,Helvetica,sans-serif;color:#12345b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef8ff"><tr><td align="center" style="padding:30px 12px"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:680px;width:100%;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 18px 55px rgba(10,83,150,.14)"><tr><td style="padding:32px 38px 27px;background:linear-gradient(135deg,#0879e8,#18bdf2 58%,#0756c9);color:#fff"><div style="font-size:11px;letter-spacing:3px;font-weight:700">SKY FIRST NETWORK · MEMBER PORTAL</div><div style="font-size:29px;font-weight:800;margin-top:10px">CỔNG THÀNH VIÊN</div><div style="margin-top:8px;font-size:14px">Một danh tính · Một hành trình · Một hồ sơ Sky First.</div><div style="height:1px;background:rgba(255,255,255,.35);margin-top:24px"></div></td></tr><tr><td style="padding:34px 38px"><div style="display:inline-block;background:#e9f7ff;border:1px solid #b9e7ff;border-radius:999px;padding:8px 13px;font-size:12px;font-weight:700;color:#0866c5">● ${st}</div><h1 style="font-size:25px;line-height:1.3;color:#0c2d57;margin:18px 0 0">Sky First đã tiếp nhận yêu cầu của bạn.</h1><p style="font-size:15px;line-height:1.75;color:#45627f">Xin chào <b>${n}</b>, yêu cầu cấp tài khoản Cổng Thành viên Sky First Network của bạn đã được hệ thống ghi nhận. Bộ phận Nhân sự sẽ tiếp nhận và cập nhật trạng thái trong quá trình xử lý.</p><div style="margin-top:23px;background:#f5faff;border:1px solid #d9ebfb;border-radius:18px;padding:22px 24px"><div style="font-size:11px;color:#6b85a1;letter-spacing:1.6px;font-weight:700">MÃ YÊU CẦU</div><div style="font-size:22px;color:#086bd8;font-weight:800;margin-top:5px">${c}</div><div style="font-size:13px;color:#71869c;margin-top:16px">Thời gian gửi: <b style="color:#173c64">${tm}</b></div></div><div style="text-align:center;margin:25px 0"><a href="https://member.skyfirst.io.vn/" style="display:inline-block;background:#0879e8;color:#fff;text-decoration:none;font-size:14px;font-weight:800;padding:14px 28px;border-radius:12px">TRA CỨU YÊU CẦU →</a></div><div style="padding:16px 18px;border-left:4px solid #16baf0;background:#f3fbff;border-radius:0 12px 12px 0;font-size:13px;line-height:1.65;color:#526e89"><b style="color:#173c64">Bảo vệ thông tin của bạn</b><br>Email này không hiển thị số CCCD, ảnh giấy tờ hoặc dữ liệu hồ sơ nhạy cảm.</div><p style="font-size:13px;line-height:1.7;color:#607b96;margin-top:24px">Đây là email tự động, vui lòng không phản hồi. Nếu cần hỗ trợ, liên hệ <b>support@skyfirst.io.vn</b>.</p></td></tr><tr><td style="padding:24px 38px 30px;border-top:1px solid #e2edf7"><b style="color:#0b4386">SKY FIRST NETWORK</b><div style="font-size:11px;letter-spacing:1.4px;color:#168edc;margin-top:4px">MEMBER IDENTITY · MEMBER PORTAL</div><div style="font-size:11px;color:#7890a7;margin-top:10px">Email tự động từ nhansu@skyfirst.io.vn · Vui lòng không phản hồi.</div></td></tr></table></td></tr></table></body></html>`;
+const htmlEsc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function memberRequestEmail({name,code,status='Đã gửi'}){
+  const n=htmlEsc(name),c=htmlEsc(code),st=htmlEsc(status);
+  return `<!doctype html><html><body style="margin:0;background:#eef7ff;font-family:Arial,Helvetica,sans-serif;color:#12345b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef7ff"><tr><td align="center" style="padding:32px 14px"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 16px 48px rgba(15,74,135,.14)"><tr><td style="padding:32px 38px;background:linear-gradient(135deg,#0879e8,#18bdf2 55%,#0756c9);color:#fff"><div style="font-size:11px;letter-spacing:3px;font-weight:700">SKY FIRST NETWORK · MEMBER PORTAL</div><div style="font-size:29px;font-weight:800;margin-top:10px">CỔNG THÀNH VIÊN</div><div style="font-size:14px;margin-top:7px">Một danh tính · Một hành trình · Một hồ sơ Sky First.</div></td></tr><tr><td style="padding:34px 38px"><div style="display:inline-block;background:#e9f7ff;border:1px solid #b9e7ff;border-radius:999px;padding:8px 13px;font-size:12px;font-weight:700;color:#0866c5">● ${st}</div><h1 style="font-size:25px;color:#0c2d57;margin:22px 0 12px">Sky First đã tiếp nhận yêu cầu của bạn.</h1><p style="font-size:15px;line-height:1.75;color:#45627f">Xin chào <strong>${n}</strong>, yêu cầu cấp tài khoản Cổng Thành viên đã được hệ thống ghi nhận. Bộ phận Nhân sự sẽ tiếp nhận và cập nhật trạng thái trong quá trình xử lý.</p><div style="margin-top:24px;background:#f5faff;border:1px solid #d9ebfb;border-radius:18px;padding:22px 24px"><div style="font-size:11px;color:#6b85a1;letter-spacing:1.6px;font-weight:700">MÃ YÊU CẦU</div><div style="font-size:22px;color:#086bd8;font-weight:800;margin-top:5px">${c}</div></div><div style="text-align:center;margin-top:25px"><a href="https://member.skyfirst.io.vn/" style="display:inline-block;background:#0879e8;color:#fff;text-decoration:none;font-size:14px;font-weight:800;padding:14px 28px;border-radius:12px">TRA CỨU YÊU CẦU →</a></div><div style="margin-top:27px;padding:17px 19px;border-left:4px solid #16baf0;background:#f3fbff;font-size:13px;line-height:1.65;color:#526e89"><strong style="color:#173c64">Bảo vệ thông tin của bạn</strong><br>Email này không hiển thị số CCCD, ảnh giấy tờ hoặc dữ liệu hồ sơ nhạy cảm.</div><p style="margin-top:24px;font-size:13px;line-height:1.7;color:#607b96">Đây là email tự động, vui lòng không phản hồi. Hỗ trợ: <strong>support@skyfirst.io.vn</strong>.</p></td></tr><tr><td style="padding:22px 38px;background:#f8fbff;font-size:11px;color:#7890a7">© 2026 Mạng lưới Giáo dục &amp; Phát triển Cộng đồng Sky First (SFN)</td></tr></table></td></tr></table></body></html>`;
 }
-async function sendMemberMail(env,{to,subject,html,replyTo}){
-  if(!env.RESEND_API_KEY)return {ok:false,skipped:true,reason:'EMAIL_PROVIDER_NOT_CONFIGURED'};
-  const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:env.MEMBER_MAIL_FROM||'Sky First Member Portal <nhansu@skyfirst.io.vn>',to:Array.isArray(to)?to:[to],subject,html,reply_to:replyTo||env.MEMBER_SUPPORT_EMAIL||'support@skyfirst.io.vn'})});
-  if(!r.ok)return {ok:false,status:r.status};
-  return {ok:true};
+
+async function sendMemberEmail(env,{to,subject,html,replyTo}){
+  if(!env.RESEND_API_KEY) return {ok:false,skipped:true};
+  const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:'Sky First Member <nhansu@skyfirst.io.vn>',to:Array.isArray(to)?to:[to],subject,html,reply_to:replyTo||'support@skyfirst.io.vn'})});
+  return {ok:r.ok,status:r.status};
 }
-async function sendAccountRequestNotifications(env,data){
-  const html=requestEmailHtml(data);
-  const user=await sendMemberMail(env,{to:data.email,subject:`[Sky First Member] Đã tiếp nhận yêu cầu ${data.code}`,html});
-  const hrHtml=`<div style="font-family:Arial,sans-serif;line-height:1.65;color:#173c64"><h2>Yêu cầu cấp tài khoản mới</h2><p><b>Mã:</b> ${htmlEsc(data.code)}</p><p><b>Họ tên:</b> ${htmlEsc(data.name)}</p><p><b>Email:</b> ${htmlEsc(data.email)}</p><p>Vui lòng đăng nhập Cổng Thành viên để tiếp nhận và xử lý. Email thông báo không chứa CCCD hoặc dữ liệu giấy tờ nhạy cảm.</p><p><a href="https://member.skyfirst.io.vn/">Mở Cổng Thành viên</a></p></div>`;
-  const hr=await sendMemberMail(env,{to:env.MEMBER_HR_INBOX||'nhansu.sfn@gmail.com',subject:`[Member Portal] Yêu cầu mới ${data.code}`,html:hrHtml});
-  return {user,hr};
-}
+
 
 async function ensureAccountRequestProfiles(env){
   await env.DB.prepare(`
@@ -966,25 +961,16 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     )
   ]);
 
-  let email_delivery={ok:false,skipped:true};
-  try{
-    email_delivery=await sendAccountRequestNotifications(env,{
-      name:clean(b.full_name,160),email,code,status:'Đã gửi'
-    });
-  }catch{
-    email_delivery={ok:false};
-  }
+  const mailHtml=memberRequestEmail({name:clean(b.full_name,160),code,status:'Đã gửi'});
+  await Promise.allSettled([
+    sendMemberEmail(env,{to:email,subject:`[Sky First Member] Đã tiếp nhận yêu cầu ${code}`,html:mailHtml}),
+    sendMemberEmail(env,{to:'nhansu.sfn@gmail.com',subject:`[Yêu cầu tài khoản] ${code} · ${clean(b.full_name,160)}`,replyTo:email,html:`<div style="font-family:Arial,sans-serif;line-height:1.65;color:#173c64"><h2>Yêu cầu cấp tài khoản mới</h2><p><b>Mã:</b> ${htmlEsc(code)}</p><p><b>Họ tên:</b> ${htmlEsc(clean(b.full_name,160))}</p><p><b>Email:</b> ${htmlEsc(email)}</p><p><b>Số điện thoại:</b> ${htmlEsc(clean(b.phone,50))}</p><p>Vui lòng xử lý trong Cổng Thành viên. Email này không chứa CCCD hoặc ảnh giấy tờ.</p></div>`})
+  ]);
 
   return json({
     ok:true,
     request_code:code,
-    email_delivery,
-    message:
-      'Yêu cầu đã được ghi nhận. '+
-      'SFN dự kiến xử lý trong 60 phút đến 48 giờ, '+
-      'có thể thay đổi tùy số lượng yêu cầu và quá trình xác minh. '+
-      'Vui lòng thường xuyên kiểm tra email và lưu mã yêu cầu '+
-      'để tra cứu trạng thái.'
+    message:'Yêu cầu đã được ghi nhận. SFN dự kiến xử lý trong 60 phút đến 48 giờ; thời gian có thể thay đổi tùy quá trình xác minh. Vui lòng kiểm tra email và lưu mã yêu cầu để tra cứu trạng thái.'
   });
 }
 
@@ -1024,24 +1010,6 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     return r
       ?json({request:r})
       :json({error:'NOT_FOUND'},404);
-  }
-
-  // =========================================================
-  // PUBLIC MEMBER PROFILE — privacy controlled
-  // =========================================================
-  if(url.pathname==='/api/public/member-profile'&&req.method==='GET'){
-    const slug=clean(url.searchParams.get('slug'),80).toLowerCase();
-    if(!slug)return json({error:'SLUG_REQUIRED'},400);
-    const profile=await env.DB.prepare(`SELECT pp.*,p.full_name,p.display_name,p.member_code,p.avatar_url,p.email,p.phone FROM public_profiles pp JOIN people p ON p.id=pp.person_id WHERE pp.slug=? AND pp.enabled=1 LIMIT 1`).bind(slug).first();
-    if(!profile)return json({error:'NOT_FOUND'},404);
-    const out={slug:profile.slug,headline:profile.headline,bio:profile.bio,theme:profile.theme,full_name:profile.display_name||profile.full_name,member_code:profile.member_code,avatar_url:profile.avatar_url,email:profile.show_email?profile.email:null,phone:profile.show_phone?profile.phone:null};
-    const jobs=[];
-    if(profile.show_memberships)jobs.push(env.DB.prepare(`SELECT m.title,m.role_label,m.started_at,m.ended_at,o.name org_name FROM org_memberships m JOIN org_nodes o ON o.id=m.org_node_id WHERE m.person_id=? AND COALESCE(m.status,'active') NOT IN ('hidden','suspended') ORDER BY COALESCE(m.started_at,m.created_at) DESC`).bind(profile.person_id).all()); else jobs.push(Promise.resolve({results:[]}));
-    if(profile.show_activities)jobs.push(env.DB.prepare(`SELECT a.name,a.starts_at,ap.role_label,ap.result FROM activity_participants ap JOIN activities a ON a.id=ap.activity_id WHERE ap.person_id=? AND COALESCE(ap.verification_status,'confirmed')!='hidden' ORDER BY COALESCE(a.starts_at,a.created_at) DESC LIMIT 30`).bind(profile.person_id).all()); else jobs.push(Promise.resolve({results:[]}));
-    if(profile.show_certificates)jobs.push(env.DB.prepare(`SELECT title,issuer,issued_at,certificate_no,verify_code FROM certificates WHERE person_id=? AND COALESCE(verification_status,'verified')!='hidden' ORDER BY COALESCE(issued_at,created_at) DESC LIMIT 30`).bind(profile.person_id).all()); else jobs.push(Promise.resolve({results:[]}));
-    if(profile.show_achievements)jobs.push(env.DB.prepare(`SELECT title,issuer,achieved_at,description FROM achievements WHERE person_id=? AND COALESCE(verification_status,'verified')!='hidden' ORDER BY COALESCE(achieved_at,created_at) DESC LIMIT 30`).bind(profile.person_id).all()); else jobs.push(Promise.resolve({results:[]}));
-    const [memberships,activities,certificates,achievements]=await Promise.all(jobs);
-    return json({profile:out,memberships:memberships.results||[],activities:activities.results||[],certificates:certificates.results||[],achievements:achievements.results||[]});
   }
 
   // =========================================================
@@ -1211,29 +1179,6 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(/unique/i.test(msg)&&/email/i.test(msg))return json({error:'EMAIL_ALREADY_USED',message:'Email này đã được sử dụng.'},409);
       return json({error:'PROFILE_UPDATE_FAILED',detail:msg},500);
     }
-  }
-
-  if(url.pathname==='/api/me/public-profile'&&req.method==='GET'){
-    let p=await env.DB.prepare(`SELECT * FROM public_profiles WHERE person_id=?`).bind(s.person_id).first();
-    if(!p){
-      const person=await env.DB.prepare(`SELECT member_code FROM people WHERE id=?`).bind(s.person_id).first();
-      const base=clean(person?.member_code||s.person_id,60).toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-|-$/g,'')||('member-'+s.person_id.slice(-8));
-      await env.DB.prepare(`INSERT OR IGNORE INTO public_profiles(person_id,slug) VALUES(?,?)`).bind(s.person_id,base).run();
-      p=await env.DB.prepare(`SELECT * FROM public_profiles WHERE person_id=?`).bind(s.person_id).first();
-    }
-    return json({profile:p,url:`${url.origin}/u/${encodeURIComponent(p.slug)}`});
-  }
-
-  if(url.pathname==='/api/me/public-profile'&&req.method==='PATCH'){
-    const b=await bodyJson(req);
-    const slug=clean(b.slug,80).toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-|-$/g,'');
-    if(slug.length<3)return json({error:'SLUG_INVALID',message:'Đường dẫn công khai cần ít nhất 3 ký tự.'},400);
-    const bool=k=>b[k]?1:0;
-    try{
-      await env.DB.prepare(`INSERT INTO public_profiles(person_id,slug,enabled,headline,bio,theme,show_email,show_phone,show_memberships,show_activities,show_certificates,show_achievements,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(person_id) DO UPDATE SET slug=excluded.slug,enabled=excluded.enabled,headline=excluded.headline,bio=excluded.bio,theme=excluded.theme,show_email=excluded.show_email,show_phone=excluded.show_phone,show_memberships=excluded.show_memberships,show_activities=excluded.show_activities,show_certificates=excluded.show_certificates,show_achievements=excluded.show_achievements,updated_at=CURRENT_TIMESTAMP`).bind(s.person_id,slug,bool('enabled'),clean(b.headline,180),clean(b.bio,1600),['sky','midnight','minimal'].includes(b.theme)?b.theme:'sky',bool('show_email'),bool('show_phone'),bool('show_memberships'),bool('show_activities'),bool('show_certificates'),bool('show_achievements')).run();
-      await audit(env,s.account_id,'public_profile_updated','person',s.person_id,null,{slug,enabled:bool('enabled')});
-      return json({ok:true,url:`${url.origin}/u/${encodeURIComponent(slug)}`});
-    }catch(e){return json({error:'SLUG_ALREADY_USED',message:'Đường dẫn này đã được sử dụng.'},409)}
   }
 
   if(url.pathname==='/api/me/password'&&req.method==='POST'){
@@ -4479,11 +4424,6 @@ export default{
           }
         )
       );
-    }
-
-    if(url.pathname.startsWith('/u/')){
-      const u=new URL(request.url);u.pathname='/public-profile.html';
-      return env.ASSETS.fetch(new Request(u.toString(),{method:'GET',headers:request.headers}));
     }
 
     if(url.pathname==='/verify'){

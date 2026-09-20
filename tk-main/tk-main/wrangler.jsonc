@@ -30,9 +30,6 @@
 
   "vars": {
     "APP_NAME": "CỔNG THÀNH VIÊN SKY FIRST NETWORK",
-    "APP_URL": "https://member.skyfirst.io.vn",
-    "MEMBER_MAIL_FROM": "Sky First Member Portal <nhansu@skyfirst.io.vn>",
-    "MEMBER_HR_INBOX": "nhansu.sfn@gmail.com",
-    "MEMBER_SUPPORT_EMAIL": "support@skyfirst.io.vn"
+    "APP_URL": "https://member.skyfirst.io.vn"
   }
 }

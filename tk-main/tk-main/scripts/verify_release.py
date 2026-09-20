@@ -105,7 +105,7 @@ for name,marker in v4_front_checks.items():
     else: fail(name,'marker missing')
 
 index=(ROOT/'public/index.html').read_text()
-if 'v=20260910-member-polish' in index: ok('cache busting current release')
+if 'v=20260920-member-v5-rebuild' in index: ok('cache busting current release')
 else: fail('cache busting','index does not force current release assets')
 
 verify=(ROOT/'public/verify.html').read_text()
