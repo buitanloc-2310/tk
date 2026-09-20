@@ -1,5 +1,7 @@
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
+const setHTML=(sel,html)=>{const el=typeof sel==='string'?$(sel):sel;if(el)el.innerHTML=html;return el};
+const setText=(sel,text)=>{const el=typeof sel==='string'?$(sel):sel;if(el)el.textContent=text;return el};
 
 const esc=s=>String(s??'').replace(
   /[&<>"']/g,
@@ -52,7 +54,8 @@ const state={
   dashboard:null,
   view:'home',
   adminMember:null,
-  adminMeta:null
+  adminMeta:null,
+  activeOrg:'all'
 };
 
 const initials=n=>(
@@ -206,7 +209,7 @@ function renderLogin(){
     </main>`;
 
   const showStatus=()=>modal('Tra cứu đăng ký',`<form id="statusForm" class="form-grid"><label>Mã đăng ký<input name="code" required placeholder="SFN-MEMBER-REQ-..."></label><label>Email đã đăng ký<input type="email" name="email" required></label><button class="primary">TRA CỨU</button><div id="statusResult"></div></form>`);
-  const bindStatus=()=>{const f=$('#statusForm'); if(!f)return; f.onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target);try{const d=await api('/api/public/account-request/status?code='+encodeURIComponent(dta.get('code'))+'&email='+encodeURIComponent(dta.get('email')));$('#statusResult').innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <b>${statusVi(d.request.status)}</b>${d.request.admin_note?`<br>Phản hồi: ${esc(d.request.admin_note)}`:''}</div>`}catch{$('#statusResult').textContent='Không tìm thấy đăng ký phù hợp.'}}};
+  const bindStatus=()=>{const f=$('#statusForm'); if(!f)return; f.onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target);try{const d=await api('/api/public/account-request/status?code='+encodeURIComponent(dta.get('code'))+'&email='+encodeURIComponent(dta.get('email')));setHTML('#statusResult',`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <b>${statusVi(d.request.status)}</b>${d.request.admin_note?`<br>Phản hồi: ${esc(d.request.admin_note)}`:''}</div>`)}catch{setText('#statusResult','Không tìm thấy đăng ký phù hợp.')}}};
   $$('[data-auth-tab]').forEach(b=>b.onclick=()=>{ $$('[data-auth-tab]').forEach(x=>x.classList.toggle('active',x===b)); const reg=b.dataset.authTab==='register'; $('#authLoginPane').hidden=reg; $('#authRegisterPane').hidden=!reg; });
   $('#startRegistration').onclick=renderAccountRequest;
   $('#checkRequest').onclick=()=>{showStatus();bindStatus()};
@@ -986,13 +989,11 @@ async function renderAccountRequest(){
    ========================================================= */
 
 function navButton(id,label){
-
+  const icons={home:'⌂',profile:'◉',directory:'◎',goals:'◇',tasks:'✓',activities:'✦',certificates:'▣',achievements:'★',evaluations:'◈',history:'↺',documents:'▤',cards:'▰',cv:'▧',notifications:'●',calendar:'□',support:'?',
+    'admin-requests':'＋','admin-calendar':'□','admin-members':'◎','admin-org':'⌘','admin-audit':'≡','admin-super':'◆'};
   return `
-    <button
-      data-view="${id}"
-      class="${state.view===id?'active':''}"
-    >
-      ${label}
+    <button data-view="${id}" class="${state.view===id?'active':''}">
+      <span class="nav-icon" aria-hidden="true">${icons[id]||'•'}</span><span>${label}</span>
     </button>
   `;
 }
@@ -1079,6 +1080,8 @@ function renderApp(){
                     'profile',
                     'Hồ sơ của tôi'
                   )}
+
+                  ${navButton('directory','Danh bạ đơn vị')}
 
                   ${navButton(
                     'goals',
@@ -1205,7 +1208,7 @@ function renderApp(){
                       :''
                   }
 
-                  ${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center'):''}
+                  ${state.me?.is_super?navButton('admin-super','Quản trị hệ thống'):''}
 
                 </nav>
               `
@@ -1216,13 +1219,8 @@ function renderApp(){
 
 
         <div class="sidebar-links">
-
-          ${portals()}
-
-          <a href="mailto:support@skyfirst.io.vn">
-            Hỗ trợ: support@skyfirst.io.vn
-          </a>
-
+          <button type="button" id="ecosystemToggle" class="ecosystem-toggle">Hệ sinh thái Sky First <span>↗</span></button>
+          <div id="ecosystemPanel" class="ecosystem-panel" hidden>${portals()}<a href="mailto:support@skyfirst.io.vn">Trung tâm hỗ trợ</a></div>
         </div>
 
 
@@ -1244,22 +1242,9 @@ function renderApp(){
 
         <div class="topbar">
 
-          <div>
-
-            <b>
-              ${esc(p.full_name)}
-            </b>
-
-            <div class="muted">
-
-              ${
-                state.me.is_member
-                  ?esc(p.member_code)
-                  :'TÀI KHOẢN QUẢN TRỊ HỆ THỐNG'
-              }
-
-            </div>
-
+          <div class="topbar-context">
+            <div class="topbar-user"><span class="topbar-kicker">SKY FIRST MEMBER WORKSPACE</span><b>${esc(p.full_name)}</b><div class="muted">${state.me.is_member?esc(p.member_code):'TÀI KHOẢN QUẢN TRỊ HỆ THỐNG'}</div></div>
+            ${state.me.memberships?.length?`<label class="workspace-switch"><span>Không gian</span><select id="workspaceSelect"><option value="all">Tất cả đơn vị của tôi</option>${state.me.memberships.filter(x=>x.status==='active').map(x=>`<option value="${esc(x.org_node_id)}" ${state.activeOrg===x.org_node_id?'selected':''}>${esc(x.org_name)}</option>`).join('')}</select></label>`:''}
           </div>
 
 
@@ -1308,6 +1293,11 @@ function renderApp(){
     }
   );
 
+
+  const eco=$('#ecosystemToggle');
+  if(eco) eco.onclick=()=>{const panel=$('#ecosystemPanel');if(panel)panel.hidden=!panel.hidden};
+  const ws=$('#workspaceSelect');
+  if(ws) ws.onchange=()=>{state.activeOrg=ws.value;renderView()};
 
   $('#logout').onclick=async()=>{
 
@@ -1630,7 +1620,11 @@ async function renderView(){
           </div>
         </div>
 
-        <div class="grid">
+        <section class="dashboard-hero">
+          <div><span class="eyebrow">MEMBER IDENTITY</span><h2>${esc(p.full_name)}</h2><p>${esc((state.me.memberships||[]).filter(x=>x.status==='active').map(x=>x.org_name).join(' · ')||'Sky First Network')}</p></div>
+          <div class="dashboard-hero-actions"><button class="secondary" data-view-jump="profile">Hồ sơ số</button><button class="primary" data-view-jump="directory">Danh bạ đơn vị</button></div>
+        </section>
+        <div class="grid dashboard-stats">
 
           <div class="card">
             <div class="eyebrow">
@@ -1690,13 +1684,17 @@ async function renderView(){
 
         </div>
       `;
-
+      $$('[data-view-jump]').forEach(b=>b.onclick=()=>{state.view=b.dataset.viewJump;renderApp()});
       return;
     }
 
 
     if(state.view==='profile'){
       return renderProfile(c);
+    }
+
+    if(state.view==='directory'){
+      return renderDirectory(c);
     }
 
     if(state.view==='goals'){
@@ -1874,6 +1872,12 @@ async function renderView(){
   }
 }
 
+
+async function renderDirectory(c){
+  c.innerHTML=`<div class="section-title"><div><span class="eyebrow">ĐƠN VỊ CỦA TÔI</span><h1>Danh bạ thành viên</h1><p class="muted">Chỉ hiển thị thành viên có chung đơn vị với bạn hoặc nằm trong phạm vi quyền được cấp.</p></div></div><div class="directory-toolbar"><div class="search-field"><span>⌕</span><input id="directoryQ" placeholder="Tìm theo họ tên hoặc mã thành viên"></div><button id="directorySearch" class="primary">Tìm kiếm</button></div><div id="directoryBox" class="directory-grid"><div class="card empty">Đang tải danh bạ…</div></div>`;
+  const load=async()=>{try{const q=encodeURIComponent($('#directoryQ')?.value||'');const d=await api('/api/directory?q='+q+'&limit=80');const items=d.items||[];setHTML('#directoryBox',items.length?items.map(x=>`<article class="directory-person">${avatar(x,'directory-avatar')}<div><b>${esc(x.display_name||x.full_name)}</b><span>${esc(x.member_code||'')}</span>${x.shared_units?`<small>${esc(x.shared_units)}</small>`:''}</div><span class="presence-dot" title="Thành viên đang hoạt động"></span></article>`).join(''):'<div class="card empty">Không có thành viên phù hợp trong phạm vi đơn vị của bạn.</div>')}catch(e){setHTML('#directoryBox','<div class="card empty">Không thể tải danh bạ lúc này.</div>')}};
+  $('#directorySearch').onclick=load;$('#directoryQ').onkeydown=e=>{if(e.key==='Enter')load()};load();
+}
 
 async function renderGoals(c){
 
@@ -4034,9 +4038,7 @@ async function renderAdminMembers(c){
   c.innerHTML=`
     <div class="section-title">
 
-      <h1>
-        Quản trị thành viên
-      </h1>
+      <div><span class="eyebrow">MEMBER OPERATIONS</span><h1>Quản trị thành viên</h1><p class="muted">Quản lý hồ sơ số, đơn vị, vai trò, tài khoản và toàn bộ vòng đời thành viên trong phạm vi được cấp quyền.</p></div>
 
       <button
         id="newMember"
@@ -4152,8 +4154,6 @@ async function renderAdminMembers(c){
       const membersBox=$('#membersBox');
       if(!membersBox) return;
       membersBox.innerHTML=`
-        <div>
-
           <div class="table-wrap">
 
             <table>
@@ -4324,8 +4324,6 @@ async function renderAdminMembers(c){
             }
 
           </div>
-
-        </div>
       `;
 
 
@@ -4445,9 +4443,7 @@ async function renderAdminMembers(c){
 
     }catch(err){
 
-      const membersBox=$('#membersBox');
-      if(membersBox) membersBox.textContent=
-        'Không có quyền hoặc không thể tải dữ liệu.';
+      setText('#membersBox','Không có quyền hoặc không thể tải dữ liệu.');
     }
   };
 
@@ -4663,7 +4659,15 @@ async function openAdminMember(id){
     modal(
       `Hồ sơ quản trị · ${esc(d.person.full_name)}`,
       `
-      <div class="tabs">
+      <div class="member-workspace-hero">
+        <div class="member-workspace-avatar">${esc((d.person.full_name||'?').trim().charAt(0).toUpperCase())}</div>
+        <div class="member-workspace-identity"><span>HỒ SƠ THÀNH VIÊN</span><h2>${esc(d.person.full_name)}</h2><p>${esc(d.person.member_code||'—')} · ${statusVi(d.person.status)}</p></div>
+        <div class="member-workspace-status"><span class="badge ${d.person.status==='active'?'ok':'off'}">${statusVi(d.person.status)}</span><small>Hồ sơ số tập trung</small></div>
+      </div>
+      <div class="member-workspace-layout">
+      <aside class="member-workspace-nav">
+      <div class="member-workspace-nav-title">HỒ SƠ QUẢN TRỊ</div>
+      <div class="tabs member-tabs">
 
         ${
           [
@@ -4717,11 +4721,16 @@ async function openAdminMember(id){
         }
 
       </div>
-
-
-      <div id="memberTab"></div>
+      </aside>
+      <section class="member-workspace-content">
+        <div id="memberTab"></div>
+      </section>
+      </div>
       `
     );
+    const memberModal=$('#modal');
+    memberModal?.classList.add('member-workspace-backdrop');
+    memberModal?.querySelector('.modal')?.classList.add('member-workspace-modal');
 
 
     $$('[data-mtab]').forEach(
@@ -4776,6 +4785,7 @@ function renderAdminMemberTab(
 
   const box=
     $('#memberTab');
+  if(!box) return;
 
   const p=
     d.person;
