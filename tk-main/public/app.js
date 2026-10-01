@@ -55,6 +55,44 @@ const state={
   adminMeta:null
 };
 
+const VIEW_CATALOG=[
+  ['home','Trang chủ','Tổng quan thành viên'],['profile','Hồ sơ của tôi','Thông tin cá nhân'],['journey','Hành trình của tôi','Dòng thời gian'],
+  ['goals','Mục tiêu & Tiến độ','Mục tiêu'],['tasks','Công việc','Nhiệm vụ'],['activities','Hoạt động','Hoạt động cộng đồng'],
+  ['certificates','Chứng nhận','Chứng chỉ'],['achievements','Thành tích & Ghi nhận','Thành tích'],['evaluations','Đánh giá của tôi','Đánh giá'],
+  ['history','Quá trình công tác','Lịch sử vai trò'],['documents','Tài liệu của tôi','Tài liệu'],['cards','Thẻ của tôi','Thẻ thành viên'],
+  ['cv','CV / Hồ sơ năng lực','CV'],['notifications','Thông báo','Thông báo'],['calendar','Lịch của tôi','Lịch'],
+  ['security','Bảo mật & Phiên đăng nhập','Thiết bị bảo mật'],['support','Tài khoản & Hỗ trợ','Hỗ trợ']
+];
+let dirtyForm=false;
+function toast(message,type='ok'){
+  let host=$('#toastHost'); if(!host){host=document.createElement('div');host.id='toastHost';host.className='toast-host';document.body.append(host)}
+  const el=document.createElement('div');el.className='toast '+type;el.textContent=message;host.append(el);setTimeout(()=>el.remove(),3600);
+}
+function goView(view){if(dirtyForm&&!confirm('Bạn có thay đổi chưa lưu. Rời trang này?'))return;dirtyForm=false;state.view=view;renderApp()}
+function openCommandPalette(){
+  const allowed=VIEW_CATALOG.filter(([id])=>state.me?.is_member||id.startsWith('admin-'));
+  modal('Tìm kiếm & thao tác nhanh',`<div class="command-box"><input id="commandSearch" autofocus placeholder="Tìm hồ sơ, chứng nhận, bảo mật, lịch..." aria-label="Tìm chức năng"><div id="commandResults" class="command-results"></div></div>`);
+  const draw=()=>{const q=($('#commandSearch').value||'').trim().toLowerCase();const rows=allowed.filter(x=>x.slice(1).join(' ').toLowerCase().includes(q)).slice(0,12);$('#commandResults').innerHTML=rows.map(([id,label,hint])=>`<button data-command-view="${id}"><b>${esc(label)}</b><span>${esc(hint)}</span></button>`).join('')||'<div class="empty">Không tìm thấy chức năng phù hợp.</div>';$$('[data-command-view]').forEach(b=>b.onclick=()=>{$('#modal')?.remove();goView(b.dataset.commandView)})};
+  $('#commandSearch').oninput=draw;draw();
+}
+function maybeShowOnboarding(){
+  if(!state.me?.is_member)return;
+  const code=state.me.person?.member_code||state.me.person?.id||'member';const key='sfn:onboard:v1:'+code;
+  if(localStorage.getItem(key))return;
+  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung tâm Thành viên Số',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
+    const finish=view=>{localStorage.setItem(key,'1');$('#modal')?.remove();if(view)goView(view)};$('#finishOnboarding').onclick=()=>finish();$$('[data-onboard]').forEach(b=>b.onclick=()=>finish(b.dataset.onboard));
+  },250);
+}
+
+function installWorkspaceUX(){
+  document.onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(state.me)openCommandPalette()}if(e.key==='Escape')$('#modal')?.remove()};
+  window.onbeforeunload=e=>{if(dirtyForm){e.preventDefault();e.returnValue=''}};
+  document.addEventListener('input',e=>{if(e.target.closest('#content form'))dirtyForm=true});
+  document.addEventListener('submit',e=>{if(e.target.closest('#content form'))dirtyForm=false});
+  const net=()=>document.body.classList.toggle('offline',!navigator.onLine);addEventListener('online',()=>{net();toast('Đã kết nối lại.')});addEventListener('offline',()=>{net();toast('Mất kết nối mạng. Dữ liệu chưa gửi sẽ được giữ trên trang.','warn')});net();
+}
+installWorkspaceUX();
+
 const initials=n=>(
   String(n||'Sky First Network')
     .trim()
@@ -1285,7 +1323,9 @@ function renderApp(){
           </div>
 
 
-          <div class="identity">
+          <div class="top-actions">
+            <button class="quick-search" id="openCommand" title="Tìm kiếm (Ctrl/⌘ + K)" aria-label="Tìm kiếm chức năng">⌕ <span>Tìm kiếm</span><kbd>Ctrl K</kbd></button>
+            <div class="identity">
 
             ${avatar(p)}
 
@@ -1306,11 +1346,12 @@ function renderApp(){
 
             </span>
 
+            </div>
           </div>
 
         </div>
 
-
+        <div class="offline-banner" role="status">Bạn đang ngoại tuyến · các thao tác cần máy chủ sẽ tạm dừng</div>
         <div id="content"></div>
 
       </main>
@@ -1322,14 +1363,13 @@ function renderApp(){
   $$('[data-view]').forEach(
     b=>b.onclick=()=>{
 
-      state.view=
-        b.dataset.view;
-
-      renderApp();
+      goView(b.dataset.view);
 
     }
   );
 
+
+  $('#openCommand')?.addEventListener('click',openCommandPalette);
 
   $('#logout').onclick=async()=>{
 
@@ -1365,6 +1405,7 @@ function renderApp(){
 
 
   renderView();
+  maybeShowOnboarding();
 }
 
 
@@ -1714,7 +1755,7 @@ async function renderView(){
 
         </div>
       `;
-      const jump=$('[data-view-jump="profile"]');if(jump)jump.onclick=()=>{state.view='profile';renderApp()};
+      const jump=$('[data-view-jump="profile"]');if(jump)jump.onclick=()=>{goView('profile')};
 
       return;
     }
@@ -1899,7 +1940,7 @@ async function renderView(){
         </b>
 
         <p class="muted">
-          ${esc(e.data?.error||e.message)}
+          Vui lòng thử lại. Nếu lỗi tiếp diễn, liên hệ bộ phận hỗ trợ.
         </p>
 
       </div>
@@ -2326,15 +2367,17 @@ async function renderProfile(c){
 
         $('#modal')?.remove();
 
+        dirtyForm=false;
+        toast('Đã cập nhật hồ sơ.');
         renderApp();
 
       }catch(err){
-        alert(err.data?.message||({
+        toast(err.data?.message||({
           PERSONAL_FIELD_REQUIRED:'Vui lòng kiểm tra các trường bắt buộc.',
           EMAIL_INVALID:'Email không hợp lệ.',
           ID_NUMBER_MUST_BE_12_DIGITS:'CCCD phải gồm đúng 12 chữ số.',
           EMAIL_ALREADY_USED:'Email này đã được sử dụng.'
-        })[err.data?.error]||err.data?.error||err.message);
+        })[err.data?.error]||err.data?.error||err.message,'warn');
       }
     };
   };
