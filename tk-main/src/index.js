@@ -95,6 +95,21 @@ async function rateFail(env,key,limit=8,blockMinutes=15){
 }
 async function rateClear(env,key){await env.DB.prepare(`DELETE FROM auth_rate_limits WHERE rate_key=?`).bind(key).run()}
 async function securityEvent(env,aid,type,req,details={}){await ensureSecurityTables(env);await env.DB.prepare(`INSERT INTO security_events(id,account_id,event_type,ip_hint,user_agent,details_json) VALUES(?,?,?,?,?,?)`).bind(uid('sec'),aid||null,type,clientHint(req),clean(req.headers.get('user-agent'),500),JSON.stringify(details)).run()}
+async function safeRateState(env,key,limit=8,minutes=15){try{return await rateState(env,key,limit,minutes)}catch(err){console.error('RATE_LIMIT_STORAGE_ERROR',err);return {blocked:false,degraded:true}}}
+async function safeRateFail(env,key,limit=8,blockMinutes=15){try{await rateFail(env,key,limit,blockMinutes)}catch(err){console.error('RATE_LIMIT_WRITE_ERROR',err)}}
+async function safeRateClear(env,key){try{await rateClear(env,key)}catch(err){console.error('RATE_LIMIT_CLEAR_ERROR',err)}}
+async function safeSecurityEvent(env,aid,type,req,details={}){try{await securityEvent(env,aid,type,req,details)}catch(err){console.error('SECURITY_EVENT_ERROR',err)}}
+async function safeAudit(env,...args){try{await audit(env,...args)}catch(err){console.error('AUDIT_EVENT_ERROR',err)}}
+async function createLoginSession(env,sid,aid,h,req){
+  const ua=clean(req.headers.get('user-agent'),500),ip=clientHint(req);
+  try{
+    await env.DB.prepare(`INSERT INTO sessions(id,account_id,token_hash,expires_at,user_agent,ip_hint) VALUES(?,?,?,datetime('now','+7 days'),?,?)`).bind(sid,aid,h,ua,ip).run();
+  }catch(err){
+    // Compatibility with an older production sessions schema. The security migration can be applied later without blocking login.
+    console.error('SESSION_METADATA_COMPAT_FALLBACK',err);
+    await env.DB.prepare(`INSERT INTO sessions(id,account_id,token_hash,expires_at) VALUES(?,?,?,datetime('now','+7 days'))`).bind(sid,aid,h).run();
+  }
+}
 
 
 async function ensureAccountRequestProfiles(env){
@@ -501,7 +516,7 @@ async function api(req,env,url){
 
       if(!login||!password) return json({error:'INVALID_LOGIN'},401);
       const rateKey=`login:${await sha256(clientHint(req)+'|'+login)}`;
-      const rs=await rateState(env,rateKey,8,15);
+      const rs=await safeRateState(env,rateKey,8,15);
       if(rs.blocked) return json({error:'TOO_MANY_LOGIN_ATTEMPTS'},429,{'retry-after':'900'});
 
       const a=await env.DB.prepare(`
@@ -524,7 +539,7 @@ async function api(req,env,url){
         LIMIT 1
       `).bind(login,login).first();
 
-      if(!a){await rateFail(env,rateKey,8,15);return json({error:'INVALID_LOGIN'},401);}
+      if(!a){await safeRateFail(env,rateKey,8,15);return json({error:'INVALID_LOGIN'},401);}
 
       if(Number(a.is_locked||0)===1){
         return json({error:'ACCOUNT_LOCKED'},423);
@@ -541,8 +556,8 @@ async function api(req,env,url){
         a.password_hash
       );
 
-      if(!passwordOK){await rateFail(env,rateKey,8,15);await securityEvent(env,a.id,'login_failed',req);return json({error:'INVALID_LOGIN'},401);}
-      await rateClear(env,rateKey);
+      if(!passwordOK){await safeRateFail(env,rateKey,8,15);await safeSecurityEvent(env,a.id,'login_failed',req);return json({error:'INVALID_LOGIN'},401);}
+      await safeRateClear(env,rateKey);
 
       await env.DB.prepare(`
         DELETE FROM sessions
@@ -554,10 +569,7 @@ async function api(req,env,url){
       const h=await sha256(t);
       const sid=uid('session');
 
-      await env.DB.prepare(`
-        INSERT INTO sessions(id,account_id,token_hash,expires_at,user_agent,ip_hint)
-        VALUES(?,?,?,datetime('now','+7 days'),?,?)
-      `).bind(sid,a.id,h,clean(req.headers.get('user-agent'),500),clientHint(req)).run();
+      await createLoginSession(env,sid,a.id,h,req);
 
       await env.DB.prepare(`
         UPDATE accounts
@@ -567,17 +579,8 @@ async function api(req,env,url){
         WHERE id=?
       `).bind(a.id).run();
 
-      await audit(
-        env,
-        a.id,
-        'account_login',
-        'account',
-        a.id,
-        null,
-        {username:a.username}
-      );
-
-      await securityEvent(env,a.id,'login_success',req);
+      await safeAudit(env,a.id,'account_login','account',a.id,null,{username:a.username});
+      await safeSecurityEvent(env,a.id,'login_success',req);
 
       return json(
         {
@@ -700,7 +703,7 @@ async function api(req,env,url){
   // =========================================================
 
   if(url.pathname==='/api/public/request-avatar'&&req.method==='POST'){
-    const uploadKey=`avatar-upload:${await sha256(clientHint(req))}`;const uploadRate=await rateState(env,uploadKey,12,60);if(uploadRate.blocked)return json({error:'UPLOAD_RATE_LIMITED'},429,{'retry-after':'3600'});await rateFail(env,uploadKey,12,60);
+    const uploadKey=`avatar-upload:${await sha256(clientHint(req))}`;const uploadRate=await safeRateState(env,uploadKey,12,60);if(uploadRate.blocked)return json({error:'UPLOAD_RATE_LIMITED'},429,{'retry-after':'3600'});await safeRateFail(env,uploadKey,12,60);
     const ct=(req.headers.get('content-type')||'').toLowerCase();
 
     if(!['image/jpeg','image/png','image/webp'].includes(ct)){
@@ -1073,14 +1076,14 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   if(url.pathname==='/api/public/password/forgot'&&req.method==='POST'){
     await ensureSecurityTables(env);const b=await bodyJson(req);const login=clean(b.login,200).toLowerCase();
-    const key=`forgot:${await sha256(clientHint(req)+'|'+login)}`;const rs=await rateState(env,key,4,60);if(rs.blocked)return json({ok:true});
-    await rateFail(env,key,4,60);
+    const key=`forgot:${await sha256(clientHint(req)+'|'+login)}`;const rs=await safeRateState(env,key,4,60);if(rs.blocked)return json({ok:true});
+    await safeRateFail(env,key,4,60);
     const a=login?await env.DB.prepare(`SELECT id,email,username FROM accounts WHERE lower(username)=? OR lower(COALESCE(email,''))=? LIMIT 1`).bind(login,login).first():null;
-    if(a?.email){const raw=token();const hash=await sha256(raw);await env.DB.prepare(`DELETE FROM password_reset_tokens WHERE account_id=? OR expires_at<=CURRENT_TIMESTAMP`).bind(a.id).run();await env.DB.prepare(`INSERT INTO password_reset_tokens(id,account_id,token_hash,expires_at) VALUES(?,?,?,datetime('now','+30 minutes'))`).bind(uid('reset'),a.id,hash).run();const app=env.APP_URL||new URL(req.url).origin;await sendMemberEmail(env,{to:a.email,subject:'Đặt lại mật khẩu Sky First',html:memberEmailHtml({title:'Đặt lại mật khẩu',name:a.username,intro:'Chúng tôi nhận được yêu cầu đặt lại mật khẩu.',status:'BẢO MẬT TÀI KHOẢN',body:'Liên kết này chỉ sử dụng một lần và hết hạn sau 30 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.',ctaUrl:`${app}/?reset_token=${encodeURIComponent(raw)}`,ctaLabel:'Đặt lại mật khẩu'})});await securityEvent(env,a.id,'password_reset_requested',req)}
+    if(a?.email){const raw=token();const hash=await sha256(raw);await env.DB.prepare(`DELETE FROM password_reset_tokens WHERE account_id=? OR expires_at<=CURRENT_TIMESTAMP`).bind(a.id).run();await env.DB.prepare(`INSERT INTO password_reset_tokens(id,account_id,token_hash,expires_at) VALUES(?,?,?,datetime('now','+30 minutes'))`).bind(uid('reset'),a.id,hash).run();const app=env.APP_URL||new URL(req.url).origin;await sendMemberEmail(env,{to:a.email,subject:'Đặt lại mật khẩu Sky First',html:memberEmailHtml({title:'Đặt lại mật khẩu',name:a.username,intro:'Chúng tôi nhận được yêu cầu đặt lại mật khẩu.',status:'BẢO MẬT TÀI KHOẢN',body:'Liên kết này chỉ sử dụng một lần và hết hạn sau 30 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.',ctaUrl:`${app}/?reset_token=${encodeURIComponent(raw)}`,ctaLabel:'Đặt lại mật khẩu'})});await safeSecurityEvent(env,a.id,'password_reset_requested',req)}
     return json({ok:true});
   }
   if(url.pathname==='/api/public/password/reset'&&req.method==='POST'){
-    await ensureSecurityTables(env);const b=await bodyJson(req);const raw=clean(b.token,512);const pw=String(b.password||'');if(!raw||pw.length<10)return json({error:'INVALID_RESET_DATA'},400);const h=await sha256(raw);const r=await env.DB.prepare(`SELECT pr.id,pr.account_id FROM password_reset_tokens pr WHERE pr.token_hash=? AND pr.used_at IS NULL AND pr.expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(h).first();if(!r)return json({error:'RESET_TOKEN_INVALID'},400);const salt=token(),it=100000,hash=await pbkdf2(pw,salt,it);await env.DB.batch([env.DB.prepare(`UPDATE accounts SET password_hash=?,password_salt=?,password_iterations=?,force_password_change=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(hash,salt,it,r.account_id),env.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?`).bind(r.id),env.DB.prepare(`DELETE FROM sessions WHERE account_id=?`).bind(r.account_id)]);await securityEvent(env,r.account_id,'password_reset_completed',req);return json({ok:true});
+    await ensureSecurityTables(env);const b=await bodyJson(req);const raw=clean(b.token,512);const pw=String(b.password||'');if(!raw||pw.length<10)return json({error:'INVALID_RESET_DATA'},400);const h=await sha256(raw);const r=await env.DB.prepare(`SELECT pr.id,pr.account_id FROM password_reset_tokens pr WHERE pr.token_hash=? AND pr.used_at IS NULL AND pr.expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(h).first();if(!r)return json({error:'RESET_TOKEN_INVALID'},400);const salt=token(),it=100000,hash=await pbkdf2(pw,salt,it);await env.DB.batch([env.DB.prepare(`UPDATE accounts SET password_hash=?,password_salt=?,password_iterations=?,force_password_change=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(hash,salt,it,r.account_id),env.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?`).bind(r.id),env.DB.prepare(`DELETE FROM sessions WHERE account_id=?`).bind(r.account_id)]);await safeSecurityEvent(env,r.account_id,'password_reset_completed',req);return json({ok:true});
   }
 
   // =========================================================
@@ -1104,10 +1107,10 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   }
   const revokeMatch=url.pathname.match(/^\/api\/me\/security\/sessions\/([^/]+)$/);
   if(revokeMatch&&req.method==='DELETE'){
-    const sid=decodeURIComponent(revokeMatch[1]);await env.DB.prepare(`DELETE FROM sessions WHERE id=? AND account_id=?`).bind(sid,s.account_id).run();await securityEvent(env,s.account_id,'session_revoked',req,{session_id:sid});return json({ok:true,current:sid===s.session_id});
+    const sid=decodeURIComponent(revokeMatch[1]);await env.DB.prepare(`DELETE FROM sessions WHERE id=? AND account_id=?`).bind(sid,s.account_id).run();await safeSecurityEvent(env,s.account_id,'session_revoked',req,{session_id:sid});return json({ok:true,current:sid===s.session_id});
   }
   if(url.pathname==='/api/me/security/revoke-others'&&req.method==='POST'){
-    await env.DB.prepare(`DELETE FROM sessions WHERE account_id=? AND id<>?`).bind(s.account_id,s.session_id).run();await securityEvent(env,s.account_id,'other_sessions_revoked',req);return json({ok:true});
+    await env.DB.prepare(`DELETE FROM sessions WHERE account_id=? AND id<>?`).bind(s.account_id,s.session_id).run();await safeSecurityEvent(env,s.account_id,'other_sessions_revoked',req);return json({ok:true});
   }
 
   // Directory is isolated by ACTIVE shared unit membership. Network admins may see all.
@@ -4485,7 +4488,18 @@ export default{
       let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return new Response('Bad request',{status:400})}
       if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')) return new Response('Bad request',{status:400});
       const isPrivate=/^(members|documents|certificates)\//.test(key);
-      if(isPrivate&&!await getSession(request,env)) return new Response('Unauthorized',{status:401});
+      if(isPrivate){
+        const fs=await getSession(request,env);
+        if(!fs)return new Response('Unauthorized',{status:401});
+        const ownerMatch=key.match(/^certificates\/(?:external\/)?([^/]+)\//);
+        if(ownerMatch&&ownerMatch[1]!==fs.person_id){
+          const elevated=await isNetworkAdmin(env,fs.account_id);
+          if(!elevated)return new Response('Forbidden',{status:403});
+        }else if(!ownerMatch&&/^(members|documents)\//.test(key)){
+          const ownSegment=`/${fs.person_id}/`;
+          if(!(`/`+key).includes(ownSegment)&&!await isNetworkAdmin(env,fs.account_id))return new Response('Forbidden',{status:403});
+        }
+      }
       const o=await env.FILES.get(key);
 
       if(!o){
