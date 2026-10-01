@@ -70,6 +70,32 @@ const cookie=(n,v,d=7)=>
 const clearCookie=n=>
   `${n}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 
+const clientHint=req=>clean(req.headers.get('cf-connecting-ip')||req.headers.get('x-forwarded-for')||'unknown',80);
+const safeEq=(a,b)=>{a=String(a||'');b=String(b||'');if(a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0};
+function sameOrigin(req){
+  if(['GET','HEAD','OPTIONS'].includes(req.method))return true;
+  const origin=req.headers.get('origin');
+  if(!origin)return true;
+  try{return new URL(origin).origin===new URL(req.url).origin}catch{return false}
+}
+async function ensureSecurityTables(env){
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS auth_rate_limits(rate_key TEXT PRIMARY KEY,window_start TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,attempts INTEGER NOT NULL DEFAULT 0,blocked_until TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS password_reset_tokens(id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,token_hash TEXT NOT NULL UNIQUE,expires_at TEXT NOT NULL,used_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS security_events(id TEXT PRIMARY KEY,account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,event_type TEXT NOT NULL,ip_hint TEXT,user_agent TEXT,details_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
+}
+async function rateState(env,key,limit=8,minutes=15){
+  await ensureSecurityTables(env);
+  const r=await env.DB.prepare(`SELECT attempts,window_start,blocked_until,CASE WHEN blocked_until>CURRENT_TIMESTAMP THEN 1 ELSE 0 END blocked,CASE WHEN window_start<=datetime('now',?) THEN 1 ELSE 0 END expired FROM auth_rate_limits WHERE rate_key=?`).bind(`-${minutes} minutes`,key).first();
+  if(r?.blocked)return {blocked:true};
+  if(!r||r.expired){await env.DB.prepare(`INSERT INTO auth_rate_limits(rate_key,window_start,attempts,blocked_until,updated_at) VALUES(?,CURRENT_TIMESTAMP,0,NULL,CURRENT_TIMESTAMP) ON CONFLICT(rate_key) DO UPDATE SET window_start=CURRENT_TIMESTAMP,attempts=0,blocked_until=NULL,updated_at=CURRENT_TIMESTAMP`).bind(key).run();return {blocked:false,attempts:0}}
+  return {blocked:false,attempts:Number(r.attempts||0),limit};
+}
+async function rateFail(env,key,limit=8,blockMinutes=15){
+  await env.DB.prepare(`UPDATE auth_rate_limits SET attempts=attempts+1,blocked_until=CASE WHEN attempts+1>=? THEN datetime('now',?) ELSE blocked_until END,updated_at=CURRENT_TIMESTAMP WHERE rate_key=?`).bind(limit,`+${blockMinutes} minutes`,key).run();
+}
+async function rateClear(env,key){await env.DB.prepare(`DELETE FROM auth_rate_limits WHERE rate_key=?`).bind(key).run()}
+async function securityEvent(env,aid,type,req,details={}){await ensureSecurityTables(env);await env.DB.prepare(`INSERT INTO security_events(id,account_id,event_type,ip_hint,user_agent,details_json) VALUES(?,?,?,?,?,?)`).bind(uid('sec'),aid||null,type,clientHint(req),clean(req.headers.get('user-agent'),500),JSON.stringify(details)).run()}
+
 
 async function ensureAccountRequestProfiles(env){
   await env.DB.prepare(`
@@ -365,10 +391,9 @@ async function api(req,env,url){
   }
 
   if(url.pathname==='/api/setup'&&req.method==='POST'){
-    if(await setupDone(env)){
-      return json({error:'SETUP_ALREADY_COMPLETED'},409);
-    }
-
+    if(await setupDone(env)) return json({error:'SETUP_ALREADY_COMPLETED'},409);
+    const supplied=clean(req.headers.get('x-setup-token'),512);
+    if(!env.SETUP_TOKEN||!safeEq(supplied,env.SETUP_TOKEN)) return json({error:'SETUP_FORBIDDEN'},403);
     const b=await bodyJson(req);
 
     const name=clean(b.full_name,160);
@@ -474,9 +499,10 @@ async function api(req,env,url){
       const login=clean(b.login,200).toLowerCase();
       const password=String(b.password||'');
 
-      if(!login||!password){
-        return json({error:'INVALID_LOGIN'},401);
-      }
+      if(!login||!password) return json({error:'INVALID_LOGIN'},401);
+      const rateKey=`login:${await sha256(clientHint(req)+'|'+login)}`;
+      const rs=await rateState(env,rateKey,8,15);
+      if(rs.blocked) return json({error:'TOO_MANY_LOGIN_ATTEMPTS'},429,{'retry-after':'900'});
 
       const a=await env.DB.prepare(`
         SELECT
@@ -498,9 +524,7 @@ async function api(req,env,url){
         LIMIT 1
       `).bind(login,login).first();
 
-      if(!a){
-        return json({error:'INVALID_LOGIN'},401);
-      }
+      if(!a){await rateFail(env,rateKey,8,15);return json({error:'INVALID_LOGIN'},401);}
 
       if(Number(a.is_locked||0)===1){
         return json({error:'ACCOUNT_LOCKED'},423);
@@ -517,9 +541,8 @@ async function api(req,env,url){
         a.password_hash
       );
 
-      if(!passwordOK){
-        return json({error:'INVALID_LOGIN'},401);
-      }
+      if(!passwordOK){await rateFail(env,rateKey,8,15);await securityEvent(env,a.id,'login_failed',req);return json({error:'INVALID_LOGIN'},401);}
+      await rateClear(env,rateKey);
 
       await env.DB.prepare(`
         DELETE FROM sessions
@@ -532,26 +555,9 @@ async function api(req,env,url){
       const sid=uid('session');
 
       await env.DB.prepare(`
-        INSERT INTO sessions(
-          id,
-          account_id,
-          token_hash,
-          expires_at,
-          user_agent
-        )
-        VALUES(
-          ?,
-          ?,
-          ?,
-          datetime('now','+7 days'),
-          ?
-        )
-      `).bind(
-        sid,
-        a.id,
-        h,
-        clean(req.headers.get('user-agent'),500)
-      ).run();
+        INSERT INTO sessions(id,account_id,token_hash,expires_at,user_agent,ip_hint)
+        VALUES(?,?,?,datetime('now','+7 days'),?,?)
+      `).bind(sid,a.id,h,clean(req.headers.get('user-agent'),500),clientHint(req)).run();
 
       await env.DB.prepare(`
         UPDATE accounts
@@ -571,6 +577,8 @@ async function api(req,env,url){
         {username:a.username}
       );
 
+      await securityEvent(env,a.id,'login_success',req);
+
       return json(
         {
           ok:true,
@@ -588,8 +596,7 @@ async function api(req,env,url){
 
       return json(
         {
-          error:'LOGIN_SYSTEM_ERROR',
-          detail:String(err?.message||err)
+          error:'LOGIN_SYSTEM_ERROR'
         },
         500
       );
@@ -693,6 +700,7 @@ async function api(req,env,url){
   // =========================================================
 
   if(url.pathname==='/api/public/request-avatar'&&req.method==='POST'){
+    const uploadKey=`avatar-upload:${await sha256(clientHint(req))}`;const uploadRate=await rateState(env,uploadKey,12,60);if(uploadRate.blocked)return json({error:'UPLOAD_RATE_LIMITED'},429,{'retry-after':'3600'});await rateFail(env,uploadKey,12,60);
     const ct=(req.headers.get('content-type')||'').toLowerCase();
 
     if(!['image/jpeg','image/png','image/webp'].includes(ct)){
@@ -1063,6 +1071,18 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       :json({error:'NOT_FOUND'},404);
   }
 
+  if(url.pathname==='/api/public/password/forgot'&&req.method==='POST'){
+    await ensureSecurityTables(env);const b=await bodyJson(req);const login=clean(b.login,200).toLowerCase();
+    const key=`forgot:${await sha256(clientHint(req)+'|'+login)}`;const rs=await rateState(env,key,4,60);if(rs.blocked)return json({ok:true});
+    await rateFail(env,key,4,60);
+    const a=login?await env.DB.prepare(`SELECT id,email,username FROM accounts WHERE lower(username)=? OR lower(COALESCE(email,''))=? LIMIT 1`).bind(login,login).first():null;
+    if(a?.email){const raw=token();const hash=await sha256(raw);await env.DB.prepare(`DELETE FROM password_reset_tokens WHERE account_id=? OR expires_at<=CURRENT_TIMESTAMP`).bind(a.id).run();await env.DB.prepare(`INSERT INTO password_reset_tokens(id,account_id,token_hash,expires_at) VALUES(?,?,?,datetime('now','+30 minutes'))`).bind(uid('reset'),a.id,hash).run();const app=env.APP_URL||new URL(req.url).origin;await sendMemberEmail(env,{to:a.email,subject:'Đặt lại mật khẩu Sky First',html:memberEmailHtml({title:'Đặt lại mật khẩu',name:a.username,intro:'Chúng tôi nhận được yêu cầu đặt lại mật khẩu.',status:'BẢO MẬT TÀI KHOẢN',body:'Liên kết này chỉ sử dụng một lần và hết hạn sau 30 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.',ctaUrl:`${app}/?reset_token=${encodeURIComponent(raw)}`,ctaLabel:'Đặt lại mật khẩu'})});await securityEvent(env,a.id,'password_reset_requested',req)}
+    return json({ok:true});
+  }
+  if(url.pathname==='/api/public/password/reset'&&req.method==='POST'){
+    await ensureSecurityTables(env);const b=await bodyJson(req);const raw=clean(b.token,512);const pw=String(b.password||'');if(!raw||pw.length<10)return json({error:'INVALID_RESET_DATA'},400);const h=await sha256(raw);const r=await env.DB.prepare(`SELECT pr.id,pr.account_id FROM password_reset_tokens pr WHERE pr.token_hash=? AND pr.used_at IS NULL AND pr.expires_at>CURRENT_TIMESTAMP LIMIT 1`).bind(h).first();if(!r)return json({error:'RESET_TOKEN_INVALID'},400);const salt=token(),it=100000,hash=await pbkdf2(pw,salt,it);await env.DB.batch([env.DB.prepare(`UPDATE accounts SET password_hash=?,password_salt=?,password_iterations=?,force_password_change=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(hash,salt,it,r.account_id),env.DB.prepare(`UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?`).bind(r.id),env.DB.prepare(`DELETE FROM sessions WHERE account_id=?`).bind(r.account_id)]);await securityEvent(env,r.account_id,'password_reset_completed',req);return json({ok:true});
+  }
+
   // =========================================================
   // AUTHENTICATED
   // =========================================================
@@ -1071,6 +1091,23 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   if(!s){
     return json({error:'UNAUTHORIZED'},401);
+  }
+
+  if(!sameOrigin(req)) return json({error:'ORIGIN_FORBIDDEN'},403);
+
+  if(url.pathname==='/api/me/security/sessions'&&req.method==='GET'){
+    const r=await env.DB.prepare(`SELECT id,created_at,last_seen_at,user_agent,ip_hint,expires_at,CASE WHEN id=? THEN 1 ELSE 0 END current FROM sessions WHERE account_id=? AND expires_at>CURRENT_TIMESTAMP ORDER BY last_seen_at DESC`).bind(s.session_id,s.account_id).all();
+    return json({items:r.results||[]});
+  }
+  if(url.pathname==='/api/me/security/events'&&req.method==='GET'){
+    await ensureSecurityTables(env);const r=await env.DB.prepare(`SELECT event_type,ip_hint,user_agent,created_at FROM security_events WHERE account_id=? ORDER BY created_at DESC LIMIT 100`).bind(s.account_id).all();return json({items:r.results||[]});
+  }
+  const revokeMatch=url.pathname.match(/^\/api\/me\/security\/sessions\/([^/]+)$/);
+  if(revokeMatch&&req.method==='DELETE'){
+    const sid=decodeURIComponent(revokeMatch[1]);await env.DB.prepare(`DELETE FROM sessions WHERE id=? AND account_id=?`).bind(sid,s.account_id).run();await securityEvent(env,s.account_id,'session_revoked',req,{session_id:sid});return json({ok:true,current:sid===s.session_id});
+  }
+  if(url.pathname==='/api/me/security/revoke-others'&&req.method==='POST'){
+    await env.DB.prepare(`DELETE FROM sessions WHERE account_id=? AND id<>?`).bind(s.account_id,s.session_id).run();await securityEvent(env,s.account_id,'other_sessions_revoked',req);return json({ok:true});
   }
 
   // Directory is isolated by ACTIVE shared unit membership. Network admins may see all.
@@ -4445,13 +4482,11 @@ export default{
     const url=new URL(request.url);
 
     if(url.pathname.startsWith('/files/')){
-      const key=
-        decodeURIComponent(
-          url.pathname.slice(7)
-        );
-
-      const o=
-        await env.FILES.get(key);
+      let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return new Response('Bad request',{status:400})}
+      if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')) return new Response('Bad request',{status:400});
+      const isPrivate=/^(members|documents|certificates)\//.test(key);
+      if(isPrivate&&!await getSession(request,env)) return new Response('Unauthorized',{status:401});
+      const o=await env.FILES.get(key);
 
       if(!o){
         return new Response(

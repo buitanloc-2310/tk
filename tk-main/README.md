@@ -65,3 +65,6 @@ python scripts/verify_release.py
 - Không xóa lịch sử đơn vị/vai trò thông thường; dùng ngừng hiệu lực/ẩn.
 - Sao lưu D1 định kỳ trước thay đổi lớn.
 - Chạy `scripts/verify_release.py` trước mỗi lần deploy thay đổi source.
+
+## Security configuration (2026 final hardening)
+Before first-time setup, configure Cloudflare secret `SETUP_TOKEN` (for example with `wrangler secret put SETUP_TOKEN`). Keep `RESEND_API_KEY` as a secret as well. `/api/setup` requires `X-Setup-Token` and locks itself after the first account exists. Login, password reset and public avatar upload are rate-limited. The member Security Center supports session review/revocation and security-event history.

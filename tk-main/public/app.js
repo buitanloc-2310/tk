@@ -211,9 +211,11 @@ function renderLogin(){
   $('#startRegistration').onclick=renderAccountRequest;
   $('#checkRequest').onclick=()=>{showStatus();bindStatus()};
   $('#checkRequestRegister').onclick=()=>{showStatus();bindStatus()};
-  $('#forgotPassword').onclick=()=>modal('Hỗ trợ đăng nhập','<div class="request-note">Vui lòng liên hệ <b>support@skyfirst.io.vn</b> để được xác minh và hỗ trợ tài khoản.</div>');
+  $('#forgotPassword').onclick=()=>{modal('Đặt lại mật khẩu',`<form id="forgotForm" class="form-grid"><p class="muted">Nhập tên đăng nhập hoặc email. Nếu tài khoản hợp lệ, hệ thống sẽ gửi liên kết đặt lại mật khẩu.</p><label>Tên đăng nhập / Email<input name="login" required autocomplete="username"></label><button class="primary">Gửi liên kết bảo mật</button><div id="forgotMsg" class="msg"></div></form>`);$('#forgotForm').onsubmit=async e=>{e.preventDefault();const login=new FormData(e.target).get('login');await api('/api/public/password/forgot',{method:'POST',body:JSON.stringify({login})}).catch(()=>null);$('#forgotMsg').textContent='Nếu tài khoản tồn tại, hướng dẫn đã được gửi đến email đăng ký.'}};
   $('#togglePassword').onclick=()=>{const i=$('#loginForm').elements.password;i.type=i.type==='password'?'text':'password'};
   $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
+  const resetToken=new URLSearchParams(location.search).get('reset_token');
+  if(resetToken){modal('Tạo mật khẩu mới',`<form id="resetForm" class="form-grid"><label>Mật khẩu mới (ít nhất 10 ký tự)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label><button class="primary">Cập nhật mật khẩu</button><div id="resetMsg" class="msg"></div></form>`);$('#resetForm').onsubmit=async e=>{e.preventDefault();const password=new FormData(e.target).get('password');try{await api('/api/public/password/reset',{method:'POST',body:JSON.stringify({token:resetToken,password})});history.replaceState({},'',location.pathname);$('#resetMsg').textContent='Đã đổi mật khẩu. Bạn có thể đăng nhập ngay.'}catch{$('#resetMsg').textContent='Liên kết không hợp lệ hoặc đã hết hạn.'}}}
 }
 
 /* =========================================================
@@ -1158,6 +1160,8 @@ function renderApp(){
                     'Lịch của tôi'
                   )}
 
+                  ${navButton('security','Bảo mật & Phiên đăng nhập')}
+
                   ${navButton(
                     'support',
                     'Tài khoản & Hỗ trợ'
@@ -1648,9 +1652,11 @@ async function renderView(){
           </div>
         </div>
 
-        <div class="grid">
+        ${(()=>{const fields=['full_name','email','phone','avatar_url','date_of_birth','permanent_address','school_or_workplace','class_or_major'];const done=fields.filter(k=>String(p[k]||'').trim()).length;const pct=Math.round(done/fields.length*100);return `<section class="member-hero"><div class="member-hero-id">${avatar(p,'hero-avatar')}<div><div class="eyebrow">DIGITAL MEMBER IDENTITY</div><h2>${esc(p.full_name)}</h2><p>${esc(p.member_code||'Chưa cấp mã')} · ${statusVi(p.status)}</p></div></div><div class="profile-meter"><div><b>${pct}%</b><span>Hồ sơ hoàn thiện</span></div><div class="meter"><i style="width:${pct}%"></i></div><button class="ghost" data-view-jump="profile">Hoàn thiện hồ sơ →</button></div></section>`})()}
 
-          <div class="card">
+        <div class="grid dashboard-metrics">
+
+          <div class="card metric-card">
             <div class="eyebrow">
               THÀNH VIÊN
             </div>
@@ -1708,6 +1714,7 @@ async function renderView(){
 
         </div>
       `;
+      const jump=$('[data-view-jump="profile"]');if(jump)jump.onclick=()=>{state.view='profile';renderApp()};
 
       return;
     }
@@ -1837,6 +1844,10 @@ async function renderView(){
 
     if(state.view==='calendar'){
       return renderCalendar(c,false);
+    }
+
+    if(state.view==='security'){
+      return renderSecurity(c);
     }
 
     if(state.view==='support'){
@@ -2850,6 +2861,15 @@ async function renderCV(c){
     c.innerHTML=`<h1>CV / Hồ sơ năng lực</h1><div class="card"><b>Không thể tải CV.</b><p class="muted">${esc(err.data?.error||err.message)}</p><button class="secondary" onclick="location.reload()">Tải lại</button></div>`;
   }
 }
+async function renderSecurity(c){
+  const [sessions,events]=await Promise.all([api('/api/me/security/sessions'),api('/api/me/security/events')]);
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">ACCOUNT SECURITY</div><h1>Bảo mật & Phiên đăng nhập</h1><p class="muted">Kiểm soát nơi tài khoản đang được sử dụng và xem các sự kiện bảo mật gần đây.</p></div><button id="revokeOthers" class="secondary">Đăng xuất thiết bị khác</button></div>
+  <div class="security-grid"><section class="card"><h2>Phiên đang hoạt động</h2><div class="stack-list">${sessions.items?.length?sessions.items.map(x=>`<div class="security-row"><div><b>${x.current?'Thiết bị hiện tại':'Phiên đăng nhập'}</b><div class="meta">${esc(x.user_agent||'Không rõ thiết bị')}</div><div class="meta">Hoạt động: ${esc(x.last_seen_at||x.created_at||'—')}</div></div>${x.current?'<span class="badge ok">HIỆN TẠI</span>':`<button class="ghost revoke-session" data-id="${esc(x.id)}">Thu hồi</button>`}</div>`).join(''):'<div class="empty">Không có phiên hoạt động.</div>'}</div></section>
+  <section class="card"><h2>Sự kiện bảo mật</h2><div class="stack-list">${events.items?.length?events.items.map(x=>`<div class="security-row"><div><b>${esc(x.event_type.replaceAll('_',' '))}</b><div class="meta">${esc(x.created_at)} · ${esc(x.ip_hint||'')}</div></div></div>`).join(''):'<div class="empty">Chưa có sự kiện bảo mật.</div>'}</div></section></div>`;
+  $('#revokeOthers').onclick=async()=>{await api('/api/me/security/revoke-others',{method:'POST'});return renderSecurity(c)};
+  $$('.revoke-session').forEach(b=>b.onclick=async()=>{await api('/api/me/security/sessions/'+encodeURIComponent(b.dataset.id),{method:'DELETE'});return renderSecurity(c)});
+}
+
 function renderSupport(c){
 
   c.innerHTML=`

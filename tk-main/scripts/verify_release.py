@@ -19,7 +19,7 @@ for x in ['public/app.js','src/index.js']:
 
 try:
     cfg=json.loads((ROOT/'wrangler.jsonc').read_text())
-    assert cfg['name']=='sfn-member-portal'
+    assert cfg['name']=='tk'
     assert cfg['d1_databases'][0]['binding']=='DB'
     assert cfg['d1_databases'][0]['database_name']=='tk'
     assert cfg['d1_databases'][0]['database_id']=='ff630699-cc44-471d-9507-aa94c84468fb'
