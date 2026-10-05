@@ -1,14 +1,19 @@
 {
   "name": "sfn-member-portal",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build && wrangler deploy",
     "db:migrate:remote": "wrangler d1 migrations apply tk --remote",
-    "check": "node --check src/index.js && node --check public/app.js"
+    "check": "node --check src/index.js && node --check public/app.js",
+    "build": "npm run check",
+    "test": "python3 scripts/verify_release.py && node scripts/validate-center.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

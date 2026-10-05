@@ -68,3 +68,8 @@ python scripts/verify_release.py
 
 ## Security configuration (2026 final hardening)
 Before first-time setup, configure Cloudflare secret `SETUP_TOKEN` (for example with `wrangler secret put SETUP_TOKEN`). Keep `RESEND_API_KEY` as a secret as well. `/api/setup` requires `X-Setup-Token` and locks itself after the first account exists. Login, password reset and public avatar upload are rate-limited. The member Security Center supports session review/revocation and security-event history.
+
+## Bản 4.1 — 05/10/2026
+Tên cổng: **Trung tâm thành viên số SKY FIRST**. Chức năng tạo trung tâm nằm tại Quản trị → Cơ cấu tổ chức, chỉ dùng trong phạm vi quyền được cấp. Xem `UPGRADE-2026-10-05.md` để biết các sửa lỗi, cách sử dụng và phạm vi kiểm thử.
+
+Cloudflare build command: `npm run build`. Kiểm thử đầy đủ: `npm test` (Node ≥22.13, Python 3). Thiết lập D1/migration và secret theo hướng dẫn sẵn có trước khi triển khai.

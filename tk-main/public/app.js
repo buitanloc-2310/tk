@@ -13,29 +13,19 @@ const esc=s=>String(s??'').replace(
 );
 
 const api=async(url,opt={})=>{
-  const r=await fetch(url,{
-    credentials:'same-origin',
-    ...opt,
-    headers:{
-      ...(opt.body?{'content-type':'application/json'}:{}),
-      ...(opt.headers||{})
-    }
-  });
-
-  const d=await r.json().catch(()=>({}));
-
-  if(!r.ok){
-    throw Object.assign(
-      new Error(d.error||'REQUEST_FAILED'),
-      {
-        status:r.status,
-        data:d
-      }
-    );
-  }
-
-  return d;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),20000);
+  try{
+    const r=await fetch(url,{credentials:'same-origin',...opt,signal:controller.signal,
+      headers:{...(opt.body?{'content-type':'application/json'}:{}),...(opt.headers||{})}});
+    let d;try{d=await r.json()}catch{throw new Error('Máy chủ trả dữ liệu không hợp lệ. Vui lòng thử lại.')}
+    if(!d||typeof d!=='object'||Array.isArray(d))throw new Error('Dữ liệu phản hồi không hợp lệ.');
+    if(!r.ok)throw Object.assign(new Error(d.error||'REQUEST_FAILED'),{status:r.status,data:d});
+    return d;
+  }catch(e){if(e.name==='AbortError')throw new Error('Yêu cầu quá thời gian. Kiểm tra kết quả trước khi thử lại.');throw e}
+  finally{clearTimeout(timeout)}
 };
+const safeStore={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 
 const logo='/sfn-logo.png?v=final-20260901';
 
@@ -78,9 +68,9 @@ function openCommandPalette(){
 function maybeShowOnboarding(){
   if(!state.me?.is_member)return;
   const code=state.me.person?.member_code||state.me.person?.id||'member';const key='sfn:onboard:v1:'+code;
-  if(localStorage.getItem(key))return;
-  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung tâm Thành viên Số',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
-    const finish=view=>{localStorage.setItem(key,'1');$('#modal')?.remove();if(view)goView(view)};$('#finishOnboarding').onclick=()=>finish();$$('[data-onboard]').forEach(b=>b.onclick=()=>finish(b.dataset.onboard));
+  if(safeStore.get(key))return;
+  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung tâm thành viên số SKY FIRST',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
+    const finish=view=>{safeStore.set(key,'1');$('#modal')?.remove();if(view)goView(view)};$('#finishOnboarding').onclick=()=>finish();$$('[data-onboard]').forEach(b=>b.onclick=()=>finish(b.dataset.onboard));
   },250);
 }
 
@@ -1104,7 +1094,7 @@ function renderApp(){
             </div>
 
             <div class="side-brand-sub">
-              Trung tâm Thành viên Số
+              Trung tâm thành viên số SKY FIRST
             </div>
 
           </div>
@@ -1430,12 +1420,12 @@ function modal(title,body){
       id="modal"
     >
 
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
 
         <div class="modal-head">
 
           <h2>
-            ${title}
+            ${esc(title)}
           </h2>
 
           <button
@@ -7693,7 +7683,7 @@ async function renderAdminOrg(c){
       </h1>
 
       <button
-        id="orgNew"
+        id="centerNew" class="secondary">Tạo Trung tâm thành viên số SKY FIRST</button><button id="orgNew"
         class="primary"
       >
         Thêm bộ phận / đơn vị
@@ -7878,6 +7868,7 @@ async function renderAdminOrg(c){
                 Loại
 
                 <select name="node_type">
+                <option value="digital_member_center" ${x.node_type==='digital_member_center'?'selected':''}>Trung tâm thành viên số SKY FIRST</option>
 
                   ${
                     [
@@ -8053,8 +8044,11 @@ async function renderAdminOrg(c){
   };
 
 
+  let creatingCenter=false;
+  $('#centerNew').onclick=()=>{ creatingCenter=true; $('#orgNew').click(); };
   $('#orgNew').onclick=
     async()=>{
+      const createCenter=creatingCenter;creatingCenter=false;
 
       try{
 
@@ -8063,7 +8057,7 @@ async function renderAdminOrg(c){
 
 
         modal(
-          'Thêm bộ phận / đơn vị',
+          createCenter?'Tạo Trung tâm thành viên số SKY FIRST':'Thêm bộ phận / đơn vị',
           `
           <form
             id="orgForm"
@@ -8076,6 +8070,9 @@ async function renderAdminOrg(c){
               <input
                 name="name"
                 required
+                maxlength="200"
+                value="${createCenter?'Trung tâm thành viên số SKY FIRST':''}"
+                ${createCenter?'readonly':''}
               >
             </label>
 
@@ -8102,9 +8099,9 @@ async function renderAdminOrg(c){
             <label>
               Loại
 
-              <select name="node_type">
+              <select name="node_type"><option value="digital_member_center" ${createCenter?'selected':''}>Trung tâm thành viên số SKY FIRST</option>
 
-                <option value="executive_board">
+                <option value="executive_board" ${createCenter?'':'selected'}>
                   BCH
                 </option>
 
@@ -8172,7 +8169,8 @@ async function renderAdminOrg(c){
           async e=>{
 
             e.preventDefault();
-
+            const submit=e.target.querySelector('button[type="submit"],button.primary');
+            if(submit.disabled)return;submit.disabled=true;
             try{
 
               await api(
@@ -8196,10 +8194,8 @@ async function renderAdminOrg(c){
 
             }catch(err){
 
-              alert(
-                err.data?.error||
-                err.message
-              );
+              alert(err.data?.error||err.message);
+              submit.disabled=false;
             }
           };
 
