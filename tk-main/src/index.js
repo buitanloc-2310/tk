@@ -198,6 +198,7 @@ async function getSession(req,env){
     WHERE s.token_hash=?
       AND s.expires_at>CURRENT_TIMESTAMP
       AND a.is_locked=0
+      AND NOT EXISTS (SELECT 1 FROM account_restrictions br WHERE br.account_id=a.id AND br.restriction_type='ban' AND (br.ends_at IS NULL OR date(br.ends_at)>=date('now','+7 hours')))
     LIMIT 1
   `).bind(h).first();
 }
@@ -382,8 +383,16 @@ async function audit(env,aid,action,type,id,scope=null,details={}){
   ).run();
 }
 
-function memberCode(n){
-  return `SFN-${String(n).padStart(6,'0')}`;
+async function memberCode(env){
+  const yy=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Ho_Chi_Minh',year:'2-digit'}).format(new Date());
+  const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  for(let attempt=0;attempt<16;attempt++){
+    const bytes=crypto.getRandomValues(new Uint8Array(8));
+    const suffix=[...bytes].map(n=>alphabet[n%alphabet.length]).join('');
+    const code=`SFN-${yy}-${suffix}`;
+    if(!(await env.DB.prepare('SELECT 1 FROM people WHERE member_code=?').bind(code).first()))return code;
+  }
+  throw new Error('MEMBER_ID_GENERATION_FAILED');
 }
 
 function verifyCode(prefix='SFN'){
@@ -398,6 +407,32 @@ async function api(req,env,url){
   // =========================================================
   // SETUP
   // =========================================================
+
+
+  if(url.pathname==='/api/public/portal-config'&&req.method==='GET'){
+    const cfg=await env.DB.prepare("SELECT value_json,updated_at FROM system_settings WHERE key='member_portal_v4'").first();
+    let settings={};try{settings=JSON.parse(cfg?.value_json||'{}')}catch{}
+    const defaults=[
+      {key:'members',label:'Thành viên đang hoạt động',mode:'auto',enabled:true},
+      {key:'activities',label:'Hoạt động đã tổ chức',mode:'auto',enabled:true},
+      {key:'units',label:'Đơn vị trực thuộc',mode:'auto',enabled:true},
+      {key:'programs',label:'Chương trình và dự án',mode:'manual',value:null,enabled:false}
+    ];
+    const allowed=new Set(defaults.map(x=>x.key));
+    const published=Array.isArray(settings.stats)?settings.stats:defaults;
+    const stats=published.filter(x=>x&&allowed.has(x.key)&&x.enabled!==false).slice(0,8);
+    const countQueries={members:"SELECT COUNT(*) n FROM people WHERE status='active'",activities:"SELECT COUNT(*) n FROM activities WHERE status='completed'",units:"SELECT COUNT(*) n FROM org_nodes WHERE status='active'"};
+    const results=[];
+    for(const row of stats){
+      let value=null;
+      if(row.mode==='manual')value=Number.isSafeInteger(row.value)&&row.value>=0?row.value:null;
+      else if(countQueries[row.key]){
+        try{value=Number((await env.DB.prepare(countQueries[row.key]).first())?.n||0)}catch{value=null}
+      }
+      if(value!==null)results.push({key:row.key,label:clean(row.label,75),value,mode:row.mode==='manual'?'manual':'auto'});
+    }
+    return json({stats:results,tagline:clean(settings.tagline||'Mỗi thành viên là một hành trình. Mỗi đóng góp tạo nên một Sky First lớn mạnh hơn.',190),updated_at:cfg?.updated_at||null});
+  }
 
   if(url.pathname==='/api/setup/status'&&req.method==='GET'){
     return json({
@@ -540,6 +575,9 @@ async function api(req,env,url){
       `).bind(login,login).first();
 
       if(!a){await safeRateFail(env,rateKey,8,15);return json({error:'INVALID_LOGIN'},401);}
+
+      const restricted=await env.DB.prepare("SELECT 1 FROM account_restrictions WHERE account_id=? AND restriction_type='ban' AND (ends_at IS NULL OR date(ends_at)>=date('now','+7 hours'))").bind(a.id).first();
+      if(restricted)return json({error:'ACCOUNT_BANNED'},423);
 
       if(Number(a.is_locked||0)===1){
         return json({error:'ACCOUNT_LOCKED'},423);
@@ -754,12 +792,12 @@ async function api(req,env,url){
 
 function memberEmailHtml({title,name,intro,code,status,processing='60 phút đến 48 giờ',body,ctaUrl,ctaLabel='Mở Trung tâm thành viên số SKY FIRST'}){
   const e=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
-  return `<!doctype html><html lang="vi"><body style="margin:0;background:#eef6fc;font-family:Arial,sans-serif;color:#13243a"><table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr><td align="center" style="padding:28px 12px"><table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:680px;background:#fff;border:1px solid #dbeaf6;border-radius:22px;overflow:hidden"><tr><td style="height:7px;background:#65b9ed"></td></tr><tr><td style="padding:28px 34px"><div style="font-size:12px;font-weight:700;letter-spacing:1.2px;color:#6597b9">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div><div style="font-size:22px;font-weight:800;margin-top:5px">Sky First Network</div></td></tr><tr><td style="padding:0 34px"><div style="height:1px;background:#e6eff6"></div></td></tr><tr><td style="padding:28px 34px 12px"><div style="display:inline-block;background:#eaf7ff;color:#267eae;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700">${e(status)}</div><h1 style="font-size:27px;line-height:35px;margin:15px 0 10px">${e(title)}</h1><p style="font-size:16px;line-height:26px;color:#41566b">Xin chào <b>${e(name)}</b>,</p><p style="font-size:16px;line-height:26px;color:#41566b">${e(intro)}</p></td></tr>${code?`<tr><td style="padding:10px 34px 18px"><div style="background:#f4f9fd;border:1px solid #dbeaf6;border-radius:16px;padding:20px 22px"><div style="font-size:12px;color:#6b8aa1;font-weight:700">MÃ YÊU CẦU</div><div style="font-size:19px;font-weight:800;margin-top:5px;word-break:break-word">${e(code)}</div><div style="font-size:14px;color:#52697c;margin-top:12px">Trạng thái: <b>${e(status)}</b>${processing?` · Thời gian dự kiến: <b>${e(processing)}</b>`:''}</div></div></td></tr>`:''}<tr><td style="padding:0 34px 18px;font-size:15px;line-height:25px;color:#41566b">${e(body)}</td></tr><tr><td align="center" style="padding:6px 34px 30px"><a href="${e(ctaUrl)}" style="display:inline-block;background:#10243d;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px">${e(ctaLabel)}</a></td></tr><tr><td style="background:#10243d;padding:24px 34px;color:#fff"><b>Trung tâm thành viên số SKY FIRST · Sky First Network</b><div style="font-size:13px;color:#b9c9d8;margin-top:6px">member@skyfirst.io.vn · member.skyfirst.io.vn</div></td></tr></table></td></tr></table></body></html>`;
+  return `<!doctype html><html lang="vi"><body style="margin:0;background:#eef6fc;font-family:Arial,sans-serif;color:#13243a"><table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr><td align="center" style="padding:28px 12px"><table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:680px;background:#fff;border:1px solid #dbeaf6;border-radius:22px;overflow:hidden"><tr><td style="height:7px;background:#65b9ed"></td></tr><tr><td style="padding:28px 34px"><div style="font-size:12px;font-weight:700;letter-spacing:1.2px;color:#6597b9">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div><div style="font-size:22px;font-weight:800;margin-top:5px">Sky First Network</div></td></tr><tr><td style="padding:0 34px"><div style="height:1px;background:#e6eff6"></div></td></tr><tr><td style="padding:28px 34px 12px"><div style="display:inline-block;background:#eaf7ff;color:#267eae;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700">${e(status)}</div><h1 style="font-size:27px;line-height:35px;margin:15px 0 10px">${e(title)}</h1><p style="font-size:16px;line-height:26px;color:#41566b">Xin chào <b>${e(name)}</b>,</p><p style="font-size:16px;line-height:26px;color:#41566b">${e(intro)}</p></td></tr>${code?`<tr><td style="padding:10px 34px 18px"><div style="background:#f4f9fd;border:1px solid #dbeaf6;border-radius:16px;padding:20px 22px"><div style="font-size:12px;color:#6b8aa1;font-weight:700">MÃ YÊU CẦU</div><div style="font-size:19px;font-weight:800;margin-top:5px;word-break:break-word">${e(code)}</div><div style="font-size:14px;color:#52697c;margin-top:12px">Trạng thái: <b>${e(status)}</b>${processing?` · Thời gian dự kiến: <b>${e(processing)}</b>`:''}</div></div></td></tr>`:''}<tr><td style="padding:0 34px 18px;font-size:15px;line-height:25px;color:#41566b">${e(body)}</td></tr><tr><td align="center" style="padding:6px 34px 30px"><a href="${e(ctaUrl)}" style="display:inline-block;background:#10243d;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px">${e(ctaLabel)}</a></td></tr><tr><td style="background:#10243d;padding:24px 34px;color:#fff"><b>Trung tâm thành viên số SKY FIRST · Sky First Network</b><div style="font-size:13px;color:#b9c9d8;margin-top:6px">support@skyfirst.io.vn · lienhe@skyfirst.io.vn · member.skyfirst.io.vn</div></td></tr></table></td></tr></table></body></html>`;
 }
 async function sendMemberEmail(env,{to,subject,html}){
   if(!env.RESEND_API_KEY||!to)return {sent:false,reason:'EMAIL_NOT_CONFIGURED'};
   try{
-    const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:'Trung tâm thành viên số SKY FIRST <member@skyfirst.io.vn>',to:[to],reply_to:'member@skyfirst.io.vn',subject,html})});
+    const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:'Trung tâm thành viên số SKY FIRST <support@skyfirst.io.vn>',to:[to],reply_to:'lienhe@skyfirst.io.vn',subject,html})});
     const data=await r.json().catch(()=>({}));
     return {sent:r.ok,id:data.id||null,error:r.ok?null:(data.message||`HTTP_${r.status}`)};
   }catch(e){return {sent:false,error:String(e?.message||e)}}
@@ -1020,7 +1058,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   ).run();
   await env.DB.batch(requestedOrgIds.map(oid=>env.DB.prepare(`INSERT OR IGNORE INTO account_request_orgs(request_id,org_node_id,is_primary) VALUES(?,?,?)`).bind(id,oid,oid===primaryOrgId?1:0)));
 
-  const trackingUrl=`${env.APP_URL||'https://member.skyfirst.io.vn'}/?request=${encodeURIComponent(code)}&email=${encodeURIComponent(email)}`;
+  const trackingUrl=`${env.APP_URL||'https://member.skyfirst.io.vn'}/registration-status?request=${encodeURIComponent(code)}&email=${encodeURIComponent(email)}`;
   const mail=await sendMemberEmail(env,{to:email,subject:`[Sky First Network] Đã tiếp nhận yêu cầu đăng ký thành viên – ${code}`,html:memberEmailHtml({title:'Đã tiếp nhận yêu cầu đăng ký thành viên',name:clean(b.full_name,160),intro:'Yêu cầu đăng ký của bạn đã được Trung tâm thành viên số SKY FIRST tiếp nhận.',code,status:'Đã tiếp nhận',body:'Vui lòng lưu mã yêu cầu để tra cứu. Sky First Network sẽ gửi email tiếp theo khi hồ sơ được cập nhật trạng thái.',ctaUrl:trackingUrl,ctaLabel:'Tra cứu trạng thái hồ sơ'})});
 
   return json({
@@ -1097,6 +1135,107 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   }
 
   if(!sameOrigin(req)) return json({error:'ORIGIN_FORBIDDEN'},403);
+
+
+  if(url.pathname==='/api/admin/card-designs'&&req.method==='GET'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const r=await env.DB.prepare('SELECT id,code,name,template_json,active FROM card_types ORDER BY name').all();
+    return json({items:r.results||[]});
+  }
+  const designer=url.pathname.match(/^\/api\/admin\/card-designs\/([^/]+)(?:\/(logo))?$/);
+  if(designer){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const id=decodeURIComponent(designer[1]);
+    const row=await env.DB.prepare('SELECT id,template_json FROM card_types WHERE id=?').bind(id).first();
+    if(!row)return json({error:'CARD_TYPE_NOT_FOUND'},404);
+    let previous={};try{previous=JSON.parse(row.template_json||'{}')}catch{}
+    if(designer[2]==='logo'&&req.method==='POST'){
+      const contentType=clean(req.headers.get('content-type'),80).split(';')[0].toLowerCase();
+      const ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[contentType];
+      if(!ext)return json({error:'UNSUPPORTED_LOGO_FORMAT'},415);
+      const bytes=await req.arrayBuffer();
+      if(bytes.byteLength<12||bytes.byteLength>2*1024*1024)return json({error:'LOGO_SIZE_INVALID'},413);
+      const header=new Uint8Array(bytes.slice(0,16));
+      const png=header[0]===137&&header[1]===80&&header[2]===78&&header[3]===71;
+      const jpg=header[0]===255&&header[1]===216&&header[2]===255;
+      const webp=String.fromCharCode(...header.slice(0,4))==='RIFF'&&String.fromCharCode(...header.slice(8,12))==='WEBP';
+      if(!({png,jpg,webp}[ext]))return json({error:'INVALID_LOGO_CONTENT'},415);
+      const key=`branding/cards/${crypto.randomUUID()}.${ext}`;
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType,cacheControl:'public,max-age=31536000,immutable'}});
+      previous.logo_url=`/files/${key}`;
+      await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(previous),id).run();
+      await safeAudit(env,s.account_id,'card_logo_updated','card_type',id,null,{key});
+      return json({ok:true,logo_url:previous.logo_url});
+    }
+    if(req.method==='PUT'){
+      const input=await bodyJson(req),accent=clean(input.accent,7),subtitle=clean(input.subtitle,90);
+      if(!/^#[a-f0-9]{6}$/i.test(accent))return json({error:'INVALID_ACCENT'},400);
+      const template={...previous,accent,subtitle};
+      await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
+      await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
+      return json({ok:true,template});
+    }
+  }
+  if(url.pathname==='/api/admin/portal-config'&&['GET','PUT'].includes(req.method)){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    if(req.method==='GET'){
+      const r=await env.DB.prepare("SELECT value_json,updated_at FROM system_settings WHERE key='member_portal_v4'").first();
+      let data={};try{data=JSON.parse(r?.value_json||'{}')}catch{}
+      return json({settings:data,updated_at:r?.updated_at||null});
+    }
+    const b=await bodyJson(req), valid=new Set(['members','activities','units','programs']);
+    if(!Array.isArray(b.stats)||b.stats.length>8)return json({error:'INVALID_STATS'},400);
+    const seen=new Set(), stats=[];
+    for(const x of b.stats){
+      if(!x||!valid.has(x.key)||seen.has(x.key))return json({error:'INVALID_STAT_KEY'},400);
+      seen.add(x.key);
+      const mode=x.mode==='manual'?'manual':'auto';
+      if(x.key==='programs'&&mode==='auto')return json({error:'PROGRAM_COUNT_REQUIRES_MANUAL_VALUE'},400);
+      const value=x.value===null||x.value===''?null:Number(x.value);
+      if(mode==='manual'&&value!==null&&(!Number.isSafeInteger(value)||value<0||value>1000000000))return json({error:'INVALID_STAT_VALUE'},400);
+      stats.push({key:x.key,label:clean(x.label,75)||x.key,mode,value:mode==='manual'?value:null,enabled:x.enabled!==false});
+    }
+    const settings={stats,tagline:clean(b.tagline,190)};
+    await env.DB.prepare("INSERT INTO system_settings(key,value_json,updated_at) VALUES('member_portal_v4',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP").bind(JSON.stringify(settings)).run();
+    await audit(env,s.account_id,'portal_config_updated','system_settings','member_portal_v4',null,{keys:stats.map(x=>x.key)});
+    return json({ok:true,settings});
+  }
+  const restrictionRoute=url.pathname.match(/^\/api\/admin\/members\/([^/]+)\/restriction$/);
+  if(restrictionRoute){
+    if(!(await hasPerm(env,s.account_id,'account.manage')))return json({error:'FORBIDDEN'},403);
+    const pid=decodeURIComponent(restrictionRoute[1]);
+    if(!(await canAccessPerson(env,s.account_id,pid)))return json({error:'SCOPE_FORBIDDEN'},403);
+    const target=await env.DB.prepare('SELECT a.id,a.email,p.full_name FROM accounts a JOIN people p ON p.id=a.person_id WHERE a.person_id=?').bind(pid).first();
+    if(!target)return json({error:'ACCOUNT_NOT_FOUND'},404);
+    if(req.method==='GET'){
+      const row=await env.DB.prepare('SELECT restriction_type,reason,ends_at,created_at,updated_at FROM account_restrictions WHERE account_id=?').bind(target.id).first();
+      return json({restriction:row||null});
+    }
+    if(req.method==='POST'){
+      if(target.id===s.account_id)return json({error:'CANNOT_RESTRICT_SELF'},409);
+      if(await isSuper(env,target.id))return json({error:'SUPER_ADMIN_PROTECTED'},403);
+      const b=await bodyJson(req),type=clean(b.type,20),reason=clean(b.reason,500);
+      if(!['ban','unban'].includes(type))return json({error:'INVALID_RESTRICTION'},400);
+      if(type==='ban'){
+        const end=clean(b.ends_at,35)||null;
+        if(!reason)return json({error:'REASON_REQUIRED'},400);
+        if(end){
+          const localToday=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(end)||Number.isNaN(Date.parse(end+'T00:00:00Z'))||new Date(end+'T00:00:00Z').toISOString().slice(0,10)!==end||end<localToday)return json({error:'INVALID_END_DATE'},400);
+        }
+        await env.DB.prepare("INSERT INTO account_restrictions(account_id,restriction_type,reason,ends_at,actor_account_id,updated_at) VALUES(?,'ban',?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(account_id) DO UPDATE SET restriction_type='ban',reason=excluded.reason,ends_at=excluded.ends_at,actor_account_id=excluded.actor_account_id,updated_at=CURRENT_TIMESTAMP").bind(target.id,reason,end,s.account_id).run();
+        await env.DB.prepare('DELETE FROM sessions WHERE account_id=?').bind(target.id).run();
+      }else{
+        await env.DB.prepare('DELETE FROM account_restrictions WHERE account_id=?').bind(target.id).run();
+      }
+      await audit(env,s.account_id,type==='ban'?'account_banned':'account_unbanned','account',target.id,null,{reason,ends_at:clean(b.ends_at,35)||null});
+      let mail={sent:false,reason:'NOT_REQUESTED'};
+      if(b.notify===true&&target.email){
+        mail=await sendMemberEmail(env,{to:target.email,subject:type==='ban'?'[Sky First] Thông báo giới hạn tài khoản':'[Sky First] Tài khoản đã được mở lại',html:memberEmailHtml({title:type==='ban'?'Thông báo giới hạn tài khoản':'Tài khoản được khôi phục',name:target.full_name,intro:type==='ban'?'Tài khoản hiện không thể đăng nhập theo quyết định quản trị.':'Quyền truy cập đã được khôi phục.',status:type==='ban'?'TẠM NGƯNG TRUY CẬP':'ĐƯỢC KHÔI PHỤC',body:type==='ban'?`Lý do: ${reason}. ${clean(b.ends_at,35)?'Thời hạn đến hết ngày '+clean(b.ends_at,35):'Không xác định thời hạn'}. Có thể liên hệ support@skyfirst.io.vn để yêu cầu xem xét.`:'Bạn có thể tiếp tục đăng nhập vào hệ thống.',ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Trung tâm thành viên số'})});
+      }
+      return json({ok:true,type,email_sent:mail.sent===true});
+    }
+  }
 
   if(url.pathname==='/api/me/security/sessions'&&req.method==='GET'){
     const r=await env.DB.prepare(`SELECT id,created_at,last_seen_at,user_agent,ip_hint,expires_at,CASE WHEN id=? THEN 1 ELSE 0 END current FROM sessions WHERE account_id=? AND expires_at>CURRENT_TIMESTAMP ORDER BY last_seen_at DESC`).bind(s.session_id,s.account_id).all();
@@ -1627,7 +1766,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   if(url.pathname==='/api/me/cards'&&req.method==='GET'){
     const r=await env.DB.prepare(`
-      SELECT c.*,t.name card_type_name,t.code card_type_code,o.name org_name
+      SELECT c.*,t.name card_type_name,t.code card_type_code,t.template_json card_template_json,o.name org_name
       FROM member_cards c
       JOIN card_types t ON t.id=c.card_type_id
       LEFT JOIN org_nodes o ON o.id=c.org_node_id
@@ -2557,24 +2696,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       },409);
     }
 
-    const last=await env.DB.prepare(`
-      SELECT member_code
-      FROM people
-      WHERE member_code LIKE 'SFN-%'
-      ORDER BY
-        CAST(
-          substr(member_code,5)
-          AS INTEGER
-        ) DESC
-      LIMIT 1
-    `).first();
-
-    const n=
-      last?.member_code
-        ?Number(last.member_code.slice(4))+1
-        :1;
-
-    const code=memberCode(n);
+    const code=await memberCode(env);
     const pid=uid('person');
     const aid=uid('account');
     const salt=token();
@@ -2834,6 +2956,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         SELECT
           c.*,
           t.name card_type_name,
+          t.template_json card_template_json,
           o.name org_name
         FROM member_cards c
         JOIN card_types t
@@ -4262,6 +4385,17 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(!(await isNetworkAdmin(env,s.account_id))){where.push(`ar.target_org_node_id IN (WITH RECURSIVE allowed(id) AS (SELECT sc.org_node_id FROM account_scopes sc JOIN roles rr ON rr.id=sc.role_id WHERE sc.account_id=? AND sc.active=1 AND rr.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN') AND sc.org_node_id IS NOT NULL UNION SELECT o.id FROM org_nodes o JOIN allowed a ON o.parent_id=a.id) SELECT id FROM allowed)`);params.push(s.account_id)}
     const r=await env.DB.prepare(`SELECT ar.*,arp.education_or_work_type,arp.school_or_workplace,arp.class_or_major,arp.education_status,o.name org_name,a.username reviewer_username,CAST((julianday('now')-julianday(ar.date_of_birth))/365.2425 AS INTEGER) age FROM account_requests ar LEFT JOIN account_request_profiles arp ON arp.request_id=ar.id LEFT JOIN org_nodes o ON o.id=ar.target_org_node_id LEFT JOIN accounts a ON a.id=ar.reviewed_by_account_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY ar.created_at DESC LIMIT 500`).bind(...params).all();return json({items:r.results||[]});
   }
+  const approvalResend=url.pathname.match(/^\/api\/admin\/account-requests\/([^/]+)\/send-approval$/);
+  if(approvalResend&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'request.manage')))return json({error:'FORBIDDEN'},403);
+    const rid=decodeURIComponent(approvalResend[1]);
+    const r=await env.DB.prepare(`SELECT ar.id,ar.email,ar.full_name,ar.target_org_node_id,p.member_code,a.username FROM account_requests ar JOIN people p ON p.id=ar.approved_person_id JOIN accounts a ON a.person_id=p.id WHERE ar.id=? AND ar.status='approved'`).bind(rid).first();
+    if(!r)return json({error:'APPROVED_REQUEST_NOT_FOUND'},404);
+    if(!(await canAccessOrg(env,s.account_id,r.target_org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);
+    const mail=await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Thông tin tài khoản thành viên – ${r.member_code}`,html:memberEmailHtml({title:'Tài khoản đã được phê duyệt',name:r.full_name,intro:'Hồ sơ thành viên của bạn đã được phê duyệt tại Sky First Network.',status:'ĐÃ PHÊ DUYỆT',processing:'',body:`Mã thành viên: ${r.member_code}. Tên đăng nhập: ${r.username}. Nếu chưa có mật khẩu, hãy liên hệ bộ phận hỗ trợ để được hướng dẫn kích hoạt bảo mật.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đến Trung tâm Thành viên Số'})});
+    await safeAudit(env,s.account_id,'approval_email_manual','account_request',rid,r.target_org_node_id,{sent:mail.sent===true});
+    return json({ok:true,email_sent:mail.sent===true,email_error:mail.error||mail.reason||null});
+  }
   const reqReview=url.pathname.match(/^\/api\/admin\/account-requests\/([^/]+)\/(approve|reject|supplement)$/);
   if(reqReview&&req.method==='POST'){
     if(!(await hasPerm(env,s.account_id,'request.manage')))return json({error:'FORBIDDEN'},403);
@@ -4270,7 +4404,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(!r)return json({error:'REQUEST_NOT_PENDING'},409);if(!(await canAccessOrg(env,s.account_id,r.target_org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);
     if(op==='reject'||op==='supplement'){const note=clean(b.admin_note,1000);if(!note)return json({error:'ADMIN_NOTE_REQUIRED'},400);const next=op==='reject'?'rejected':'supplement';await env.DB.prepare(`UPDATE account_requests SET status=?,admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,note,s.account_id,rid).run();await audit(env,s.account_id,op==='reject'?'account_request_rejected':'account_request_supplement_requested','account_request',rid,r.target_org_node_id,{note});const label=op==='reject'?'Chưa được phê duyệt':'Cần bổ sung hồ sơ';await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] ${label} – ${r.request_code}`,html:memberEmailHtml({title:label,name:r.full_name,intro:op==='reject'?'Sky First Network đã hoàn tất xem xét yêu cầu đăng ký của bạn.':'Hồ sơ đăng ký của bạn cần bổ sung thêm thông tin trước khi tiếp tục xử lý.',code:r.request_code,status:label,processing:'',body:note,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Mở Trung tâm thành viên số SKY FIRST'})});return json({ok:true,status:next})}
     if(await env.DB.prepare(`SELECT 1 FROM accounts WHERE lower(email)=? LIMIT 1`).bind(r.email).first())return json({error:'ACCOUNT_ALREADY_EXISTS'},409);
-    const last=await env.DB.prepare(`SELECT member_code FROM people WHERE member_code LIKE 'SFN-%' ORDER BY CAST(substr(member_code,5) AS INTEGER) DESC LIMIT 1`).first(),nextNo=last?.member_code?Number(last.member_code.slice(4))+1:1,pid=uid('person'),aid=uid('account'),code=memberCode(nextNo),username=code.toLowerCase(),temporaryPassword=`SFN-${crypto.randomUUID().replaceAll('-','').slice(0,14)}`,salt=token(),it=100000,hash=await pbkdf2(temporaryPassword,salt,it);
+    const code=await memberCode(env),pid=uid('person'),aid=uid('account'),username=code.toLowerCase(),temporaryPassword=`SFN-${crypto.randomUUID().replaceAll('-','').slice(0,14)}`,salt=token(),it=100000,hash=await pbkdf2(temporaryPassword,salt,it);
     await env.DB.batch([
 env.DB.prepare(`
   INSERT INTO people(
@@ -4326,7 +4460,7 @@ env.DB.prepare(`
       env.DB.prepare(`INSERT INTO account_scopes(id,account_id,role_id,org_node_id,active) VALUES(?,?,?,?,1)`).bind(uid('scope'),aid,'role_member',null),
       env.DB.prepare(`INSERT INTO org_memberships(id,person_id,org_node_id,role_label,started_at,status,is_primary) VALUES(?,?,?,?,DATE('now'),'active',1)`).bind(uid('membership'),pid,r.target_org_node_id,'Thành viên'),
       env.DB.prepare(`UPDATE account_requests SET status='approved',admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,approved_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(clean(b.admin_note,1000)||'Đã phê duyệt',s.account_id,pid,rid)
-    ]);await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code});if(b.send_email!==false)await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Tài khoản thành viên đã được phê duyệt – ${code}`,html:memberEmailHtml({title:'Tài khoản thành viên đã được phê duyệt',name:r.full_name,intro:'Hồ sơ của bạn đã được phê duyệt và tài khoản tại Trung tâm thành viên số SKY FIRST đã được tạo.',code:r.request_code,status:'Đã phê duyệt',processing:'',body:`Mã thành viên: ${code}. Tên đăng nhập: ${username}. Vui lòng liên hệ bộ phận quản trị qua kênh hỗ trợ chính thức để nhận hướng dẫn kích hoạt tài khoản và thiết lập mật khẩu an toàn.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đăng nhập Trung tâm thành viên số SKY FIRST'})});return json({ok:true,member_code:code,username,temporary_password:temporaryPassword,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
+    ]);await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code});const mail=b.send_email!==false?await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Tài khoản thành viên đã được phê duyệt – ${code}`,html:memberEmailHtml({title:'Tài khoản thành viên đã được phê duyệt',name:r.full_name,intro:'Hồ sơ của bạn đã được phê duyệt và tài khoản tại Trung tâm thành viên số SKY FIRST đã được tạo.',code:r.request_code,status:'Đã phê duyệt',processing:'',body:`Mã thành viên: ${code}. Tên đăng nhập: ${username}. Vui lòng liên hệ bộ phận quản trị qua kênh hỗ trợ chính thức để nhận hướng dẫn kích hoạt tài khoản và thiết lập mật khẩu an toàn.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đăng nhập Trung tâm thành viên số SKY FIRST'})}):{sent:false,reason:'NOT_REQUESTED'};await safeAudit(env,s.account_id,'approval_email_status','account_request',rid,r.target_org_node_id,{requested:b.send_email!==false,sent:mail.sent===true});return json({ok:true,email_sent:mail.sent===true,member_code:code,username,temporary_password:temporaryPassword,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
   }
 
   // =========================================================

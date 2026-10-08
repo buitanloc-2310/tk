@@ -192,7 +192,74 @@ async function boot(){
   }
 }
 
+function routePublic(path){
+  if(!['/login','/register','/registration-status'].includes(path))return;
+  if(location.pathname!==path)history.pushState({publicPath:path},'',path);
+  if(path==='/register')renderAccountRequest();
+  else if(path==='/registration-status')renderRegistrationStatus();
+  else renderLogin();
+  scrollTo({top:0,behavior:'instant'});
+}
+window.addEventListener('popstate',()=>{if(!state.me)routePublic(location.pathname)});
+function renderRegistrationStatus(){
+  $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" alt="Sky First Network"> Trung tâm Thành viên Số</a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">SKY FIRST MEMBER IDENTITY</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
+  wirePublicLinks();
+  const qs=new URLSearchParams(location.search);if(qs.has('request'))$('#statusForm').elements.code.value=qs.get('request');if(qs.has('email'))$('#statusForm').elements.email.value=qs.get('email');
+  $('#statusForm').onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target),out=$('#statusResult');out.textContent='Đang kiểm tra hồ sơ...';try{const d=await api('/api/public/account-request/status?code='+encodeURIComponent(dta.get('code'))+'&email='+encodeURIComponent(dta.get('email')));out.innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <strong>${esc(statusVi(d.request.status))}</strong>${d.request.admin_note?`<p>Phản hồi: ${esc(d.request.admin_note)}</p>`:''}</div>`}catch{out.textContent='Không tìm thấy hồ sơ phù hợp. Vui lòng kiểm tra lại mã và email.'}};
+}
+function wirePublicLinks(){document.querySelectorAll('[data-public-path]').forEach(a=>a.onclick=e=>{e.preventDefault();routePublic(a.dataset.publicPath)})}
+function showRegistrationPage(title,html){
+  $('#app').innerHTML=`<main class="standalone register-screen"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" alt="Sky First Network"> Trung tâm Thành viên Số</a><a href="/registration-status" data-public-path="/registration-status">Tra cứu đăng ký →</a></header><section class="standalone-panel register-panel"><div class="eyebrow">THAM GIA SKY FIRST NETWORK</div><h1>${esc(title)}</h1><p class="muted">Hoàn thành các bước bên dưới. Thông tin chỉ được xử lý để xét duyệt và quản lý hồ sơ theo chính sách của hệ thống.</p><div class="wizard-progress" id="wizardProgress" aria-live="polite"></div>${html}</section></main>`;
+  wirePublicLinks();
+}
+function initRegistrationWizard(form){
+  const children=[...form.children];
+  const groups=[[],[],[],[]];let step=0;
+  for(const el of children){
+    const h=(el.querySelector('h3')?.textContent||'').trim().toLowerCase();
+    if(h.includes('học tập'))step=1;
+    else if(h.includes('thông tin đăng ký'))step=2;
+    else if(h.includes('thông tin cha/mẹ'))step=3;
+    groups[step].push(el);
+  }
+  const sections=groups.map((nodes,i)=>{const section=document.createElement('section');section.className='wizard-step request-grid';section.dataset.step=i;for(const n of nodes)section.append(n);form.append(section);return section});
+  const controls=document.createElement('div');controls.className='wizard-controls';controls.innerHTML='<button type="button" id="wizardPrev" class="secondary">← Quay lại</button><button type="button" id="wizardNext" class="primary">Tiếp tục →</button>';form.append(controls);
+  // Keep the real submit button inside final section, and never submit early.
+  const submit=sections[3].querySelector('button[type="submit"],button.primary.full');if(submit)submit.type='submit';
+  const labels=['Thông tin cá nhân','Học tập / công tác','Đơn vị tham gia','Xác nhận & gửi'];
+  let current=0;
+  const draw=()=>{sections.forEach((s,i)=>{s.hidden=i!==current});$('#wizardProgress').innerHTML=labels.map((label,i)=>`<div class="wizard-dot ${i===current?'current':i<current?'done':''}"><b>0${i+1}</b><span>${label}</span></div>`).join('');$('#wizardPrev').hidden=current===0;$('#wizardNext').hidden=current===3;window.scrollTo({top:0,behavior:'smooth'})};
+  $('#wizardPrev').onclick=()=>{if(current>0){current--;draw()}};
+  $('#wizardNext').onclick=()=>{
+    const fields=[...sections[current].querySelectorAll('input,select,textarea')].filter(el=>!el.closest('[hidden]')&&el.offsetParent!==null);
+    const invalid=fields.find(x=>!x.checkValidity());if(invalid){invalid.reportValidity();invalid.focus();return}
+    if(current===2&&!form.querySelectorAll('[name="requested_org_ids"]:checked').length){toast('Vui lòng chọn ít nhất một đơn vị tham gia.','warn');return}
+    current=Math.min(current+1,3);draw()
+  };
+  draw();
+}
+async function loadPublicStats(){
+  const box=$('#impactNumbers');if(!box)return;
+  try{
+    const d=await api('/api/public/portal-config');
+    if(!$('#impactNumbers'))return;
+    box.innerHTML=(d.stats||[]).map((x,i)=>`<article class="impact-stat"><strong data-count="${Number(x.value)||0}" data-index="${i}">0</strong><span>${esc(x.label)}</span></article>`).join('')||'<span class="muted">Chào mừng đến với Sky First Network</span>';
+    $('#impactTagline').textContent=d.tagline||'';
+    const animate=()=>{
+      const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+      box.querySelectorAll('[data-count]').forEach(el=>{
+        const goal=Number(el.dataset.count)||0,start=performance.now();
+        if(reduced){el.textContent=goal.toLocaleString('vi-VN');return}
+        const frame=now=>{if(!el.isConnected)return;const t=Math.min(1,(now-start)/1150),ease=1-Math.pow(1-t,3);el.textContent=Math.round(goal*ease).toLocaleString('vi-VN');if(t<1)requestAnimationFrame(frame)};
+        requestAnimationFrame(frame);
+      });
+    };
+    if('IntersectionObserver' in window){const io=new IntersectionObserver(entries=>{if(entries.some(x=>x.isIntersecting)){io.disconnect();animate()}},{threshold:.2});io.observe(box)}else animate();
+  }catch{box.innerHTML='<span class="muted">Thông tin hoạt động sẽ được cập nhật.</span>'}
+}
 function renderLogin(){
+  if(location.pathname==='/register'){renderAccountRequest();return}
+  if(location.pathname==='/registration-status'){renderRegistrationStatus();return}
   $('#app').innerHTML=`
     <main class="identity-gate">
       <section class="gate-story" aria-label="Sky First Network">
@@ -201,7 +268,8 @@ function renderLogin(){
           <span class="gate-kicker">TRUNG TÂM THÀNH VIÊN SỐ · DIGITAL MEMBER CENTER</span>
           <h1>Một hồ sơ.<br>Mọi hành trình<br>tại Sky First.</h1>
           <p>Không gian định danh số dành cho thành viên: vai trò, đơn vị, hoạt động, hồ sơ, thành tích và những đóng góp được kết nối trong cùng một nơi.</p>
-          <div class="impact-row"><span>EDUCATION</span><span>COMMUNITY</span><span>VOLUNTEER</span><span>MEMBER</span></div>
+          <div class="impact-row"><span>GIÁO DỤC</span><span>CỘNG ĐỒNG</span><span>TÌNH NGUYỆN</span></div>
+          <div id="impactNumbers" class="impact-numbers" aria-live="polite"><span class="muted">Đang tải số liệu hoạt động…</span></div><p class="impact-tagline" id="impactTagline"></p>
         </div>
         <div class="gate-art" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div class="gate-foot">MẠNG LƯỚI GIÁO DỤC &amp; PHÁT TRIỂN CỘNG ĐỒNG SKY FIRST</div>
@@ -233,15 +301,14 @@ function renderLogin(){
       </section>
     </main>`;
 
-  const showStatus=()=>modal('Tra cứu đăng ký',`<form id="statusForm" class="form-grid"><label>Mã đăng ký<input name="code" required placeholder="SFN-MEMBER-REQ-..."></label><label>Email đã đăng ký<input type="email" name="email" required></label><button class="primary">TRA CỨU</button><div id="statusResult"></div></form>`);
-  const bindStatus=()=>{const f=$('#statusForm'); if(!f)return; f.onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target);try{const d=await api('/api/public/account-request/status?code='+encodeURIComponent(dta.get('code'))+'&email='+encodeURIComponent(dta.get('email')));$('#statusResult').innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <b>${statusVi(d.request.status)}</b>${d.request.admin_note?`<br>Phản hồi: ${esc(d.request.admin_note)}`:''}</div>`}catch{$('#statusResult').textContent='Không tìm thấy đăng ký phù hợp.'}}};
-  $$('[data-auth-tab]').forEach(b=>b.onclick=()=>{ $$('[data-auth-tab]').forEach(x=>x.classList.toggle('active',x===b)); const reg=b.dataset.authTab==='register'; $('#authLoginPane').hidden=reg; $('#authRegisterPane').hidden=!reg; });
-  $('#startRegistration').onclick=renderAccountRequest;
-  $('#checkRequest').onclick=()=>{showStatus();bindStatus()};
-  $('#checkRequestRegister').onclick=()=>{showStatus();bindStatus()};
+  $$('[data-auth-tab]').forEach(b=>b.onclick=()=>{if(b.dataset.authTab==='register')routePublic('/register')});
+  $('#startRegistration').onclick=()=>routePublic('/register');
+  $('#checkRequest').onclick=()=>routePublic('/registration-status');
+  $('#checkRequestRegister').onclick=()=>routePublic('/registration-status');
+  loadPublicStats();
   $('#forgotPassword').onclick=()=>{modal('Đặt lại mật khẩu',`<form id="forgotForm" class="form-grid"><p class="muted">Nhập tên đăng nhập hoặc email. Nếu tài khoản hợp lệ, hệ thống sẽ gửi liên kết đặt lại mật khẩu.</p><label>Tên đăng nhập / Email<input name="login" required autocomplete="username"></label><button class="primary">Gửi liên kết bảo mật</button><div id="forgotMsg" class="msg"></div></form>`);$('#forgotForm').onsubmit=async e=>{e.preventDefault();const login=new FormData(e.target).get('login');await api('/api/public/password/forgot',{method:'POST',body:JSON.stringify({login})}).catch(()=>null);$('#forgotMsg').textContent='Nếu tài khoản tồn tại, hướng dẫn đã được gửi đến email đăng ký.'}};
   $('#togglePassword').onclick=()=>{const i=$('#loginForm').elements.password;i.type=i.type==='password'?'text':'password'};
-  $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
+  $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':code==='ACCOUNT_BANNED'?'Tài khoản bị giới hạn truy cập. Vui lòng liên hệ support@skyfirst.io.vn.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
   const resetToken=new URLSearchParams(location.search).get('reset_token');
   if(resetToken){modal('Tạo mật khẩu mới',`<form id="resetForm" class="form-grid"><label>Mật khẩu mới (ít nhất 10 ký tự)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label><button class="primary">Cập nhật mật khẩu</button><div id="resetMsg" class="msg"></div></form>`);$('#resetForm').onsubmit=async e=>{e.preventDefault();const password=new FormData(e.target).get('password');try{await api('/api/public/password/reset',{method:'POST',body:JSON.stringify({token:resetToken,password})});history.replaceState({},'',location.pathname);$('#resetMsg').textContent='Đã đổi mật khẩu. Bạn có thể đăng nhập ngay.'}catch{$('#resetMsg').textContent='Liên kết không hợp lệ hoặc đã hết hạn.'}}}
 }
@@ -261,7 +328,7 @@ async function renderAccountRequest(){
   }catch{}
 
 
-  modal(
+  showRegistrationPage(
     'Đăng ký thành viên',
     `
     <div class="request-note">
@@ -657,6 +724,7 @@ async function renderAccountRequest(){
 
 
   const form=$('#requestForm');
+  initRegistrationWizard(form);
 
   const dob=
     form.elements.date_of_birth;
@@ -1255,7 +1323,7 @@ function renderApp(){
                       :''
                   }
 
-                  ${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center'):''}
+                  ${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center')+navButton('admin-studio','Cấu hình giao diện & thống kê'):''}
 
                 </nav>
               `
@@ -1904,6 +1972,7 @@ async function renderView(){
     if(state.view==='admin-audit'){
       return renderAdminAudit(c);
     }
+    if(state.view==='admin-studio'){return renderPortalStudio(c)}
     if(state.view==='admin-super'){
       return renderSuperAdmin(c);
     }
@@ -2374,7 +2443,12 @@ async function renderProfile(c){
 }
 
 
+function cardTheme(x){
+  let raw={};try{raw=JSON.parse(x.card_template_json||'{}')}catch{}
+  return {accent:/^#[a-f0-9]{6}$/i.test(raw.accent||'')?raw.accent:'#2366c9',logo_url:/^\/files\/branding\/cards\/[a-f0-9-]+\.(png|jpg|webp)$/i.test(raw.logo_url||'')?raw.logo_url:logo,subtitle:String(raw.subtitle||'').slice(0,90)};
+}
 function cardClass(x){
+  if(/(?:^|\b)(chủ tịch|phó chủ tịch|tổng thư ký|chairperson|president|secretary.general)(?:\b|$)/i.test(String(x.title_on_card||'')+' '+String(x.card_type_name||'')))return 'leadership';
 
   const c=
     (
@@ -2393,20 +2467,23 @@ function cardClass(x){
 
 
 function cardVerifyUrl(x){
-  return location.origin+'/verify?code='+encodeURIComponent(x.verify_token||x.card_number||'');
+  if(!x.verify_token)return '';
+  return location.origin+'/verify?code='+encodeURIComponent(x.verify_token);
 }
 
 function cardQrSrc(x,size=180){
+  if(!x.verify_token)return '';
   return 'https://api.qrserver.com/v1/create-qr-code/?format=svg&margin=1&size='+size+'x'+size+'&data='+encodeURIComponent(cardVerifyUrl(x));
 }
 
 function printCardWindow(x,p){
+  if(!x.verify_token){toast('Không thể in thẻ thiếu mã QR xác minh hợp lệ.','warn');return}
   const w=window.open('','_blank','width=900,height=700');
   if(!w)return alert('Trình duyệt đang chặn cửa sổ in. Vui lòng cho phép pop-up rồi thử lại.');
-  const verifyUrl=cardVerifyUrl(x),qr=cardQrSrc(x,220);
+  const verifyUrl=cardVerifyUrl(x),qr=cardQrSrc(x,220),theme=cardTheme(x);
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(x.card_number||'Sky First Network Card')}</title><style>
-  *{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:18mm;background:#fff;color:#fff}.sheet{width:86mm;height:54mm;border-radius:5mm;padding:5mm;background:linear-gradient(135deg,#10243f,#2864dc);position:relative;overflow:hidden}.brand{font-size:7.5pt;letter-spacing:1.1px}.type{font-size:14pt;font-weight:800;margin:3mm 0 2mm}.body{display:grid;grid-template-columns:20mm 1fr 20mm;gap:3mm;align-items:start}.photo{width:20mm;height:25mm;object-fit:cover;border-radius:2.5mm;border:1px solid rgba(255,255,255,.65);background:#fff}.name{font-weight:800;font-size:11pt}.meta{font-size:7.7pt;line-height:1.45}.qr{width:20mm;height:20mm;background:#fff;padding:1mm;border-radius:1.5mm}.status{position:absolute;left:5mm;bottom:4mm;font-size:8pt;font-weight:800}.verify{position:absolute;right:5mm;bottom:3.5mm;font-size:5.8pt;max-width:42mm;text-align:right;word-break:break-all;opacity:.9}@page{size:86mm 54mm;margin:0}@media print{body{padding:0}.sheet{border-radius:0}}
-  </style></head><body><div class="sheet"><div class="brand">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div><div class="type">${esc(x.card_type_name||'THẺ THÀNH VIÊN')}</div><div class="body"><img class="photo" src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh thành viên"><div><div class="name">${esc(p.full_name||'')}</div><div class="meta">${esc(p.member_code||'')}<br>${esc(x.card_number||'')}<br>${esc(x.org_name||'Sky First Network')}<br>${esc(x.title_on_card||'')}<br>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</div></div><img class="qr" src="${esc(qr)}" alt="QR xác minh"></div><div class="status">${esc(statusVi(x.status))}</div><div class="verify">${esc(verifyUrl)}</div></div><script>addEventListener('load',()=>setTimeout(()=>print(),500));<\/script></body></html>`);
+  *{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:18mm;background:#fff;color:#fff}.sheet{width:86mm;height:54mm;border-radius:5mm;padding:5mm;background:linear-gradient(135deg,#10243f,${cardClass(x)==='leadership'?'#675324':theme.accent});position:relative;overflow:hidden}.brand{font-size:7.5pt;letter-spacing:1.1px}.type{font-size:14pt;font-weight:800;margin:3mm 0 2mm}.body{display:grid;grid-template-columns:20mm 1fr 20mm;gap:3mm;align-items:start}.photo{width:20mm;height:25mm;object-fit:cover;border-radius:2.5mm;border:1px solid rgba(255,255,255,.65);background:#fff}.name{font-weight:800;font-size:11pt}.meta{font-size:7.7pt;line-height:1.45}.qr{width:20mm;height:20mm;background:#fff;padding:1mm;border-radius:1.5mm}.status{position:absolute;left:5mm;bottom:4mm;font-size:8pt;font-weight:800}.verify{position:absolute;right:5mm;bottom:3.5mm;font-size:5.8pt;max-width:42mm;text-align:right;word-break:break-all;opacity:.9}@page{size:86mm 54mm;margin:0}@media print{body{padding:0}.sheet{border-radius:0}}
+  </style></head><body><div class="sheet"><div class="brand">${esc(theme.subtitle||'TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST')}</div><div class="type">${esc(x.card_type_name||'THẺ THÀNH VIÊN')}</div><div class="body"><img class="photo" src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh thành viên"><div><div class="name">${esc(p.full_name||'')}</div><div class="meta">${esc(p.member_code||'')}<br>${esc(x.card_number||'')}<br>${esc(x.org_name||'Sky First Network')}<br>${esc(x.title_on_card||'')}<br>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</div></div><img class="qr" src="${esc(qr)}" alt="QR xác minh"></div><div class="status">${esc(statusVi(x.status))}</div><div class="verify">${esc(verifyUrl)}</div></div><script>addEventListener('load',()=>setTimeout(()=>print(),500));<\/script></body></html>`);
   w.document.close();
 }
 
@@ -2415,9 +2492,9 @@ function renderCards(c){
   api('/api/me/cards').then(d=>{
     const p=state.me.person;
     $('#cardsBox').outerHTML=`<div id="cardsBox" class="card-wallet">${d.items?.length?d.items.map(x=>`
-      <div class="member-card ${cardClass(x)}" style="position:relative;min-height:294px;padding-right:126px">
-        <img class="member-card-logo" src="${logo}" alt="Sky First Network">
-        <div class="eyebrow">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div>
+      <div class="member-card ${cardClass(x)}" style="position:relative;min-height:294px;padding-right:126px;${cardClass(x)==='leadership'?'':`background:linear-gradient(135deg,#071b31,${cardTheme(x).accent})`}">
+        <img class="member-card-logo" src="${esc(cardTheme(x).logo_url)}" alt="Logo đơn vị / chương trình">
+        <div class="eyebrow">${esc(cardTheme(x).subtitle||'TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST')}</div>
         <h3>${esc(x.card_type_name||'THẺ THÀNH VIÊN')}</h3>
         <img src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh ${esc(p.full_name)}" style="width:82px;height:104px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.55);margin:7px 0">
         <div style="font-size:18px;font-weight:850">${esc(p.full_name)}</div>
@@ -2425,11 +2502,11 @@ function renderCards(c){
         <div class="small">${esc(x.card_number||'')} · ${esc(x.org_name||'Sky First Network')}</div>
         ${x.title_on_card?`<div class="small">${esc(x.title_on_card)}</div>`:''}
         <div class="small">Hiệu lực: ${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</div>
-        <img src="${esc(cardQrSrc(x,170))}" alt="QR xác minh" style="position:absolute;right:22px;top:88px;width:92px;height:92px;background:#fff;padding:4px;border-radius:8px">
+        ${x.verify_token?`<img src="${esc(cardQrSrc(x,170))}" alt="QR xác minh" style="position:absolute;right:22px;top:88px;width:92px;height:92px;background:#fff;padding:4px;border-radius:8px">`:`<div class="card-qr-missing">Thẻ chưa có QR xác minh — liên hệ quản trị để xử lý</div>`}
         <div class="card-status">${statusVi(x.status)}</div>
-        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||x.card_number)}">Xác minh</button><button data-card-print="${esc(x.id)}">In / Xuất PDF</button></div>
+        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||'')}" ${x.verify_token?'':'disabled title="Thẻ chưa có mã QR xác minh"'}>Xác minh</button><button data-card-print="${esc(x.id)}" ${x.verify_token?'':'disabled'}>In / Xuất PDF</button></div>
       </div>`).join(''):'<div class="empty">Chưa có thẻ điện tử.</div>'}</div>`;
-    $$('[data-card-verify]').forEach(b=>b.onclick=()=>window.open('/verify?code='+encodeURIComponent(b.dataset.cardVerify),'_blank'));
+    $$('[data-card-verify]').forEach(b=>b.onclick=()=>{if(b.dataset.cardVerify)window.open('/verify?code='+encodeURIComponent(b.dataset.cardVerify),'_blank','noopener')});
     $$('[data-card-print]').forEach(b=>b.onclick=()=>{const x=d.items.find(v=>v.id===b.dataset.cardPrint);if(x)printCardWindow(x,p)});
   }).catch(err=>{$('#cardsBox').textContent='Không thể tải thẻ: '+(err.data?.message||err.data?.error||err.message)});
 }
@@ -2650,6 +2727,31 @@ async function renderList(
   }
 }
 
+
+function printOnePageCV({p,memberships,activities,certificates,achievements}){
+  const includeContact=confirm('Có đưa email và số điện thoại vào bản PDF?\nOK: Có · Hủy: Ẩn thông tin liên hệ (khuyến nghị nếu chia sẻ công khai).');
+  const w=window.open('','_blank','width=900,height=750');
+  if(!w){toast('Trình duyệt chặn cửa sổ in. Hãy bật cửa sổ bật lên để lưu PDF.','warn');return}
+  const list=(items,map,limit=3)=>items.slice(0,limit).map(map).join('')||'<p class="note">Chưa có dữ liệu được ghi nhận.</p>';
+  const role=memberships.find(x=>x.status==='active')||memberships[0];
+  const name=esc(p.full_name||'Thành viên Sky First');
+  const html=`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>CV Sky First - ${name}</title><style>
+  @page{size:A4;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#173752;background:#fff;margin:0;font-size:9pt;line-height:1.48;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sheet{height:276mm;overflow:hidden}.head{background:linear-gradient(112deg,#0c3152,#1674b6);color:#fff;border-radius:12px;padding:20px;display:flex;gap:17px;align-items:center}
+  .head img{width:76px;height:86px;object-fit:cover;object-position:center;border-radius:10px;background:#fff;border:2px solid rgba(255,255,255,.7)}
+  .head .name{font-size:21pt;font-weight:800;line-height:1.12}.head p{margin:6px 0 0;color:#d6eaf8}.id{font-size:9pt;color:#bde2ff;letter-spacing:.07em;margin-top:7px}
+  .intro{background:#ecf7ff;border-radius:10px;padding:11px 14px;margin:12px 0;display:flex;gap:16px;justify-content:space-between}
+  .columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}.group{break-inside:avoid;margin:0 0 12px}
+  h2{font-size:10.5pt;color:#0d659e;letter-spacing:.06em;border-bottom:1px solid #b7dbf3;padding:0 0 6px;margin:9px 0}
+  .entry{padding:6px 0;border-bottom:1px solid #edf2f6;break-inside:avoid}.entry b{display:block;font-size:9pt}.entry small{font-size:8pt;color:#607c92}.note{font-size:8pt;color:#698095}
+  .footer{display:flex;justify-content:space-between;border-top:1px solid #d6e8f4;margin-top:9px;padding-top:8px;color:#6e8397;font-size:7.5pt}
+  </style></head><body><div class="sheet"><header class="head"><img src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh thành viên"><div><div style="font-size:8pt;letter-spacing:.11em">SKY FIRST NETWORK · HỒ SƠ NĂNG LỰC</div><div class="name">${name}</div><div class="id">${esc(p.member_code||'')}</div><p>${esc(role?.title||role?.role_label||'Thành viên')} · ${esc(role?.org_name||'Sky First Network')}</p></div></header>
+  <div class="intro"><div><b>Học tập / Công tác</b><br>${esc(p.school_or_workplace||'Chưa cập nhật')}<br><span class="note">${esc(p.class_or_major||'')}</span></div>${includeContact?`<div><b>Liên hệ</b><br>${esc(p.email||'')}<br>${esc(p.phone||'')}</div>`:'<div><b>Quyền riêng tư</b><br>Thông tin liên hệ được ẩn</div>'}</div>
+  <main class="columns"><section><div class="group"><h2>VAI TRÒ & HÀNH TRÌNH</h2>${list(memberships,x=>`<div class="entry"><b>${esc(x.title||x.role_label||'Thành viên')}</b><span>${esc(x.org_name||'Sky First Network')}</span><br><small>${esc(x.started_at||'')} — ${esc(x.ended_at||'hiện tại')}</small></div>`,4)}</div><div class="group"><h2>THÀNH TÍCH & GHI NHẬN</h2>${list(achievements,x=>`<div class="entry"><b>${esc(x.title||'Ghi nhận')}</b><small>${esc(x.achieved_at||'')} · ${esc(x.issuer||'Sky First Network')}</small></div>`,3)}</div></section>
+  <section><div class="group"><h2>HOẠT ĐỘNG TIÊU BIỂU</h2>${list(activities,x=>`<div class="entry"><b>${esc(x.name||'Hoạt động')}</b><small>${esc(x.role_label||'Thành viên')} · ${esc(x.starts_at||'')}</small></div>`,4)}</div><div class="group"><h2>CHỨNG NHẬN</h2>${list(certificates,x=>`<div class="entry"><b>${esc(x.title||'Chứng nhận')}</b><small>${esc(x.issuer||'Sky First Network')} · ${esc(x.issued_at||'')}</small></div>`,3)}</div></section></main>
+  <footer class="footer"><span>Hồ sơ do thành viên lựa chọn xuất từ Trung tâm Thành viên Số Sky First</span><span>member.skyfirst.io.vn</span></footer></div><script>addEventListener('load',()=>setTimeout(()=>window.print(),450));<\/script></body></html>`;
+  w.document.write(html);w.document.close();
+}
 
 async function renderCV(c){
 
@@ -2884,14 +2986,12 @@ async function renderCV(c){
   `;
 
 
-  $('#printCV').onclick=()=>{
-
-    window.print();
-
-  };
+  $('#cvSheet').classList.add('cv-premium');
+  $('#printCV').onclick=()=>printOnePageCV({p,memberships,activities,certificates,achievements});
   }catch(err){
     console.error('CV_LOAD_ERROR',err);
-    c.innerHTML=`<h1>CV / Hồ sơ năng lực</h1><div class="card"><b>Không thể tải CV.</b><p class="muted">${esc(err.data?.error||err.message)}</p><button class="secondary" onclick="location.reload()">Tải lại</button></div>`;
+    c.innerHTML=`<h1>CV / Hồ sơ năng lực</h1><div class="card"><b>Không thể tải CV.</b><p class="muted">${esc(err.data?.error||err.message)}</p><button class="secondary" id="retryCV">Thử lại</button></div>`;
+    $('#retryCV').onclick=()=>renderCV(c);
   }
 }
 async function renderSecurity(c){
@@ -3907,6 +4007,7 @@ async function renderAdminRequests(c){
       </div>
 
 
+      ${r.status==='approved'?`<div class="toolbar"><button class="secondary" id="sendApprovalLater">Gửi email tài khoản cho thành viên</button></div>`:''}
       ${
         ['pending','supplement'].includes(
           r.status
@@ -3946,9 +4047,13 @@ async function renderAdminRequests(c){
     );
 
 
-    if(!$('#reqApprove')){
-      return;
-    }
+    if($('#sendApprovalLater'))$('#sendApprovalLater').onclick=async()=>{
+      if(!confirm('Gửi thông báo phê duyệt tài khoản đến email đã đăng ký?'))return;
+      const button=$('#sendApprovalLater');button.disabled=true;
+      try{const x=await api(`/api/admin/account-requests/${r.id}/send-approval`,{method:'POST',body:'{}'});toast(x.email_sent?'Đã gửi email thông báo.':'Không gửi được email: '+(x.email_error||'Kiểm tra cấu hình email'),x.email_sent?'ok':'warn')}
+      catch(err){toast(err.data?.error||err.message,'warn')}finally{button.disabled=false}
+    };
+    if(!$('#reqApprove'))return;
 
 
     $('#reqApprove').onclick=
@@ -3964,7 +4069,10 @@ async function renderAdminRequests(c){
           return;
         }
 
-        const sendEmail=confirm('Gửi email thông báo phê duyệt đến người đăng ký?\nOK: Gửi email · Hủy: Chỉ phê duyệt, không gửi.');
+        const emailChoice=prompt('Chọn gửi email sau phê duyệt:\n1 = Gửi tự động ngay\n2 = Phê duyệt trước, quản trị gửi sau\n3 = Không gửi email','1');
+        if(emailChoice===null)return;
+        if(!['1','2','3'].includes(emailChoice)){toast('Vui lòng chọn 1, 2 hoặc 3.','warn');return}
+        const sendEmail=emailChoice==='1';
         try{
 
           const z=
@@ -7180,6 +7288,9 @@ if(tab==='membership'){
         </button>
 
         <button
+          id="banAccount" class="danger" type="button">Cấm / gỡ cấm có tùy chỉnh</button>
+
+        <button
           id="lockAccount"
           class="${
             p.is_locked
@@ -7199,6 +7310,15 @@ if(tab==='membership'){
       </div>
     `;
 
+
+    $('#banAccount').onclick=async()=>{
+      const rid=p.id;
+      try{
+        const r=await api(`/api/admin/members/${rid}/restriction`),current=r.restriction;
+        modal('Quản lý cấm tài khoản',`<div class="request-note">Cấm tài khoản sẽ thu hồi phiên đăng nhập ngay. Cấm tạm thời tự hết hiệu lực sau ngày đã chọn. Có thể gỡ cấm bất cứ lúc nào.</div><form id="restrictionForm" class="form-grid"><label>Hình thức<select name="type"><option value="ban">Cấm tài khoản</option>${current?'<option value="unban">Gỡ cấm tài khoản</option>':''}</select></label><label>Ngày kết thúc (để trống nếu vô thời hạn)<input name="ends_at" type="date" value="${esc(current?.ends_at||'')}"></label><label>Lý do xử lý<textarea name="reason" rows="3" maxlength="500" placeholder="Mô tả lý do...">${esc(current?.reason||'')}</textarea></label><label><input name="notify" type="checkbox" checked> Gửi email thông báo cho thành viên</label><div class="full"><button class="primary">Xác nhận xử lý</button></div><div id="restrictionMsg" class="msg"></div></form>`);
+        $('#restrictionForm').onsubmit=async e=>{e.preventDefault();const form=e.target,btn=form.querySelector('button.primary');btn.disabled=true;try{const data=Object.fromEntries(new FormData(form));data.notify=form.elements.notify.checked;await api(`/api/admin/members/${rid}/restriction`,{method:'POST',body:JSON.stringify(data)});$('#modal')?.remove();toast('Đã cập nhật trạng thái cấm tài khoản.');await refreshAdminMemberTab(rid,tab)}catch(err){$('#restrictionMsg').textContent=err.data?.error||err.message}finally{btn.disabled=false}};
+      }catch(err){toast('Không thể mở quản lý tài khoản: '+(err.data?.error||err.message),'warn')}
+    };
 
     $('#resetPw').onclick=
       async()=>{
@@ -7669,6 +7789,34 @@ function simplePostModal(
 /* =========================================================
    ADMIN - CƠ CẤU TỔ CHỨC
    ========================================================= */
+
+async function mountCardDesignStudio(container){
+  const d=await api('/api/admin/card-designs');
+  const items=d.items||[];
+  container.insertAdjacentHTML('beforeend',`<section class="card studio-design"><div class="section-title"><div><div class="eyebrow">DIGITAL CARD DESIGN STUDIO</div><h2>Mẫu thẻ theo đơn vị / chương trình</h2><p class="muted">Mỗi loại thẻ dùng màu và logo riêng. Mã QR xác minh luôn bắt buộc, không thể tắt trong mẫu thiết kế.</p></div></div><form id="cardDesigner" class="form-grid"><label>Loại thẻ<select name="type_id">${items.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} · ${esc(x.code)}</option>`).join('')}</select></label><div class="studio-design-fields"><label>Màu nhận diện<input name="accent" type="color" value="#2366c9"></label><label>Dòng nhận diện trên thẻ<input name="subtitle" maxlength="90" placeholder="Sky First Network"></label></div><div class="card-design-preview" id="cardPreview"><span>SKY FIRST DIGITAL MEMBER</span><b>THẺ THÀNH VIÊN</b><small>QR XÁC MINH CHÍNH THỨC · BẮT BUỘC</small></div><label>Logo chương trình (PNG/JPG/WebP, tối đa 2 MB)<input type="file" name="logo" accept="image/png,image/jpeg,image/webp"></label><div class="toolbar"><button class="primary">Lưu mẫu thiết kế</button><button class="secondary" type="button" id="cardUploadLogo">Tải logo lên R2</button></div><div id="cardDesignerMsg" role="status"></div></form></section>`);
+  if(!items.length){$('#cardDesigner').innerHTML='<p class="muted">Chưa có loại thẻ. Hãy tạo loại thẻ trước khi thiết kế.</p>';return}
+  const form=$('#cardDesigner'),preview=$('#cardPreview');
+  const read=()=>{const type=items.find(x=>x.id===form.elements.type_id.value)||items[0];let t={};try{t=JSON.parse(type.template_json||'{}')}catch{};form.elements.accent.value=/^#[a-f0-9]{6}$/i.test(t.accent||'')?t.accent:'#2366c9';form.elements.subtitle.value=t.subtitle||'';preview.querySelector('b').textContent=type.name;preview.style.background=`linear-gradient(140deg,#0b2342,${form.elements.accent.value})`};
+  form.elements.type_id.onchange=read;
+  form.elements.accent.oninput=()=>preview.style.background=`linear-gradient(140deg,#0b2342,${form.elements.accent.value})`;
+  read();
+  form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button.primary'),msg=$('#cardDesignerMsg');button.disabled=true;try{const id=form.elements.type_id.value,reply=await api(`/api/admin/card-designs/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify({accent:form.elements.accent.value,subtitle:form.elements.subtitle.value})});const type=items.find(x=>x.id===id);if(type)type.template_json=JSON.stringify(reply.template);msg.textContent='Đã cập nhật mẫu thẻ thành công.';toast('Đã lưu mẫu thiết kế thẻ.')}catch(err){msg.textContent=err.data?.error||err.message}finally{button.disabled=false}};
+  $('#cardUploadLogo').onclick=async()=>{const file=form.elements.logo.files?.[0],msg=$('#cardDesignerMsg');if(!file)return toast('Chọn ảnh logo trước khi tải lên.','warn');if(file.size>2097152)return toast('Logo phải nhỏ hơn 2 MB.','warn');const id=form.elements.type_id.value,btn=$('#cardUploadLogo');btn.disabled=true;try{const data=await uploadBinary(`/api/admin/card-designs/${encodeURIComponent(id)}/logo`,file);const x=items.find(x=>x.id===id);if(x){let tpl={};try{tpl=JSON.parse(x.template_json||'{}')}catch{};tpl.logo_url=data.logo_url;x.template_json=JSON.stringify(tpl)}msg.textContent='Đã lưu logo cho loại thẻ này trên R2.';toast('Tải logo thành công.')}catch(err){msg.textContent=err.data?.error||err.message}finally{btn.disabled=false}};
+}
+
+async function renderPortalStudio(c){
+  c.innerHTML='<div class="section-title"><div><div class="eyebrow">SKY FIRST STUDIO</div><h1>Quản trị giao diện & số liệu</h1><p class="muted">Thay đổi và xuất bản nội dung trang đăng nhập mà không cần chỉnh mã nguồn.</p></div></div><div class="card">Đang tải cấu hình...</div>';
+  try{
+    const [saved,published]=await Promise.all([api('/api/admin/portal-config'),api('/api/public/portal-config')]);
+    const fallbacks=[['members','Thành viên đang hoạt động'],['activities','Hoạt động đã tổ chức'],['units','Đơn vị trực thuộc'],['programs','Chương trình và dự án']];
+    const byKey=new Map((saved.settings?.stats||[]).map(x=>[x.key,x]));
+    c.innerHTML=`<div class="section-title"><div><div class="eyebrow">SKY FIRST STUDIO · SUPER ADMIN</div><h1>Cấu hình giao diện & thống kê</h1><p class="muted">Thống kê tự động dùng dữ liệu D1. Số liệu thủ công phải được kiểm chứng trước khi công bố.</p></div></div>
+    <form id="studioForm" class="card studio-form"><h2>Các chỉ số ở trang đăng nhập</h2><p class="muted">Thay đổi trực tiếp trong phần quản trị. Không cần deploy lại website.</p><div class="studio-grid">
+    ${fallbacks.map(([key,title])=>{const x=byKey.get(key)||{key,label:title,mode:key==='programs'?'manual':'auto',enabled:key!=='programs',value:null};return `<fieldset class="studio-stat" data-stat-key="${key}"><legend>${esc(title)}</legend><label>Tên hiển thị<input name="label" maxlength="75" value="${esc(x.label||title)}" required></label><label>Nguồn dữ liệu<select name="mode"><option value="auto" ${x.mode==='auto'?'selected':''} ${key==='programs'?'disabled':''}>Tự động từ D1</option><option value="manual" ${x.mode==='manual'?'selected':''}>Số liệu đã kiểm chứng (nhập tay)</option></select></label><label>Giá trị công bố<input name="value" type="number" min="0" max="1000000000" step="1" value="${x.value??''}" placeholder="Nhập số khi dùng thủ công"></label><label class="studio-check"><input type="checkbox" name="enabled" ${x.enabled!==false?'checked':''}> Hiển thị chỉ số</label></fieldset>`}).join('')}</div><label>Thông điệp bên dưới thống kê<textarea name="tagline" maxlength="190" rows="2">${esc(saved.settings?.tagline||published.tagline||'')}</textarea></label><div class="toolbar"><button class="primary" id="studioSave">Lưu và xuất bản</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div></form>`;
+    $('#studioForm').onsubmit=async e=>{e.preventDefault();const button=$('#studioSave'),msg=$('#studioMsg');button.disabled=true;msg.textContent='Đang lưu và xuất bản…';try{const form=e.target;const stats=[...form.querySelectorAll('[data-stat-key]')].map(el=>({key:el.dataset.statKey,label:el.querySelector('[name="label"]').value,mode:el.querySelector('[name="mode"]').value,value:el.querySelector('[name="value"]').value||null,enabled:el.querySelector('[name="enabled"]').checked}));await api('/api/admin/portal-config',{method:'PUT',body:JSON.stringify({stats,tagline:form.elements.tagline.value})});msg.textContent='Đã xuất bản cấu hình thành công.';toast('Đã cập nhật giao diện công khai.')}catch(err){msg.textContent='Không thể lưu: '+(err.data?.error||err.message)}finally{button.disabled=false}};
+    await mountCardDesignStudio(c);
+  }catch(err){c.innerHTML='<div class="card">Không thể tải cấu hình: '+esc(err.data?.error||err.message)+'</div>'}
+}
 
 async function renderSuperAdmin(c){
   c.innerHTML=`<h1>SUPER_ADMIN Center</h1><div id="superBox" class="card">Đang tải...</div>`;
