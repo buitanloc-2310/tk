@@ -2444,11 +2444,13 @@ function renderCards(c){
         <div class="small">Hiệu lực: ${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</div>
         ${x.verify_token?`<img src="${esc(cardQrSrc(x,170))}" alt="QR xác minh" style="position:absolute;right:22px;top:88px;width:92px;height:92px;background:#fff;padding:4px;border-radius:8px">`:`<div class="card-qr-missing">Thẻ chưa có QR xác minh — liên hệ quản trị để xử lý</div>`}
         <div class="card-status">${statusVi(x.status)}</div>
-        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||'')}" ${x.verify_token?'':'disabled title="Thẻ chưa có mã QR xác minh"'}>Xác minh</button><button data-card-print="${esc(x.id)}" ${x.verify_token?'':'disabled'}>In / PDF</button><button data-card-download="${esc(x.id)}" ${x.verify_token?'':'disabled'}>Tải thẻ</button></div>
+        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||'')}" ${x.verify_token?'':'disabled title="Thẻ chưa có mã QR xác minh"'}>Xác minh</button><button data-card-print="${esc(x.id)}" ${x.verify_token?'':'disabled'}>In / PDF</button><button data-card-png="${esc(x.id)}" ${x.verify_token?'':'disabled'}>PNG</button><button data-card-jpg="${esc(x.id)}" ${x.verify_token?'':'disabled'}>JPG</button><button data-card-download="${esc(x.id)}" ${x.verify_token?'':'disabled'}>SVG</button></div>
       </div>`).join(''):'<div class="empty">Chưa có thẻ điện tử.</div>'}</div>`;
     $$('[data-card-verify]').forEach(b=>b.onclick=()=>{if(b.dataset.cardVerify)window.open('/verify?code='+encodeURIComponent(b.dataset.cardVerify),'_blank','noopener')});
     $$('[data-card-print]').forEach(b=>b.onclick=()=>{const x=d.items.find(v=>v.id===b.dataset.cardPrint);if(x)printCardWindow(x,p)});
-    $$('[data-card-download]').forEach(b=>b.onclick=()=>{const x=d.items.find(v=>v.id===b.dataset.cardDownload);if(x)downloadMemberCard(x,p,'front')});
+    $$('[data-card-download]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardDownload);if(!x)return;try{await downloadMemberCard(x,p,'front')}catch(e){toast(e.message||'Không thể xuất thẻ.','warn')}});
+    $$('[data-card-png]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardPng);if(!x)return;try{const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});await downloadCardImage({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t,'front','image/png')}catch(e){toast(e.message||'Không thể xuất PNG.','warn')}});
+    $$('[data-card-jpg]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardJpg);if(!x)return;try{const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});await downloadCardImage({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t,'front','image/jpeg')}catch(e){toast(e.message||'Không thể xuất JPG.','warn')}});
   }).catch(err=>{$('#cardsBox').textContent='Không thể tải thẻ: '+(err.data?.message||err.data?.error||err.message)});
 }
 
@@ -7709,19 +7711,27 @@ function defaultCardTemplate(type){
     {id:'backtitle',kind:'text',text:'HIỆU LỰC & CÁCH SỬ DỤNG',x:6,y:7,w:88,h:8,color:'#0b2b49',size:13,bold:true,align:'left'},
     {id:'valid',kind:'text',text:'Hiệu lực: {{issued_at}} → {{expires_at}}',x:6,y:20,w:88,h:7,color:'#173e5d',size:9,bold:true,align:'left'},
     {id:'use',kind:'text',text:'Sử dụng thẻ theo quy định của chương trình. QR ở mặt trước dùng để xác minh thẻ.',x:6,y:31,w:88,h:18,color:'#4b657d',size:9,bold:false,align:'left'},
-    {id:'note',kind:'text',text:'Thẻ chỉ có giá trị trong phạm vi và thời gian được ghi trên thẻ.',x:6,y:74,w:88,h:9,color:'#4b657d',size:8,bold:false,align:'left'}
+    {id:'note',kind:'text',text:'Thẻ chỉ có giá trị trong phạm vi và thời gian được ghi trên thẻ.',x:6,y:43,w:88,h:8,color:'#4b657d',size:8,bold:false,align:'left'}
   ]}};
 }
 function templateFor(type){let t={};try{t=JSON.parse(type?.template_json||'{}')}catch{};const d=defaultCardTemplate(type);return {...d,...t,front:{...d.front,...(t.front||{})},back:{...d.back,...(t.back||{})}}}
 function credentialText(t,x){return String(t||'').replaceAll('{{full_name}}',x.full_name||'').replaceAll('{{role_label}}',x.role_label||'').replaceAll('{{event_name}}',x.event_name||'').replaceAll('{{card_number}}',x.card_number||'').replaceAll('{{issued_at}}',x.issued_at||'—').replaceAll('{{expires_at}}',x.expires_at||'Không thời hạn')}
 function safeCssColor(v,fallback='#ffffff'){return /^#[a-f0-9]{6}$/i.test(v||'')?v:fallback}
 function cardHtml(x,t,side='front',qrUrl=''){
-  const elems=(t[side]?.elements||[]); const bg=side==='front'?`linear-gradient(135deg,#082b4b,${safeCssColor(t.accent,'#1677d2')})`:'linear-gradient(145deg,#f8fcff,#eaf5ff)';
-  const body=elems.map(e=>{const text=credentialText(e.text,x);const style=`left:${e.x}%;top:${e.y}%;width:${e.w}%;height:${e.h}%;color:${safeCssColor(e.color,side==='front'?'#fff':'#173e5d')};font-size:${e.size||10}px;font-weight:${e.bold?800:500};text-align:${e.align||'left'};display:flex;align-items:center;justify-content:${e.align==='center'?'center':e.align==='right'?'flex-end':'flex-start'};line-height:1.2;position:absolute;overflow:hidden;`;
+  const elems=(t[side]?.elements||[]);
+  const bg=side==='front'
+    ?`linear-gradient(135deg,#082b4b,${safeCssColor(t.accent,'#1677d2')})`
+    :'linear-gradient(145deg,#f8fcff,#eaf5ff)';
+  const clamp=(v,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(v))?Number(v):min));
+  const body=elems.map(e=>{
+    const w=clamp(e.w,4,100), h=clamp(e.h,4,100);
+    const xx=clamp(e.x,0,100-w), yy=clamp(e.y,0,100-h);
+    const text=credentialText(e.text,x);
+    const style=`left:${xx}%;top:${yy}%;width:${w}%;height:${h}%;color:${safeCssColor(e.color,side==='front'?'#fff':'#173e5d')};font-size:${clamp(e.size,6,96)}px;font-weight:${e.bold?800:500};text-align:${e.align||'left'};display:flex;align-items:center;justify-content:${e.align==='center'?'center':e.align==='right'?'flex-end':'flex-start'};line-height:1.2;position:absolute;overflow:hidden;`;
     if(e.kind==='qr')return `<img class="sf-card-el sf-card-qr" style="${style}padding:2.2%;background:#fff;border-radius:6px;object-fit:contain" src="${esc(qrUrl)}" alt="QR xác minh">`;
-    if(e.kind==='photo')return `<img class="sf-card-el" style="${style}object-fit:cover;border-radius:8px;background:#fff" src="${esc(x.photo_url||'/sfn-logo.png')}" alt="Ảnh">`;
+    if(e.kind==='photo')return `<img class="sf-card-el" style="${style}object-fit:cover;border-radius:${clamp(e.radius,0,32)}px;background:#fff" src="${esc(x.photo_url||'/sfn-logo.png')}" alt="Ảnh">`;
     if(e.kind==='logo')return `<img class="sf-card-el" style="${style}object-fit:contain" src="${esc(t.logo_url||'/sfn-logo.png')}" alt="Logo">`;
-    if(e.kind==='shape')return `<span class="sf-card-el" style="${style}background:${safeCssColor(e.color,'#ffffff')};border-radius:12px;opacity:.18"></span>`;
+    if(e.kind==='shape')return `<span class="sf-card-el" style="${style}background:${safeCssColor(e.color,'#ffffff')};border-radius:${clamp(e.radius,0,32)}px;opacity:${clamp(e.opacity,0,1)}"></span>`;
     return `<span class="sf-card-el" style="${style}">${esc(text)}</span>`;
   }).join('');
   return `<div class="sf-card-face" style="background:${bg}">${body}</div>`;
@@ -7731,10 +7741,73 @@ function openCardPrint(x,t){
   if(!w){toast('Trình duyệt đang chặn cửa sổ in. Hãy cho phép cửa sổ bật lên.','warn');return}
   w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Thẻ · ${esc(x.full_name||'')}</title><style>*{box-sizing:border-box}body{margin:0;padding:16mm;background:#fff;font-family:Arial,sans-serif}.page{display:flex;flex-direction:column;gap:12mm;align-items:center}.sf-card-face{position:relative;width:86mm;height:54mm;overflow:hidden;border-radius:4mm;box-shadow:0 4mm 12mm rgba(0,0,0,.12);print-color-adjust:exact;-webkit-print-color-adjust:exact}.sf-card-el{font-family:Arial,sans-serif;box-sizing:border-box}@page{size:A4;margin:10mm}@media print{body{padding:0}.sf-card-face{box-shadow:none;border-radius:0}}.label{font-size:9pt;color:#667085;margin:0}</style></head><body><div class="page"><div><p class="label">Mặt trước</p>${cardHtml(x,t,'front',qr)}</div><div><p class="label">Mặt sau</p>${cardHtml(x,t,'back',qr)}</div></div><script>addEventListener('load',()=>setTimeout(()=>print(),500));<\/script></body></html>`);w.document.close();
 }
+function cardSvg(x,t,side='front',qr=''){
+  const inner=cardHtml(x,t,side,qr)
+    .replace(/<img\b([^>]*?)>/gi,'<img$1 />');
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1016" height="638" viewBox="0 0 100 62.75"><foreignObject x="0" y="0" width="100" height="62.75"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;font-family:Arial,sans-serif">${inner}</div></foreignObject></svg>`;
+}
+async function fetchAsDataUrl(url){
+  if(!url)return '';
+  const r=await fetch(url,{credentials:'same-origin'});
+  if(!r.ok)throw new Error(`Không thể tải asset (${r.status}).`);
+  const blob=await r.blob();
+  return await new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onload=()=>resolve(String(fr.result));
+    fr.onerror=()=>reject(new Error('Không thể đọc asset.'));
+    fr.readAsDataURL(blob);
+  });
+}
+async function exportCardAssets(x,t){
+  const out={...x};
+  const qr=cardQrSrc(x,600);
+  out._qrData=await fetchAsDataUrl(qr);
+  out.photo_url=await fetchAsDataUrl(x.photo_url||'/sfn-logo.png');
+  if(t.logo_url)t={...t,logo_url:await fetchAsDataUrl(t.logo_url)};
+  return {x:out,t};
+}
+function cardSvg(x,t,side='front',qr=''){
+  const inner=cardHtml(x,t,side,qr)
+    .replace(/<img\b([^>]*?)>/gi,'<img$1 />');
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1016" height="638" viewBox="0 0 100 62.75"><foreignObject x="0" y="0" width="100" height="62.75"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;font-family:Arial,sans-serif">${inner}</div></foreignObject></svg>`;
+}
+async function rasterizeCard(x,t,side,mime){
+  const assets=await exportCardAssets(x,t);
+  const qr=assets.x._qrData;
+  const svg=cardSvg(assets.x,assets.t,side,qr);
+  const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
+  try{
+    const img=new Image();
+    img.decoding='async';
+    img.src=url;
+    await img.decode();
+    const canvas=document.createElement('canvas');
+    canvas.width=1016;canvas.height=638;
+    const ctx=canvas.getContext('2d');
+    if(!ctx)throw new Error('Trình duyệt không hỗ trợ xuất ảnh.');
+    ctx.drawImage(img,0,0,1016,638);
+    return canvas.toDataURL(mime,mime==='image/jpeg'?0.96:1);
+  }finally{URL.revokeObjectURL(url)}
+}
+function downloadDataUrl(dataUrl,name){
+  const a=document.createElement('a');a.href=dataUrl;a.download=name;a.click();
+}
+async function downloadCardImage(x,t,side='front',mime='image/png'){
+  if(!x?.verify_token)throw new Error('Thẻ chưa có QR xác minh.');
+  const ext=mime==='image/jpeg'?'jpg':'png';
+  const data=await rasterizeCard(x,t,side,mime);
+  downloadDataUrl(data,`the-${String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-')}-${side}.${ext}`);
+  toast(`Đã xuất mặt thẻ dạng ${ext.toUpperCase()}.`);
+}
 async function downloadCardSvg(x,t,side='front'){
-  const qr=cardQrSrc(x, 600), width=1016,height=638; const inner=cardHtml(x,t,side,qr).replace(/class="sf-card-face" style="background:([^\"]+)"/,'class="sf-card-face"');
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 100 62.75"><foreignObject x="0" y="0" width="100" height="62.75"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;font-family:Arial,sans-serif">${inner}</div></foreignObject></svg>`;
-  const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`the-${String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-')}-${side}.svg`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);toast('Đã tải mặt thẻ xuống dạng SVG chất lượng cao.');
+  if(!x?.verify_token)throw new Error('Thẻ chưa có QR xác minh.');
+  const assets=await exportCardAssets(x,t);
+  const svg=cardSvg(assets.x,assets.t,side,assets.x._qrData);
+  const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=`the-${String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-')}-${side}.svg`;
+  a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  toast('Đã tải mặt thẻ dạng SVG.');
 }
 async function mountCardDesignStudio(container){
   const d=await api('/api/admin/card-designs'); const items=d.items||[];

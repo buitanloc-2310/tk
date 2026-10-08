@@ -1228,8 +1228,35 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(req.method==='PUT'){
       const input=await bodyJson(req),accent=clean(input.accent,7),subtitle=clean(input.subtitle,90);
       if(!/^#[a-f0-9]{6}$/i.test(accent))return json({error:'INVALID_ACCENT'},400);
-      const sanitizeElements=arr=>Array.isArray(arr)?arr.slice(0,40).map((x,i)=>({id:String(x.id||('el_'+i)).slice(0,60),kind:['text','photo','logo','qr','shape'].includes(x.kind)?x.kind:'text',text:clean(x.text,240),x:Number.isFinite(Number(x.x))?Math.max(0,Math.min(100,Number(x.x))):5,y:Number.isFinite(Number(x.y))?Math.max(0,Math.min(100,Number(x.y))):5,w:Number.isFinite(Number(x.w))?Math.max(4,Math.min(100,Number(x.w))):30,h:Number.isFinite(Number(x.h))?Math.max(4,Math.min(100,Number(x.h))):10,color:/^#[a-f0-9]{6}$/i.test(x.color||'')?x.color:'#ffffff',size:Number.isFinite(Number(x.size))?Math.max(8,Math.min(72,Number(x.size))):14,bold:!!x.bold,align:['left','center','right'].includes(x.align)?x.align:'left'})):[];
-      const template={...previous,version:2,accent,subtitle,size:{width_mm:86,height_mm:54},front:{...(previous.front||{}),elements:sanitizeElements(input.front?.elements||previous.front?.elements)},back:{...(previous.back||{}),elements:sanitizeElements(input.back?.elements||previous.back?.elements)},backTitle:clean(input.backTitle||previous.backTitle||'HIỆU LỰC & CÁCH SỬ DỤNG',120)};
+      const sanitizeElements=(arr,side='front')=>{
+        if(!Array.isArray(arr))return [];
+        return arr.slice(0,40).map((x,i)=>{
+          const kind=['text','photo','logo','qr','shape'].includes(x.kind)?x.kind:'text';
+          const w=Number.isFinite(Number(x.w))?Math.max(4,Math.min(100,Number(x.w))):30;
+          const h=Number.isFinite(Number(x.h))?Math.max(4,Math.min(100,Number(x.h))):10;
+          const rawX=Number.isFinite(Number(x.x))?Number(x.x):5;
+          const rawY=Number.isFinite(Number(x.y))?Number(x.y):5;
+          return {
+            id:String(x.id||('el_'+i)).slice(0,60),
+            kind:side==='back'&&kind==='qr'?'text':kind,
+            text:clean(x.text,240),
+            x:Math.max(0,Math.min(100-w,rawX)),
+            y:Math.max(0,Math.min(100-h,rawY)),
+            w,h,
+            color:/^#[a-f0-9]{6}$/i.test(x.color||'')?x.color:'#ffffff',
+            size:Number.isFinite(Number(x.size))?Math.max(8,Math.min(72,Number(x.size))):14,
+            bold:!!x.bold,
+            align:['left','center','right'].includes(x.align)?x.align:'left',
+            radius:Number.isFinite(Number(x.radius))?Math.max(0,Math.min(32,Number(x.radius))):8,
+            opacity:Number.isFinite(Number(x.opacity))?Math.max(0,Math.min(1,Number(x.opacity))):1
+          };
+        });
+      };
+      const frontElements=sanitizeElements(input.front?.elements||previous.front?.elements,'front');
+      if(!frontElements.some(x=>x.kind==='qr')){
+        frontElements.push({id:'qr',kind:'qr',text:'',x:72,y:18,w:21,h:28,color:'#ffffff',size:8,bold:false,align:'center',radius:6,opacity:1});
+      }
+      const template={...previous,version:2,accent,subtitle,size:{width_mm:86,height_mm:54},front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:sanitizeElements(input.back?.elements||previous.back?.elements,'back')},backTitle:clean(input.backTitle||previous.backTitle||'HIỆU LỰC & CÁCH SỬ DỤNG',120)};
       await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
       await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
       return json({ok:true,template});
@@ -4814,8 +4841,8 @@ export default{
           const elevated=await isNetworkAdmin(env,fs.account_id);
           if(!elevated)return new Response('Forbidden',{status:403});
         }else if(!ownerMatch&&/^(members|documents)\//.test(key)){
-          const ownSegment=`/${fs.person_id}/`;
-          if(!(`/`+key).includes(ownSegment)&&!await isNetworkAdmin(env,fs.account_id))return new Response('Forbidden',{status:403});
+          const ownerKey=key.match(/^(?:members|documents)\/([^/]+)\//)?.[1]||'';
+          if(ownerKey!==fs.person_id&&!await isNetworkAdmin(env,fs.account_id))return new Response('Forbidden',{status:403});
         }
       }
       const o=await env.FILES.get(key);
