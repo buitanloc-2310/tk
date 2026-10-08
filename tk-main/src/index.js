@@ -709,6 +709,31 @@ async function api(req,env,url){
       });
     }
 
+    const oneTime=await env.DB.prepare(`
+      SELECT
+        o.card_number,
+        o.status,
+        o.issued_at,
+        o.expires_at,
+        o.event_name,
+        o.full_name,
+        o.role_label,
+        o.photo_url,
+        t.name card_type_name
+      FROM one_time_credentials o
+      LEFT JOIN card_types t ON t.id=o.card_type_id
+      WHERE o.verify_token=? OR o.card_number=?
+      LIMIT 1
+    `).bind(code,code).first();
+    if(oneTime){
+      const today=new Date().toISOString().slice(0,10);
+      return json({
+        type:'one_time',
+        valid:oneTime.status==='active' && (!oneTime.expires_at || oneTime.expires_at>=today),
+        record:oneTime
+      });
+    }
+
     const cert=await env.DB.prepare(`
       SELECT
         c.certificate_no,
@@ -1137,14 +1162,47 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(!sameOrigin(req)) return json({error:'ORIGIN_FORBIDDEN'},403);
 
 
+  if(url.pathname==='/api/admin/one-time-credentials'&&['GET','POST'].includes(req.method)){
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(req.method==='GET'){
+      const r=await env.DB.prepare(`SELECT o.*,t.name card_type_name FROM one_time_credentials o LEFT JOIN card_types t ON t.id=o.card_type_id ORDER BY o.created_at DESC LIMIT 250`).all();
+      return json({items:r.results||[]});
+    }
+    const b=await bodyJson(req);
+    const fullName=clean(b.full_name,160);
+    const eventName=clean(b.event_name,200);
+    if(!fullName||!eventName)return json({error:'FULL_NAME_AND_EVENT_REQUIRED'},400);
+    const id=uid('otc');
+    const verify=verifyCode('EVT');
+    const cardNumber=clean(b.card_number,120)||`SFN-EVT-${String(Date.now()).slice(-8)}`;
+    const status=['active','used','expired','revoked'].includes(b.status)?b.status:'active';
+    try{
+      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,clean(b.photo_url,500)||null,cardNumber,clean(b.issued_at,20)||new Date().toISOString().slice(0,10),clean(b.expires_at,20)||null,status,verify,clean(b.card_type_id,80)||null,clean(b.notes,1000)||null,s.account_id).run();
+    }catch(e){return json({error:String(e).includes('UNIQUE')?'CARD_NUMBER_ALREADY_USED':'CREATE_FAILED'},400)}
+    await safeAudit(env,s.account_id,'one_time_credential_issued','one_time_credential',id,null,{event_name:eventName,card_number:cardNumber});
+    return json({ok:true,id,verify_token:verify,card_number:cardNumber});
+  }
+  const oneTimeAction=url.pathname.match(/^\/api\/admin\/one-time-credentials\/([^/]+)\/(revoke|use)$/);
+  if(oneTimeAction&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    const id=decodeURIComponent(oneTimeAction[1]);
+    const action=oneTimeAction[2];
+    const row=await env.DB.prepare('SELECT id,status FROM one_time_credentials WHERE id=?').bind(id).first();
+    if(!row)return json({error:'NOT_FOUND'},404);
+    const next=action==='revoke'?'revoked':'used';
+    await env.DB.prepare('UPDATE one_time_credentials SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(next,id).run();
+    await safeAudit(env,s.account_id,action==='revoke'?'one_time_credential_revoked':'one_time_credential_used','one_time_credential',id,null,{});
+    return json({ok:true,status:next});
+  }
+
   if(url.pathname==='/api/admin/card-designs'&&req.method==='GET'){
-    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
     const r=await env.DB.prepare('SELECT id,code,name,template_json,active FROM card_types ORDER BY name').all();
     return json({items:r.results||[]});
   }
   const designer=url.pathname.match(/^\/api\/admin\/card-designs\/([^/]+)(?:\/(logo))?$/);
   if(designer){
-    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
     const id=decodeURIComponent(designer[1]);
     const row=await env.DB.prepare('SELECT id,template_json FROM card_types WHERE id=?').bind(id).first();
     if(!row)return json({error:'CARD_TYPE_NOT_FOUND'},404);
@@ -1170,7 +1228,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(req.method==='PUT'){
       const input=await bodyJson(req),accent=clean(input.accent,7),subtitle=clean(input.subtitle,90);
       if(!/^#[a-f0-9]{6}$/i.test(accent))return json({error:'INVALID_ACCENT'},400);
-      const template={...previous,accent,subtitle};
+      const sanitizeElements=arr=>Array.isArray(arr)?arr.slice(0,40).map((x,i)=>({id:String(x.id||('el_'+i)).slice(0,60),kind:['text','photo','logo','qr','shape'].includes(x.kind)?x.kind:'text',text:clean(x.text,240),x:Number.isFinite(Number(x.x))?Math.max(0,Math.min(100,Number(x.x))):5,y:Number.isFinite(Number(x.y))?Math.max(0,Math.min(100,Number(x.y))):5,w:Number.isFinite(Number(x.w))?Math.max(4,Math.min(100,Number(x.w))):30,h:Number.isFinite(Number(x.h))?Math.max(4,Math.min(100,Number(x.h))):10,color:/^#[a-f0-9]{6}$/i.test(x.color||'')?x.color:'#ffffff',size:Number.isFinite(Number(x.size))?Math.max(8,Math.min(72,Number(x.size))):14,bold:!!x.bold,align:['left','center','right'].includes(x.align)?x.align:'left'})):[];
+      const template={...previous,version:2,accent,subtitle,size:{width_mm:86,height_mm:54},front:{...(previous.front||{}),elements:sanitizeElements(input.front?.elements||previous.front?.elements)},back:{...(previous.back||{}),elements:sanitizeElements(input.back?.elements||previous.back?.elements)},backTitle:clean(input.backTitle||previous.backTitle||'HIỆU LỰC & CÁCH SỬ DỤNG',120)};
       await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
       await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
       return json({ok:true,template});
