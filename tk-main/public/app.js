@@ -1269,8 +1269,8 @@ function renderApp(){
 
           ${portals()}
 
-          <a href="mailto:member@skyfirst.io.vn">
-            Thành viên: member@skyfirst.io.vn
+          <a href="mailto:support@skyfirst.io.vn">
+            Hỗ trợ: support@skyfirst.io.vn
           </a>
 
         </div>
@@ -2964,15 +2964,15 @@ function renderSupport(c){
 
         <p>
           <b>Email hỗ trợ:</b>
-          <a href="mailto:member@skyfirst.io.vn">
+          <a href="mailto:support@skyfirst.io.vn">
             support@skyfirst.io.vn
           </a>
         </p>
 
         <p>
           <b>Email liên hệ:</b>
-          <a href="mailto:member@skyfirst.io.vn">
-            support@skyfirst.io.vn
+          <a href="mailto:lienhe@skyfirst.io.vn">
+            lienhe@skyfirst.io.vn
           </a>
         </p>
 
@@ -3964,6 +3964,7 @@ async function renderAdminRequests(c){
           return;
         }
 
+        const sendEmail=confirm('Gửi email thông báo phê duyệt đến người đăng ký?\nOK: Gửi email · Hủy: Chỉ phê duyệt, không gửi.');
         try{
 
           const z=
@@ -3972,7 +3973,8 @@ async function renderAdminRequests(c){
               {
                 method:'POST',
                 body:JSON.stringify({
-                  admin_note:note
+                  admin_note:note,
+                  send_email:sendEmail
                 })
               }
             );
@@ -5692,7 +5694,7 @@ if(tab==='membership'){
             );
 
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
@@ -5876,7 +5878,7 @@ if(tab==='membership'){
               }
             );
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
@@ -6037,7 +6039,7 @@ if(tab==='membership'){
               }
             );
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
@@ -6234,7 +6236,7 @@ if(tab==='membership'){
               }
             );
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
@@ -6316,9 +6318,9 @@ if(tab==='membership'){
     box.innerHTML=`<div class="toolbar"><button id="newEvaluation" class="primary">Thêm đánh giá</button></div><div class="list">${rows.length?rows.map(x=>`<div class="list-item"><b>${esc(x.period_label||x.period_type)} · ${esc(x.rating||'Chưa xếp loại')}</b><div class="meta">${esc(x.org_name||'Sky First Network')} · Người đánh giá: ${esc(x.evaluator_username||'—')} · ${x.total_score??'—'} điểm · ${esc(x.status)}</div>${x.comments?`<div>${esc(x.comments)}</div>`:''}<div class="toolbar" style="margin-top:8px">${x.status!=='final'?`<button data-eval-edit="${x.id}">Chỉnh sửa</button><button data-eval-final="${x.id}" class="primary">Chốt đánh giá</button>`:''}${x.status==='hidden'?`<button data-eval-show="${x.id}">Khôi phục</button>`:`<button data-eval-hide="${x.id}" class="danger">Ẩn</button>`}</div></div>`).join(''):'<div class="empty">Chưa có đánh giá.</div>'}</div>`;
     const form=(x={})=>modal(x.id?'Chỉnh sửa đánh giá':'Thêm đánh giá',`<form id="evaluationForm" class="form-grid"><label>Kỳ<select name="period_type"><option value="month">Tháng</option><option value="quarter">Quý</option><option value="half_year">6 tháng</option><option value="year">Năm</option><option value="program">Chương trình</option></select></label><label>Tên kỳ<input name="period_label" required value="${esc(x.period_label||'')}"></label><label>Đơn vị<select name="org_node_id"><option value="">Sky First Network</option>${meta.orgs.map(o=>`<option value="${o.id}" ${o.id===x.org_node_id?'selected':''}>${esc(o.name)}</option>`).join('')}</select></label><label>Điểm tổng<input type="number" min="0" max="100" step="0.1" name="total_score" value="${x.total_score??''}"></label><label>Xếp loại<input name="rating" value="${esc(x.rating||'')}"></label><label>Hiển thị<select name="visibility"><option value="member">Thành viên được xem</option><option value="admin">Chỉ quản trị</option></select></label><label style="grid-column:1/-1">Nhận xét<textarea name="comments" rows="5">${esc(x.comments||'')}</textarea></label><button class="primary">Lưu đánh giá</button></form>`);
     $('#newEvaluation').onclick=()=>{form();setTimeout(()=>{$('#evaluationForm').onsubmit=saveEval},0)};
-    const saveEval=async e=>{e.preventDefault();const id=e.target.dataset.id;await api(`/api/admin/members/${p.id}/evaluation${id?'/'+id:''}`,{method:id?'PATCH':'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});location.reload()};
+    const saveEval=async e=>{e.preventDefault();const id=e.target.dataset.id;await api(`/api/admin/members/${p.id}/evaluation${id?'/'+id:''}`,{method:id?'PATCH':'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await refreshAdminMemberTab(p.id,tab)};
     $$('[data-eval-edit]').forEach(b=>b.onclick=()=>{const x=rows.find(r=>r.id===b.dataset.evalEdit);form(x);setTimeout(()=>{const f=$('#evaluationForm');f.dataset.id=x.id;f.onsubmit=saveEval},0)});
-    for(const [sel,act] of [['[data-eval-final]','finalize'],['[data-eval-hide]','hide'],['[data-eval-show]','show']]) $$(sel).forEach(b=>b.onclick=async()=>{const id=b.dataset.evalFinal||b.dataset.evalHide||b.dataset.evalShow;await api(`/api/admin/members/${p.id}/evaluation/${id}/${act}`,{method:'POST'});location.reload()});
+    for(const [sel,act] of [['[data-eval-final]','finalize'],['[data-eval-hide]','hide'],['[data-eval-show]','show']]) $$(sel).forEach(b=>b.onclick=async()=>{const id=b.dataset.evalFinal||b.dataset.evalHide||b.dataset.evalShow;await api(`/api/admin/members/${p.id}/evaluation/${id}/${act}`,{method:'POST'});await refreshAdminMemberTab(p.id,tab)});
   }
 
   if(tab==='audit'){
@@ -6490,7 +6492,7 @@ if(tab==='membership'){
             'Đã xác minh chứng nhận.'
           );
 
-          location.reload();
+          await refreshAdminMemberTab(p.id,tab);
 
         }catch(err){
 
@@ -6522,7 +6524,7 @@ if(tab==='membership'){
             'Đã từ chối xác minh.'
           );
 
-          location.reload();
+          await refreshAdminMemberTab(p.id,tab);
 
         }catch(err){
 
@@ -6723,7 +6725,7 @@ if(tab==='membership'){
             );
 
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
@@ -6814,7 +6816,7 @@ if(tab==='membership'){
             'Mô tả'
           ]
         ],
-        ()=>location.reload()
+        async()=>await refreshAdminMemberTab(p.id,tab)
       );
   }
 
@@ -7009,7 +7011,7 @@ if(tab==='membership'){
             );
 
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
@@ -7110,7 +7112,7 @@ if(tab==='membership'){
             'Ngày'
           ]
         ],
-        ()=>location.reload()
+        async()=>await refreshAdminMemberTab(p.id,tab)
       );
   }
 
@@ -7260,7 +7262,7 @@ if(tab==='membership'){
           );
 
 
-          location.reload();
+          await refreshAdminMemberTab(p.id,tab);
 
         }catch(err){
 
@@ -7436,7 +7438,7 @@ if(tab==='membership'){
             );
 
 
-            location.reload();
+            await refreshAdminMemberTab(p.id,tab);
 
           }catch(err){
 
