@@ -69,7 +69,7 @@ function maybeShowOnboarding(){
   if(!state.me?.is_member)return;
   const code=state.me.person?.member_code||state.me.person?.id||'member';const key='sfn:onboard:v1:'+code;
   if(safeStore.get(key))return;
-  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung tâm thành viên số SKY FIRST',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
+  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung Tâm Thành Viên Số Sky First',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
     const finish=view=>{safeStore.set(key,'1');$('#modal')?.remove();if(view)goView(view)};$('#finishOnboarding').onclick=()=>finish();$$('[data-onboard]').forEach(b=>b.onclick=()=>finish(b.dataset.onboard));
   },250);
 }
@@ -1085,7 +1085,7 @@ async function renderAccountRequest(){
 
 const NAV_ICONS={
   home:'⌂',profile:'◎',journey:'↗',goals:'◔',tasks:'✓',activities:'✦',certificates:'▣',achievements:'★',evaluations:'◫',history:'↺',documents:'▤',cards:'▱',cv:'▥',notifications:'◉',calendar:'▦',security:'⌁',support:'?',
-  'admin-requests':'◌','admin-calendar':'▦','admin-members':'◎','admin-org':'⌘','admin-audit':'◒','admin-super':'✧','admin-studio':'◈'
+  'admin-requests':'◌','admin-calendar':'▦','admin-members':'◎','admin-org':'⌘','admin-audit':'◒','admin-super':'✧','admin-studio':'◈','admin-work':'✓','admin-reports':'▥','admin-system':'⚙'
 };
 function navButton(id,label){
   const icon=NAV_ICONS[id]||'•';
@@ -1098,7 +1098,7 @@ function navButton(id,label){
 
 const VIEW_META={
   home:['Tổng quan','Không gian điều hành hành trình thành viên'],profile:['Hồ sơ của tôi','Định danh và thông tin thành viên'],journey:['Hành trình của tôi','Các cột mốc và đóng góp'],goals:['Mục tiêu & Tiến độ','Theo dõi mục tiêu cá nhân'],tasks:['Công việc','Nhiệm vụ và tiến độ'],activities:['Hoạt động','Các hoạt động đã tham gia'],certificates:['Chứng nhận','Kho chứng nhận đã xác minh'],achievements:['Thành tích & Ghi nhận','Những dấu mốc nổi bật'],evaluations:['Đánh giá của tôi','Kết quả và lịch sử đánh giá'],history:['Quá trình công tác','Vai trò và đơn vị theo thời gian'],documents:['Tài liệu của tôi','Tài liệu cá nhân và minh chứng'],cards:['Thẻ của tôi','Thẻ thành viên và xác minh QR'],cv:['CV / Hồ sơ năng lực','Hồ sơ năng lực một trang A4'],notifications:['Thông báo','Thông tin mới và việc cần chú ý'],calendar:['Lịch của tôi','Lịch hoạt động và lịch cá nhân'],security:['Bảo mật & Phiên đăng nhập','Thiết bị và phiên truy cập'],support:['Tài khoản & Hỗ trợ','Cài đặt và trung tâm hỗ trợ'],
-  'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-super':['SUPER_ADMIN Center','Tổng quan hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Studio vận hành và nhận diện']
+  'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-work':['Trung tâm công việc','Việc đang chờ xử lý và cảnh báo'], 'admin-reports':['Báo cáo & thống kê','Số liệu vận hành từ dữ liệu thật'], 'admin-super':['SUPER_ADMIN Center','Tổng quan và kiểm soát hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Điều chỉnh nội dung và số liệu'], 'admin-system':['Cấu hình hệ thống','Bộ lọc, an toàn và tình trạng dịch vụ']
 };
 function currentViewMeta(){return VIEW_META[state.view]||['Trung tâm thành viên số','Không gian quản trị Sky First'];}
 
@@ -1168,7 +1168,7 @@ function renderApp(){
             </div>
 
             <div class="side-brand-sub">
-              Trung tâm thành viên số SKY FIRST
+              Sky First Network
             </div>
 
           </div>
@@ -1329,7 +1329,7 @@ function renderApp(){
                       :''
                   }
 
-                  ${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center')+navButton('admin-studio','Cấu hình giao diện & thống kê'):''}
+                  ${hasP('member.view')?navButton('admin-work','Trung tâm công việc')+navButton('admin-reports','Báo cáo & thống kê'):''}${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center')+navButton('admin-studio','Cấu hình giao diện & thống kê')+navButton('admin-system','Cấu hình hệ thống'):''}
 
                 </nav>
               `
@@ -1902,6 +1902,9 @@ async function renderView(){
     if(state.view==='admin-audit'){
       return renderAdminAudit(c);
     }
+    if(state.view==='admin-work'){return renderAdminWork(c)}
+    if(state.view==='admin-reports'){return renderAdminReports(c)}
+    if(state.view==='admin-system'){return renderAdminSystem(c)}
     if(state.view==='admin-studio'){return renderPortalStudio(c)}
     if(state.view==='admin-super'){
       return renderSuperAdmin(c);
@@ -7728,7 +7731,7 @@ async function renderAdminOrg(c){
       </h1>
 
       <button
-        id="centerNew" class="secondary">Tạo Trung tâm thành viên số SKY FIRST</button><button id="orgNew"
+        id="centerNew" class="secondary">Tạo Trung Tâm Thành Viên Số Sky First</button><button id="orgNew"
         class="primary"
       >
         Thêm bộ phận / đơn vị
@@ -7917,7 +7920,7 @@ async function renderAdminOrg(c){
                 Loại
 
                 <select name="node_type">
-                <option value="digital_member_center" ${x.node_type==='digital_member_center'?'selected':''}>Trung tâm thành viên số SKY FIRST</option>
+                <option value="digital_member_center" ${x.node_type==='digital_member_center'?'selected':''}>Trung Tâm Thành Viên Số Sky First</option>
 
                   ${
                     [
@@ -8108,7 +8111,7 @@ async function renderAdminOrg(c){
 
 
         modal(
-          createCenter?'Tạo Trung tâm thành viên số SKY FIRST':'Thêm bộ phận / đơn vị',
+          createCenter?'Tạo Trung Tâm Thành Viên Số Sky First':'Thêm bộ phận / đơn vị',
           `
           <form
             id="orgForm"
@@ -8122,7 +8125,7 @@ async function renderAdminOrg(c){
                 name="name"
                 required
                 maxlength="200"
-                value="${createCenter?'Trung tâm thành viên số SKY FIRST':''}"
+                value="${createCenter?'Trung Tâm Thành Viên Số Sky First':''}"
                 ${createCenter?'readonly':''}
               >
             </label>
@@ -8150,7 +8153,7 @@ async function renderAdminOrg(c){
             <label>
               Loại
 
-              <select name="node_type"><option value="digital_member_center" ${createCenter?'selected':''}>Trung tâm thành viên số SKY FIRST</option>
+              <select name="node_type"><option value="digital_member_center" ${createCenter?'selected':''}>Trung Tâm Thành Viên Số Sky First</option>
 
                 <option value="executive_board" ${createCenter?'':'selected'}>
                   BCH
@@ -8264,6 +8267,33 @@ async function renderAdminOrg(c){
   load();
 }
 
+
+
+/* =========================================================
+   ADMIN - WORK CENTER / REPORTS / SYSTEM
+   ========================================================= */
+async function renderAdminWork(c){
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">ĐIỀU HÀNH</div><h1>Trung tâm công việc</h1><p class="muted">Một nơi để nhìn thấy việc cần xử lý mà không phải mở từng phân hệ.</p></div><button class="secondary" id="workRefresh">Làm mới</button></div><div id="workBox" class="card">Đang tải...</div>`;
+  const load=async()=>{
+    const d=await api('/api/admin/work-center');
+    const items=d.items||[];
+    $('#workBox').outerHTML=`<div id="workBox"><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${[['Yêu cầu chờ',d.counts.pending_requests],['Tài khoản cần chú ý',d.counts.account_attention],['Thẻ sắp hết hạn',d.counts.expiring_cards],['Hồ sơ thiếu thông tin',d.counts.incomplete_profiles]].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div><div class="card"><div class="section-title"><h2>Danh sách việc cần xử lý</h2></div>${items.length?`<div class="table-wrap"><table><thead><tr><th>Loại việc</th><th>Nội dung</th><th>Đối tượng</th><th>Thời gian</th><th></th></tr></thead><tbody>${items.map(x=>`<tr><td>${esc(x.kind_label)}</td><td><b>${esc(x.title)}</b><div class="meta">${esc(x.detail||'')}</div></td><td>${esc(x.target||'—')}</td><td>${esc(x.created_at||'')}</td><td><button class="secondary" data-work-view="${esc(x.target_view||'admin-members')}">Mở</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Hiện không có việc cần xử lý.</div>'}</div></div>`;
+    $$('[data-work-view]').forEach(b=>b.onclick=()=>navigate(b.dataset.workView));
+  };
+  $('#workRefresh').onclick=load; await load();
+}
+
+async function renderAdminReports(c){
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">DỮ LIỆU VẬN HÀNH</div><h1>Báo cáo & thống kê</h1><p class="muted">Số liệu được tính trực tiếp từ dữ liệu thành viên, tài khoản, đơn vị và thẻ.</p></div><button class="secondary" id="reportRefresh">Làm mới</button></div><div id="reportBox" class="card">Đang tải...</div>`;
+  const load=async()=>{const d=await api('/api/admin/reports');$('#reportBox').innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${Object.entries(d.summary||{}).map(([k,v])=>`<div class="card stat"><span>${esc(v.label)}</span><strong>${v.value}</strong></div>`).join('')}</div><div class="section-grid"><div class="card"><h2>Thành viên theo trạng thái</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.member_status||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div><div class="card"><h2>Thành viên theo đơn vị</h2><div class="table-wrap"><table><thead><tr><th>Đơn vị</th><th>Số lượng</th></tr></thead><tbody>${(d.orgs||[]).map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div></div><div class="card" style="margin-top:14px"><h2>Thẻ thành viên</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.cards||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div>`};
+  $('#reportRefresh').onclick=load; await load();
+}
+
+async function renderAdminSystem(c){
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">SUPER_ADMIN</div><h1>Cấu hình hệ thống</h1><p class="muted">Các thiết lập vận hành, bộ lọc đã lưu và tình trạng dịch vụ.</p></div></div><div class="section-grid"><div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu bộ lọc quản trị để không phải chọn lại mỗi lần.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div><div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div></div>`;
+  const refresh=async()=>{const [f,h]=await Promise.all([api('/api/admin/saved-filters'),api('/api/admin/system-health')]);$('#savedFilters').innerHTML=(f.items||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div class="meta">${esc(x.view)} · ${esc(x.query||'Không có điều kiện')}</div></div><button class="danger" data-filter-del="${esc(x.id)}">Xóa</button></div>`).join('')||'<div class="empty">Chưa có bộ lọc đã lưu.</div>';$('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b>${h.database==='ok'?'Hoạt động':'Có lỗi'}</b></div><div class="list-row"><span>Phiên bản lược đồ</span><b>${esc(h.schema_version||'—')}</b></div><div class="list-row"><span>Kho tệp</span><b>${h.r2_binding?'Đã khai báo':'Chưa kiểm tra kết nối'}</b></div><div class="list-row"><span>Email</span><b>${h.email_binding?'Đã khai báo':'Chưa kiểm tra kết nối'}</b></div><div class="meta" style="margin-top:10px">Không đánh dấu PASS cho dịch vụ chưa thực sự được kiểm chứng.</div>`;$$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()})};
+  $('#savedFilterForm').onsubmit=async e=>{e.preventDefault();const x=Object.fromEntries(new FormData(e.target));await api('/api/admin/saved-filters',{method:'POST',body:JSON.stringify(x)});e.target.reset();toast('Đã lưu bộ lọc.');await refresh()}; await refresh();
+}
 
 /* =========================================================
    ADMIN - AUDIT
