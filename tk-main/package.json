@@ -1,6 +1,6 @@
 {
   "name": "sfn-member-portal",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",

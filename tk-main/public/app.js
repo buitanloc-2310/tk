@@ -3226,6 +3226,7 @@ async function renderCalendar(
 
     </div>
 
+    ${admin?'<div class="bulk-bar" id="calendarBulkBar"><div><b id="calendarSelectedCount">0</b> lịch đã chọn</div><div class="toolbar"><button id="calendarSelectAll" class="secondary">Chọn tất cả</button><button id="calendarBulkDelete" class="danger">Xóa lịch đã chọn</button></div></div>':''}
     <div
       id="calendarBox"
       class="card"
@@ -3259,6 +3260,7 @@ async function renderCalendar(
                   x=>`
                     <div class="list-item">
 
+                      ${admin?`<label class="bulk-check"><input type="checkbox" data-calendar-check="${esc(x.id)}"> Chọn</label>`:''}
                       <b>
                         ${esc(x.title)}
                       </b>
@@ -3328,8 +3330,13 @@ async function renderCalendar(
 
 
       if(admin){
+        const syncCalendarBulk=()=>{const n=$$('[data-calendar-check]:checked').length;$('#calendarSelectedCount')?.replaceChildren(document.createTextNode(String(n)));const b=$('#calendarBulkDelete');if(b)b.disabled=n===0};
+        $$('[data-calendar-check]').forEach(x=>x.addEventListener('change',syncCalendarBulk));
+        $('#calendarSelectAll')?.addEventListener('click',()=>{$$('[data-calendar-check]').forEach(x=>x.checked=true);syncCalendarBulk()});
+        $('#calendarBulkDelete')?.addEventListener('click',async()=>{const ids=$$('[data-calendar-check]:checked').map(x=>x.dataset.calendarCheck);if(!ids.length||!confirm(`Xóa ${ids.length} lịch đã chọn?`))return;for(const id of ids){try{await api(`/api/admin/calendar/${encodeURIComponent(id)}`,{method:'DELETE'})}catch{}}toast(`Đã xử lý ${ids.length} lịch.`);await load()});syncCalendarBulk();
 
         $$('[data-cal-del]').forEach(
+
           b=>b.onclick=async()=>{
 
             if(
@@ -3646,6 +3653,7 @@ async function renderAdminRequests(c){
 
               <tr>
 
+                <th><input type="checkbox" id="selectAllRequests" aria-label="Chọn tất cả yêu cầu"></th>
                 <th>
                   Mã yêu cầu
                 </th>
@@ -3687,6 +3695,8 @@ async function renderAdminRequests(c){
                 d.items.map(
                   x=>`
                     <tr>
+
+                      <td><input type="checkbox" data-request-check="${esc(x.id)}"></td>
 
                       <td>
                         ${esc(x.request_code)}
@@ -3759,6 +3769,13 @@ async function renderAdminRequests(c){
         </div>
       `;
 
+
+      const requestIds=()=>$$('[data-request-check]:checked').map(x=>x.dataset.requestCheck);
+      const syncReqBulk=()=>{const n=requestIds().length;const host=$('#reqList');let bar=$('#requestBulkBar');if(!bar){bar=document.createElement('div');bar.id='requestBulkBar';bar.className='bulk-bar';bar.innerHTML='<div><b id="requestSelectedCount">0</b> yêu cầu đã chọn</div><div class="toolbar"><button id="bulkReqApprove" class="primary">Phê duyệt</button><button id="bulkReqSupplement" class="secondary">Yêu cầu bổ sung</button><button id="bulkReqReject" class="danger">Từ chối</button></div>';host.parentNode.insertBefore(bar,host)}$('#requestSelectedCount').textContent=n;['#bulkReqApprove','#bulkReqSupplement','#bulkReqReject'].forEach(sel=>{const b=$(sel);if(b)b.disabled=n===0})};
+      $('#selectAllRequests')?.addEventListener('change',e=>{$$('[data-request-check]').forEach(x=>x.checked=e.target.checked);syncReqBulk()});
+      $$('[data-request-check]').forEach(x=>x.addEventListener('change',syncReqBulk));
+      const bulkReq=async(action)=>{const ids=requestIds();if(!ids.length)return;let note=prompt(action==='approve'?'Ghi chú phê duyệt:':action==='supplement'?'Nội dung cần bổ sung:':'Lý do từ chối:');if(note===null||!note.trim())return;let send=false;if(action==='approve'){const choice=prompt('Gửi email sau phê duyệt?\n1 = Có\n2 = Không','1');if(choice===null)return;send=choice==='1'}if(!confirm(`Xử lý ${ids.length} yêu cầu đã chọn?`))return;const results=[];for(const id of ids){try{const x=await api(`/api/admin/account-requests/${encodeURIComponent(id)}/${action==='approve'?'approve':action==='supplement'?'supplement':'reject'}`,{method:'POST',body:JSON.stringify({admin_note:note,send_email:send})});results.push({ok:true,x})}catch(err){results.push({ok:false,error:err.data?.error||err.message})}}toast(`Đã xử lý ${results.filter(x=>x.ok).length}/${ids.length} yêu cầu.`,results.some(x=>!x.ok)?'warn':'ok');await load()};
+      $('#bulkReqApprove')?.addEventListener('click',()=>bulkReq('approve'));$('#bulkReqSupplement')?.addEventListener('click',()=>bulkReq('supplement'));$('#bulkReqReject')?.addEventListener('click',()=>bulkReq('reject'));syncReqBulk();
 
       $$('[data-open-req]').forEach(
         b=>b.onclick=()=>{
@@ -4405,22 +4422,19 @@ async function renderAdminMembers(c){
           </div>
 
 
-          <div
-            class="toolbar"
-            style="margin-top:12px"
-          >
-
-            <span>
-              ${d.total} thành viên
-            </span>
-
-
-            <button
-              id="bulkExport"
-              class="secondary"
-            >
-              Xuất danh sách đã chọn
-            </button>
+          <div class="bulk-bar" id="memberBulkBar" style="margin-top:12px">
+            <div><b id="memberSelectedCount">0</b> thành viên đã chọn</div>
+            <div class="toolbar">
+              <button id="bulkLock" class="secondary">Khóa tài khoản</button>
+              <button id="bulkUnlock" class="secondary">Mở khóa</button>
+              <button id="bulkBan" class="danger">Cấm tài khoản</button>
+              <button id="bulkUnban" class="secondary">Gỡ cấm</button>
+              <button id="bulkCard" class="primary">Tạo thẻ</button>
+              <button id="bulkExport" class="secondary">Xuất danh sách</button>
+            </div>
+          </div>
+          <div class="toolbar" style="margin-top:8px">
+            <span>${d.total} thành viên · Trang ${d.page}</span>
 
 
             ${
@@ -4454,6 +4468,47 @@ async function renderAdminMembers(c){
       `;
 
 
+      const selectedIds=()=>$$('[data-member-check]:checked').map(x=>x.dataset.memberCheck);
+      const syncBulk=()=>{
+        const n=selectedIds().length;
+        const bar=$('#memberBulkBar');
+        if($('#memberSelectedCount'))$('#memberSelectedCount').textContent=n;
+        if(bar)bar.classList.toggle('is-active',n>0);
+        ['#bulkLock','#bulkUnlock','#bulkBan','#bulkUnban','#bulkCard','#bulkExport'].forEach(sel=>{const b=$(sel);if(b)b.disabled=n===0});
+      };
+      $('#selectAllMembers')?.addEventListener('change',e=>{$$('[data-member-check]').forEach(x=>x.checked=e.target.checked);syncBulk()});
+      $$('[data-member-check]').forEach(x=>x.addEventListener('change',()=>syncBulk()));
+      const runBulk=async(action,extra={})=>{
+        const ids=selectedIds(); if(!ids.length)return;
+        const names={lock:'Khóa tài khoản',unlock:'Mở khóa tài khoản',ban:'Cấm tài khoản',unban:'Gỡ cấm tài khoản',issue_card:'Tạo thẻ'};
+        if(!confirm(`${names[action]||'Xử lý'} cho ${ids.length} thành viên đã chọn?`))return;
+        let payload={ids,action,...extra};
+        if(action==='ban'){
+          const reason=prompt('Lý do cấm tài khoản:'); if(!reason)return;
+          payload.reason=reason;
+          const ends=prompt('Ngày hết hạn (YYYY-MM-DD), để trống nếu vô thời hạn:',''); if(ends)payload.ends_at=ends;
+        }
+        const btn=document.querySelector(`[id="${action==='issue_card'?'bulkCard':action==='lock'?'bulkLock':action==='unlock'?'bulkUnlock':action==='ban'?'bulkBan':'bulkUnban'}"]`); if(btn)btn.disabled=true;
+        try{const r=await api('/api/admin/members/bulk',{method:'POST',body:JSON.stringify(payload)});toast(`Đã xử lý ${r.success}/${r.processed} thành viên.`,r.failed?'warn':'ok');await load(page)}catch(err){toast(err.data?.error||err.message,'warn')}finally{syncBulk()}
+      };
+      $('#bulkLock')?.addEventListener('click',()=>runBulk('lock'));
+      $('#bulkUnlock')?.addEventListener('click',()=>runBulk('unlock'));
+      $('#bulkBan')?.addEventListener('click',()=>runBulk('ban'));
+      $('#bulkUnban')?.addEventListener('click',()=>runBulk('unban'));
+      $('#bulkCard')?.addEventListener('click',()=>{
+        const ids=selectedIds();if(!ids.length)return;
+        const fields=meta.card_types.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+        modal('Tạo thẻ cho nhiều thành viên',`<form id="bulkCardForm" class="form-grid"><label>Loại thẻ<select name="card_type_id">${fields}</select></label><label>Đơn vị<select name="org_node_id">${meta.orgs.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Chức danh chung<input name="title_on_card" placeholder="Để trống nếu dùng chức danh hiện có"></label><label>Ngày hết hạn<input name="expires_at" type="date"></label><div class="full"><button class="primary">Tạo ${ids.length} thẻ</button></div><div id="bulkCardMsg" class="msg"></div></form>`);
+        $('#bulkCardForm').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button.primary');btn.disabled=true;try{const x=Object.fromEntries(new FormData(e.target));const r=await api('/api/admin/members/bulk',{method:'POST',body:JSON.stringify({ids,action:'issue_card',...x})});$('#modal')?.remove();toast(`Đã tạo ${r.success}/${r.processed} thẻ.`,r.failed?'warn':'ok');await load(page)}catch(err){$('#bulkCardMsg').textContent=err.data?.error||err.message;btn.disabled=false}};
+      });
+      $('#bulkExport')?.addEventListener('click',()=>{
+        const ids=selectedIds();if(!ids.length)return;
+        const rows=d.items.filter(x=>ids.includes(x.id));
+        const csv=['Mã;Họ tên;Email;Đơn vị;Chức vụ;Tài khoản;Trạng thái',...rows.map(x=>[x.member_code,x.full_name,x.email,x.org_name,x.org_title,x.username,statusVi(x.status)].map(v=>`"${String(v||'').replaceAll('"','""')}"`).join(';'))].join('\n');
+        const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='danh-sach-thanh-vien-da-chon.csv';a.click();URL.revokeObjectURL(a.href);
+      });
+      syncBulk();
+
       $$('[data-open-member]').forEach(
         b=>b.onclick=()=>{
 
@@ -4476,96 +4531,6 @@ async function renderAdminMembers(c){
       );
 
 
-      const bulkExportBtn = $('#bulkExport');
-      if (bulkExportBtn) bulkExportBtn.onclick=()=>{
-
-        const ids=
-          $$('[data-member-check]:checked')
-            .map(
-              x=>x.dataset.memberCheck
-            );
-
-
-        if(!ids.length){
-
-          alert(
-            'Chưa chọn thành viên.'
-          );
-
-          return;
-        }
-
-
-        const rows=
-          d.items
-            .filter(
-              x=>ids.includes(x.id)
-            )
-            .map(
-              x=>[
-                x.member_code,
-                x.full_name,
-                x.email||'',
-                x.phone||'',
-                x.org_name||'',
-                x.org_title||'',
-                statusVi(x.status)
-              ]
-            );
-
-
-        const csv=[
-          [
-            'Mã',
-            'Họ tên',
-            'Email',
-            'SĐT',
-            'Đơn vị',
-            'Chức vụ',
-            'Trạng thái'
-          ],
-          ...rows
-        ]
-        .map(
-          r=>r.map(
-            v=>
-              '"'+
-              String(v)
-                .replaceAll(
-                  '"',
-                  '""'
-                )+
-              '"'
-          ).join(',')
-        )
-        .join('\n');
-
-
-        const a=
-          document.createElement(
-            'a'
-          );
-
-
-        a.href=
-          URL.createObjectURL(
-            new Blob(
-              [
-                '\ufeff'+csv
-              ],
-              {
-                type:'text/csv'
-              }
-            )
-          );
-
-
-        a.download=
-          'Sky-First-Network-thanh-vien.csv';
-
-
-        a.click();
-      };
 
 
     }catch(err){
@@ -7784,6 +7749,8 @@ async function renderAdminOrg(c){
     </div>
 
 
+    <div class="toolbar" style="margin-top:14px"><input id="orgSearch" placeholder="Tìm đơn vị, mã hoặc tên ngắn"><select id="orgStatusFilter"><option value="">Tất cả trạng thái</option><option value="active">Đang hoạt động</option><option value="inactive">Không hoạt động</option><option value="archived">Đã lưu trữ</option></select><button id="orgFilterApply" class="secondary">Lọc</button></div>
+    <div class="card org-summary" id="orgSummary"></div>
     <div
       id="orgBox"
       class="card"
@@ -7803,8 +7770,12 @@ async function renderAdminOrg(c){
         );
 
 
+      const orgQuery=($('#orgSearch')?.value||'').trim().toLowerCase();
+      const orgStatus=$('#orgStatusFilter')?.value||'';
+      const visibleItems=d.items.filter(x=>(!orgQuery||[x.name,x.code,x.short_name].some(v=>String(v||'').toLowerCase().includes(orgQuery)))&&(!orgStatus||x.status===orgStatus));
+      $('#orgSummary').innerHTML=`<b>${d.items.length}</b> đơn vị · <b>${d.items.filter(x=>x.status==='active').length}</b> đang hoạt động · <b>${d.items.filter(x=>x.status==='inactive').length}</b> tạm ngưng`;
       $('#orgBox').innerHTML=
-        d.items.map(
+        visibleItems.map(
           x=>`
             <div class="list-item">
 
@@ -7834,12 +7805,8 @@ async function renderAdminOrg(c){
 
                 <div class="actions">
 
-                  <button
-                    class="secondary"
-                    data-org-edit="${esc(x.id)}"
-                  >
-                    Sửa
-                  </button>
+                  <button class="secondary" data-org-edit="${esc(x.id)}">Sửa</button>
+                  ${x.id!=='org_sfn'?`<button class="secondary" data-org-toggle="${esc(x.id)}">${x.status==='active'?'Tạm ngưng':'Kích hoạt'}</button>`:''}
 
 
                   ${
@@ -7864,8 +7831,10 @@ async function renderAdminOrg(c){
         ).join('');
 
 
+      $$('[data-org-toggle]').forEach(b=>b.onclick=async()=>{const x=d.items.find(o=>o.id===b.dataset.orgToggle);if(!x)return;try{await api(`/api/admin/org/${x.id}`,{method:'PATCH',body:JSON.stringify({status:x.status==='active'?'inactive':'active'})});state.adminMeta=null;load()}catch(err){toast(err.data?.error||err.message,'warn')}});
       $$('[data-org-delete]').forEach(
         b=>b.onclick=async()=>{
+
 
           if(
             !confirm(
@@ -8124,6 +8093,8 @@ async function renderAdminOrg(c){
   };
 
 
+  $('#orgFilterApply').onclick=()=>load();
+  $('#orgSearch').addEventListener('keydown',e=>{if(e.key==='Enter')load()});
   let creatingCenter=false;
   $('#centerNew').onclick=()=>{ creatingCenter=true; $('#orgNew').click(); };
   $('#orgNew').onclick=
@@ -8305,6 +8276,7 @@ async function renderAdminAudit(c){
       Nhật ký hệ thống
     </h1>
 
+    <div class="toolbar" style="margin-top:14px"><input id="auditSearch" placeholder="Tìm tài khoản, thao tác, đối tượng"><button id="auditFilter" class="secondary">Lọc</button><button id="auditExport" class="secondary">Xuất nhật ký</button></div>
     <div
       id="auditBox"
       class="card"
@@ -8322,8 +8294,8 @@ async function renderAdminAudit(c){
       );
 
 
-    $('#auditBox').outerHTML=`
-      <div class="table-wrap">
+    const renderAudit=(query='')=>{const q=query.toLowerCase();const items=(d.items||[]).filter(x=>!q||[x.username,x.action,x.entity_type,x.entity_id].some(v=>String(v||'').toLowerCase().includes(q)));$('#auditBox').outerHTML=`
+      <div id="auditBox" class="table-wrap">
 
         <table>
 
@@ -8355,7 +8327,7 @@ async function renderAdminAudit(c){
           <tbody>
 
             ${
-              d.items.map(
+              items.map(
                 x=>`
                   <tr>
 
@@ -8391,7 +8363,11 @@ async function renderAdminAudit(c){
         </table>
 
       </div>
-    `;
+    `};
+    renderAudit();
+    $('#auditFilter').onclick=()=>renderAudit($('#auditSearch').value);
+    $('#auditSearch').addEventListener('keydown',e=>{if(e.key==='Enter')renderAudit(e.target.value)});
+    $('#auditExport').onclick=()=>{const q=($('#auditSearch').value||'').toLowerCase();const items=(d.items||[]).filter(x=>!q||[x.username,x.action,x.entity_type,x.entity_id].some(v=>String(v||'').toLowerCase().includes(q)));const csv=['Thời gian,Tài khoản,Thao tác,Đối tượng,Mã đối tượng',...items.map(x=>[x.created_at,x.username||'Hệ thống',x.action,x.entity_type,x.entity_id||''].map(v=>`"${String(v).replaceAll('"','""')}"`).join(','))].join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='nhat-ky-he-thong-sky-first.csv';a.click();URL.revokeObjectURL(a.href)};
 
 
   }catch(err){

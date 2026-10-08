@@ -2421,6 +2421,76 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   }
 
   // =========================================================
+  // ADMIN BULK OPERATIONS
+  // =========================================================
+  if(url.pathname==='/api/admin/members/bulk'&&req.method==='POST'){
+    const b=await bodyJson(req);
+    const ids=Array.isArray(b.ids)?[...new Set(b.ids.map(x=>clean(x,100)).filter(Boolean))].slice(0,100):[];
+    const action=clean(b.action,40);
+    if(!ids.length)return json({error:'NO_MEMBERS_SELECTED'},400);
+    if(ids.some(x=>!x))return json({error:'INVALID_MEMBER_ID'},400);
+
+    const placeholders=ids.map(()=>'?').join(',');
+    const rows=await env.DB.prepare(`SELECT p.id,p.full_name,p.member_code,a.id account_id,a.email,a.is_locked FROM people p LEFT JOIN accounts a ON a.person_id=p.id WHERE p.id IN (${placeholders})`).bind(...ids).all();
+    const members=rows.results||[];
+    if(!members.length)return json({error:'MEMBERS_NOT_FOUND'},404);
+    for(const m of members)if(!(await canAccessPerson(env,s.account_id,m.id)))return json({error:'SCOPE_FORBIDDEN',member_id:m.id},403);
+
+    const results=[];
+    if(['lock','unlock'].includes(action)){
+      if(!(await hasPerm(env,s.account_id,'account.manage')))return json({error:'FORBIDDEN'},403);
+      const locked=action==='lock'?1:0;
+      for(const m of members){
+        if(m.account_id===s.account_id){results.push({id:m.id,ok:false,error:'CANNOT_LOCK_SELF'});continue;}
+        if(await isSuper(env,m.account_id||'')){results.push({id:m.id,ok:false,error:'SUPER_ADMIN_PROTECTED'});continue;}
+        await env.DB.prepare('UPDATE accounts SET is_locked=?,updated_at=CURRENT_TIMESTAMP WHERE person_id=?').bind(locked,m.id).run();
+        if(locked&&m.account_id)await env.DB.prepare('DELETE FROM sessions WHERE account_id=?').bind(m.account_id).run();
+        await audit(env,s.account_id,locked?'account_locked_bulk':'account_unlocked_bulk','account',m.account_id,null,{person_id:m.id,batch:true});
+        results.push({id:m.id,ok:true});
+      }
+    } else if(['ban','unban'].includes(action)){
+      if(!(await hasPerm(env,s.account_id,'account.manage')))return json({error:'FORBIDDEN'},403);
+      if(action==='ban'&&!clean(b.reason,500))return json({error:'REASON_REQUIRED'},400);
+      for(const m of members){
+        if(m.account_id===s.account_id){results.push({id:m.id,ok:false,error:'CANNOT_RESTRICT_SELF'});continue;}
+        if(await isSuper(env,m.account_id||'')){results.push({id:m.id,ok:false,error:'SUPER_ADMIN_PROTECTED'});continue;}
+        if(action==='ban'){
+          const end=clean(b.ends_at,35)||null;
+          await env.DB.prepare("INSERT INTO account_restrictions(account_id,restriction_type,reason,ends_at,actor_account_id,updated_at) VALUES(?,'ban',?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(account_id) DO UPDATE SET restriction_type='ban',reason=excluded.reason,ends_at=excluded.ends_at,actor_account_id=excluded.actor_account_id,updated_at=CURRENT_TIMESTAMP").bind(m.account_id,clean(b.reason,500),end,s.account_id).run();
+          if(m.account_id)await env.DB.prepare('DELETE FROM sessions WHERE account_id=?').bind(m.account_id).run();
+        }else{
+          await env.DB.prepare('DELETE FROM account_restrictions WHERE account_id=?').bind(m.account_id).run();
+        }
+        await audit(env,s.account_id,action==='ban'?'account_banned_bulk':'account_unbanned_bulk','account',m.account_id,null,{person_id:m.id,batch:true,reason:clean(b.reason,500)||null});
+        results.push({id:m.id,ok:true});
+      }
+    } else if(action==='issue_card'){
+      if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+      const cardType=clean(b.card_type_id,100)||'card_member';
+      const org=clean(b.org_node_id,100)||'org_sfn';
+      if(!(await canAccessOrg(env,s.account_id,org)))return json({error:'SCOPE_FORBIDDEN'},403);
+      for(const m of members){
+        const existing=await env.DB.prepare("SELECT id FROM member_cards WHERE person_id=? AND status='active' LIMIT 1").bind(m.id).first();
+        if(existing){results.push({id:m.id,ok:false,error:'ACTIVE_CARD_EXISTS'});continue;}
+        let cardNumber='';
+        let unique=false;
+        for(let i=0;i<5&&!unique;i++){
+          cardNumber=`SFN-CARD-${crypto.randomUUID().replaceAll('-','').slice(0,10).toUpperCase()}`;
+          unique=!(await env.DB.prepare('SELECT id FROM member_cards WHERE card_number=?').bind(cardNumber).first());
+        }
+        if(!unique){results.push({id:m.id,ok:false,error:'CARD_NUMBER_GENERATION_FAILED'});continue;}
+        const cardId=uid('card'),verify=verifyCode('CARD');
+        await env.DB.prepare(`INSERT INTO member_cards(id,person_id,card_type_id,org_node_id,card_number,title_on_card,issued_at,expires_at,status,verify_token) VALUES(?,?,?,?,?,?,CURRENT_DATE,?, 'active',?)`).bind(cardId,m.id,cardType,org,cardNumber,clean(b.title_on_card,180)||null,clean(b.expires_at,20)||null,verify).run();
+        await audit(env,s.account_id,'card_issued_bulk','member_card',cardId,org,{person_id:m.id,batch:true,verify_token:verify});
+        results.push({id:m.id,ok:true,card_id:cardId,card_number:cardNumber});
+      }
+    } else {
+      return json({error:'INVALID_BULK_ACTION'},400);
+    }
+    return json({ok:true,action,processed:members.length,success:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length,results});
+  }
+
+  // =========================================================
   // ADMIN MEMBER LIST
   // =========================================================
 
