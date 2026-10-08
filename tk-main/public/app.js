@@ -27,7 +27,7 @@ const api=async(url,opt={})=>{
 };
 const safeStore={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 
-const logo='/sfn-logo.png?v=final-20260901';
+const logo='/sfn-logo.png';
 
 const PORTALS=[
   ['Cổng chính Sky First Network','https://skyfirst.io.vn'],
@@ -1083,18 +1083,24 @@ async function renderAccountRequest(){
    NAVIGATION / APP
    ========================================================= */
 
+const NAV_ICONS={
+  home:'⌂',profile:'◎',journey:'↗',goals:'◔',tasks:'✓',activities:'✦',certificates:'▣',achievements:'★',evaluations:'◫',history:'↺',documents:'▤',cards:'▱',cv:'▥',notifications:'◉',calendar:'▦',security:'⌁',support:'?',
+  'admin-requests':'◌','admin-calendar':'▦','admin-members':'◎','admin-org':'⌘','admin-audit':'◒','admin-super':'✧','admin-studio':'◈'
+};
 function navButton(id,label){
-
+  const icon=NAV_ICONS[id]||'•';
   return `
-    <button
-      data-view="${id}"
-      class="${state.view===id?'active':''}"
-    >
-      ${label}
+    <button data-view="${id}" class="${state.view===id?'active':''}" aria-current="${state.view===id?'page':'false'}">
+      <span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-label">${label}</span>
     </button>
   `;
 }
 
+const VIEW_META={
+  home:['Tổng quan','Không gian điều hành hành trình thành viên'],profile:['Hồ sơ của tôi','Định danh và thông tin thành viên'],journey:['Hành trình của tôi','Các cột mốc và đóng góp'],goals:['Mục tiêu & Tiến độ','Theo dõi mục tiêu cá nhân'],tasks:['Công việc','Nhiệm vụ và tiến độ'],activities:['Hoạt động','Các hoạt động đã tham gia'],certificates:['Chứng nhận','Kho chứng nhận đã xác minh'],achievements:['Thành tích & Ghi nhận','Những dấu mốc nổi bật'],evaluations:['Đánh giá của tôi','Kết quả và lịch sử đánh giá'],history:['Quá trình công tác','Vai trò và đơn vị theo thời gian'],documents:['Tài liệu của tôi','Tài liệu cá nhân và minh chứng'],cards:['Thẻ của tôi','Thẻ thành viên và xác minh QR'],cv:['CV / Hồ sơ năng lực','Hồ sơ năng lực một trang A4'],notifications:['Thông báo','Thông tin mới và việc cần chú ý'],calendar:['Lịch của tôi','Lịch hoạt động và lịch cá nhân'],security:['Bảo mật & Phiên đăng nhập','Thiết bị và phiên truy cập'],support:['Tài khoản & Hỗ trợ','Cài đặt và trung tâm hỗ trợ'],
+  'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-super':['SUPER_ADMIN Center','Tổng quan hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Studio vận hành và nhận diện']
+};
+function currentViewMeta(){return VIEW_META[state.view]||['Trung tâm thành viên số','Không gian quản trị Sky First'];}
 
 function hasP(code){
 
@@ -1145,7 +1151,7 @@ function renderApp(){
   $('#app').innerHTML=`
     <div class="app-shell">
 
-      <aside class="sidebar">
+      <aside class="sidebar" id="memberSidebar">
 
         <div class="side-brand">
 
@@ -1358,55 +1364,26 @@ function renderApp(){
       </aside>
 
 
+      <button class="sidebar-backdrop" id="sidebarBackdrop" aria-label="Đóng menu"></button>
       <main class="main">
 
         <div class="topbar">
-
-          <div>
-
-            <b>
-              ${esc(p.full_name)}
-            </b>
-
-            <div class="muted">
-
-              ${
-                state.me.is_member
-                  ?esc(p.member_code)
-                  :'TÀI KHOẢN QUẢN TRỊ HỆ THỐNG'
-              }
-
+          <div class="topbar-title">
+            <button class="mobile-menu" id="mobileMenu" aria-label="Mở menu" aria-controls="memberSidebar">☰</button>
+            <div>
+              <div class="breadcrumb"><span>SKY FIRST</span><i>›</i><span>${esc(currentViewMeta()[0])}</span></div>
+              <h1>${esc(currentViewMeta()[0])}</h1>
+              <p>${esc(currentViewMeta()[1])}</p>
             </div>
-
           </div>
-
-
           <div class="top-actions">
             <button class="quick-search" id="openCommand" title="Tìm kiếm (Ctrl/⌘ + K)" aria-label="Tìm kiếm chức năng">⌕ <span>Tìm kiếm</span><kbd>Ctrl K</kbd></button>
-            <div class="identity">
-
-            ${avatar(p)}
-
-            <span
-              class="badge ${
-                p.status==='active'
-                  ?'ok'
-                  :'off'
-              }"
-            >
-
-              ${
-                state.me.is_super&&
-                !state.me.is_member
-                  ?'SUPER ADMIN'
-                  :esc(p.status)
-              }
-
-            </span>
-
+            <div class="top-user">
+              ${avatar(p)}
+              <div class="top-user-copy"><b>${esc(p.display_name||p.full_name)}</b><span>${state.me.is_member?esc(p.member_code||'Thành viên'):'SUPER ADMIN'}</span></div>
+              <span class="status-dot ${p.status==='active'?'on':''}" title="${p.status==='active'?'Đang hoạt động':'Không hoạt động'}"></span>
             </div>
           </div>
-
         </div>
 
         <div class="offline-banner" role="status">Bạn đang ngoại tuyến · các thao tác cần máy chủ sẽ tạm dừng</div>
@@ -1418,16 +1395,10 @@ function renderApp(){
   `;
 
 
-  $$('[data-view]').forEach(
-    b=>b.onclick=()=>{
-
-      goView(b.dataset.view);
-
-    }
-  );
-
-
+  $$('[data-view]').forEach(b=>b.onclick=()=>{goView(b.dataset.view);document.body.classList.remove('sidebar-open')});
   $('#openCommand')?.addEventListener('click',openCommandPalette);
+  $('#mobileMenu')?.addEventListener('click',()=>document.body.classList.toggle('sidebar-open'));
+  $('#sidebarBackdrop')?.addEventListener('click',()=>document.body.classList.remove('sidebar-open'));
 
   $('#logout').onclick=async()=>{
 
@@ -1730,91 +1701,50 @@ async function renderView(){
   try{
 
     if(state.view==='home'){
-
-      const d=
-        state.dashboard||
-        await api('/api/dashboard');
-
-      const p=
-        state.me.person;
-
+      const d=state.dashboard||await api('/api/dashboard');
+      const p=state.me.person;
+      const goalRows=Array.isArray(d.goals)?d.goals:[];
+      const goalProgress=goalRows.length?Math.round(goalRows.reduce((sum,x)=>sum+Number(x.progress||0),0)/goalRows.length):0;
+      const fields=['full_name','email','phone','avatar_url','date_of_birth','permanent_address','school_or_workplace','class_or_major'];
+      const profilePct=Math.round(fields.filter(k=>String(p[k]||'').trim()).length/fields.length*100);
       c.innerHTML=`
-        <div class="section-title">
-          <div>
-            <h1>
-              Xin chào, ${esc(p.display_name||p.full_name)}
-            </h1>
-
-            <p class="muted">
-              Hồ sơ · Hoạt động · Kết nối · Phát triển
-            </p>
+        <section class="dashboard-hero">
+          <div class="dashboard-hero-glow"></div>
+          <div class="dashboard-hero-copy">
+            <span class="hero-kicker">DIGITAL MEMBER IDENTITY · ${esc(statusVi(p.status)).toUpperCase()}</span>
+            <h1>Xin chào, ${esc(p.display_name||p.full_name)}.</h1>
+            <p>Mọi vai trò, hoạt động và cột mốc của bạn được kết nối trong một hồ sơ số duy nhất.</p>
+            <div class="hero-actions"><button class="primary" data-view-jump="profile">Hoàn thiện hồ sơ <span>→</span></button><button class="hero-ghost" data-view-jump="cards">Mở thẻ thành viên</button></div>
           </div>
+          <div class="dashboard-hero-card">
+            ${avatar(p,'hero-avatar')}
+            <div><span class="eyebrow">MEMBER ID</span><strong>${esc(p.member_code||'Chưa cấp mã')}</strong><small>${esc(p.full_name)}</small></div>
+            <div class="hero-card-line"><span>Hồ sơ</span><b>${profilePct}%</b></div>
+            <div class="meter"><i style="width:${profilePct}%"></i></div>
+          </div>
+        </section>
+        <div class="dashboard-section-head"><div><span class="eyebrow">TỔNG QUAN</span><h2>Trạng thái hành trình</h2></div><button class="text-action" data-view-jump="journey">Xem hành trình →</button></div>
+        <div class="dashboard-metrics">
+          <button class="dashboard-metric" data-view-jump="goals"><span class="metric-icon blue">◔</span><span><b>${goalProgress}%</b><small>Tiến độ mục tiêu</small></span><i>↗</i></button>
+          <button class="dashboard-metric" data-view-jump="tasks"><span class="metric-icon violet">✓</span><span><b>${Number(d.tasks||0)}</b><small>Công việc liên quan</small></span><i>↗</i></button>
+          <button class="dashboard-metric" data-view-jump="activities"><span class="metric-icon green">✦</span><span><b>${Number(d.activities||0)}</b><small>Hoạt động đã tham gia</small></span><i>↗</i></button>
+          <button class="dashboard-metric" data-view-jump="certificates"><span class="metric-icon gold">▣</span><span><b>${Number(d.certificates||0)}</b><small>Chứng nhận xác minh</small></span><i>↗</i></button>
         </div>
-
-        ${(()=>{const fields=['full_name','email','phone','avatar_url','date_of_birth','permanent_address','school_or_workplace','class_or_major'];const done=fields.filter(k=>String(p[k]||'').trim()).length;const pct=Math.round(done/fields.length*100);return `<section class="member-hero"><div class="member-hero-id">${avatar(p,'hero-avatar')}<div><div class="eyebrow">DIGITAL MEMBER IDENTITY</div><h2>${esc(p.full_name)}</h2><p>${esc(p.member_code||'Chưa cấp mã')} · ${statusVi(p.status)}</p></div></div><div class="profile-meter"><div><b>${pct}%</b><span>Hồ sơ hoàn thiện</span></div><div class="meter"><i style="width:${pct}%"></i></div><button class="ghost" data-view-jump="profile">Hoàn thiện hồ sơ →</button></div></section>`})()}
-
-        <div class="grid dashboard-metrics">
-
-          <div class="card metric-card">
-            <div class="eyebrow">
-              THÀNH VIÊN
-            </div>
-
-            <h2>
-              ${esc(p.member_code||'—')}
-            </h2>
-
-            <div class="muted">
-              ${statusVi(p.status)}
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="eyebrow">
-              MỤC TIÊU
-            </div>
-
-            <h2>
-              ${Number(d.goals_count||0)}
-            </h2>
-
-            <div class="muted">
-              Mục tiêu đang theo dõi
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="eyebrow">
-              CÔNG VIỆC
-            </div>
-
-            <h2>
-              ${Number(d.tasks_count||0)}
-            </h2>
-
-            <div class="muted">
-              Công việc liên quan
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="eyebrow">
-              CHỨNG NHẬN
-            </div>
-
-            <h2>
-              ${Number(d.certificates_count||0)}
-            </h2>
-
-            <div class="muted">
-              Chứng nhận trong hồ sơ
-            </div>
-          </div>
-
-        </div>
-      `;
-      const jump=$('[data-view-jump="profile"]');if(jump)jump.onclick=()=>{goView('profile')};
-
+        <div class="dashboard-lower">
+          <section class="card dashboard-panel journey-pulse">
+            <div class="panel-head"><div><span class="eyebrow">MEMBER PULSE</span><h3>Hồ sơ & dấu ấn</h3></div><span class="badge ok">${profilePct}% hoàn thiện</span></div>
+            <div class="pulse-row"><span>Hồ sơ thành viên</span><b>${profilePct}%</b></div><div class="progress premium-progress"><i style="width:${profilePct}%"></i></div>
+            <div class="pulse-row"><span>Mục tiêu hiện tại</span><b>${goalProgress}%</b></div><div class="progress premium-progress"><i style="width:${goalProgress}%"></i></div>
+            <div class="pulse-grid"><button data-view-jump="achievements"><b>${Number(d.achievements||0)}</b><span>Thành tích</span></button><button data-view-jump="notifications"><b>${Number(d.unread||0)}</b><span>Thông báo chưa đọc</span></button></div>
+          </section>
+          <section class="card dashboard-panel quick-panel">
+            <div class="panel-head"><div><span class="eyebrow">SHORTCUTS</span><h3>Thao tác nhanh</h3></div></div>
+            <button class="quick-row" data-view-jump="cards"><span class="quick-icon">▱</span><span><b>Thẻ thành viên</b><small>Xem QR xác minh và trạng thái</small></span><i>→</i></button>
+            <button class="quick-row" data-view-jump="cv"><span class="quick-icon">▥</span><span><b>CV / Hồ sơ năng lực</b><small>Tạo hồ sơ A4 chuyên nghiệp</small></span><i>→</i></button>
+            <button class="quick-row" data-view-jump="security"><span class="quick-icon">⌁</span><span><b>Bảo mật</b><small>Kiểm tra thiết bị và phiên đăng nhập</small></span><i>→</i></button>
+          </section>
+        </div>`;
+      $$('[data-view-jump]').forEach(btn=>btn.onclick=()=>goView(btn.dataset.viewJump));
       return;
     }
 
