@@ -179,6 +179,7 @@ async function uploadBinary(url,blob){
 }
 
 async function boot(){
+  window.__SFN_APP_STARTED__=true;
   try{
     state.me=await api('/api/me');
     state.dashboard=await api('/api/dashboard');
