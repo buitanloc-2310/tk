@@ -2408,9 +2408,11 @@ function cardVerifyUrl(x){
   return location.origin+'/verify?code='+encodeURIComponent(x.verify_token);
 }
 
-function cardQrSrc(x,size=180){
-  if(!x.verify_token)return '';
-  return 'https://api.qrserver.com/v1/create-qr-code/?format=svg&margin=1&size='+size+'x'+size+'&data='+encodeURIComponent(cardVerifyUrl(x));
+function cardQrSrc(x, size = 180){
+  if(!x?.verify_token) return '';
+  const url = cardVerifyUrl(x);
+  if(!url) return '';
+  return `https://quickchart.io/qr?size=${size}&margin=2&ecLevel=H&text=${encodeURIComponent(url)}`;
 }
 
 function printCardWindow(x,p){
