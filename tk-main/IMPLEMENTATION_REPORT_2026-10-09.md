@@ -28,3 +28,10 @@ Nguồn ban đầu: `tk-main-fixed-20261009-v3(1).zip`
 - Chưa kiểm thử thao tác giao diện đầy đủ bằng trình duyệt thật/thiết bị di động. Xuất PDF, kéo thả và render hai mặt vẫn cần kiểm thử giao diện thực tế sau khi deploy thử.
 - Bộ test API hiện chạy trên SQLite trong bộ kiểm thử, không chứng minh toàn bộ hành vi tương thích với D1 production.
 - Source được cung cấp để triển khai và kiểm chứng tiếp; không tuyên bố hệ thống live đã thay đổi.
+
+## Bản sửa lỗi bổ sung — 09/10/2026
+
+- Sửa lỗi `Cannot access 't' before initialization` khi mở phần cấu hình/thiết kế thẻ. Nguyên nhân: template literal dựng giao diện đọc `t.accent` trước khi biến `t` được khai báo; lỗi JavaScript temporal dead zone khiến `mountCardDesignStudio()` throw và khối cấu hình hiển thị “Không thể tải cấu hình”.
+- Đã chuyển khởi tạo `type` và `t = templateFor(type)` lên trước khi dựng HTML; giữ nguyên các luồng chức năng còn lại.
+- Xác minh: `node --check public/app.js` đạt; `npm run build` đạt; `npm test` đạt, 47/47 kiểm tra tích hợp API.
+- Chưa triển khai lên Cloudflare production; cần thay ZIP trên môi trường triển khai và kiểm tra trực tiếp giao diện sau deploy.
