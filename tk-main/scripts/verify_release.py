@@ -105,8 +105,23 @@ for name,marker in v4_front_checks.items():
     else: fail(name,'marker missing')
 
 index=(ROOT/'public/index.html').read_text()
-if 'v=20261009-member-v6-pdf-final-2' in index: ok('cache busting current release')
+if 'v=20261009-member-v6-locked-back-3' in index: ok('cache busting current release')
 else: fail('cache busting','index does not force current release assets')
+
+# Locked member-card copy must be enforced in both client and Worker API.
+locked_copy = ['HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG','THỜI HẠN SỬ DỤNG','Có giá trị trong thời hạn ghi trên thẻ và theo trạng thái xác minh của hệ thống.','HƯỚNG DẪN SỬ DỤNG','Xuất trình thẻ khi cần xác nhận tư cách thành viên hoặc người tham gia chương trình.','Sử dụng mã QR ở mặt trước để kiểm tra thông tin và trạng thái thẻ.','Không cho mượn, chuyển nhượng hoặc sử dụng thẻ thay cho người khác.','LƯU Ý','Thẻ chỉ có giá trị xác minh thông qua mã QR ở mặt trước. Thẻ không còn giá trị sử dụng khi hệ thống xác minh thông báo thẻ đã bị hủy.','Sky First Network · Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First']
+if all(x in front and x in back for x in locked_copy): ok('locked back-of-card copy')
+else: fail('locked back-of-card copy','canonical copy missing from client or API')
+if 'lockedCardBackElements(requestedOrientation)' in back and 'LOCKED_CARD_BACK_IDS.has(x.id)' in back: ok('back-card content enforced server-side')
+else: fail('back-card content enforcement','API does not replace user-supplied fixed text')
+if 'canvas.toBlob' in front and 'toDataURL(' not in front: ok('PDF rasterization uses Blob, not data URL')
+else: fail('PDF rasterization','legacy canvas data URL remains')
+if 'data-nav-toggle' in front and 'savedNavScroll' in front and 'nav-section-toggle' in (ROOT/'public/styles.css').read_text(): ok('collapsible navigation and scroll preservation')
+else: fail('navigation usability','accordion or scroll preservation missing')
+if "locked?'disabled aria-label=\"Nội dung cố định\"'" in front and "LOCKED_CARD_BACK_IDS.has(arr[idx]?.id)" in front: ok('fixed card-back editor controls are disabled')
+else: fail('fixed card-back editor controls','locked copy can be edited or dragged in the designer')
+if all("['footer','Sky First Network · Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First',6,true" in x for x in (front,back)): ok('footer fits single line at physical card size')
+else: fail('card footer layout','frontend and API footer sizes should match and fit print width')
 
 verify=(ROOT/'public/verify.html').read_text()
 for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning')]:

@@ -43,7 +43,8 @@ const state={
   dashboard:null,
   view:'home',
   adminMember:null,
-  adminMeta:null
+  adminMeta:null,
+  navOpen:{personal:false,admin:false}
 };
 
 const VIEW_CATALOG=[
@@ -59,7 +60,12 @@ function toast(message,type='ok'){
   let host=$('#toastHost'); if(!host){host=document.createElement('div');host.id='toastHost';host.className='toast-host';document.body.append(host)}
   const el=document.createElement('div');el.className='toast '+type;el.textContent=message;host.append(el);setTimeout(()=>el.remove(),3600);
 }
-function goView(view){if(dirtyForm&&!confirm('Bạn có thay đổi chưa lưu. Rời trang này?'))return;dirtyForm=false;state.view=view;renderApp()}
+function goView(view){
+  if(dirtyForm&&!confirm('Bạn có thay đổi chưa lưu. Rời trang này?'))return;
+  dirtyForm=false;state.view=view;
+  if(String(view).startsWith('admin-'))state.navOpen.admin=true;else state.navOpen.personal=true;
+  renderApp();
+}
 function openCommandPalette(){
   const allowed=VIEW_CATALOG.filter(([id])=>state.me?.is_member||id.startsWith('admin-'));
   modal('Tìm kiếm & thao tác nhanh',`<div class="command-box"><input id="commandSearch" autofocus placeholder="Tìm hồ sơ, chứng nhận, bảo mật, lịch..." aria-label="Tìm chức năng"><div id="commandResults" class="command-results"></div></div>`);
@@ -1150,10 +1156,9 @@ function canAdmin(){
 
 
 function renderApp(){
-
-  const p=
-    state.me.person;
-
+  const savedWindowScroll=window.scrollY||document.documentElement.scrollTop||0;
+  const savedNavScroll=document.querySelector('.nav-scroll')?.scrollTop||0;
+  const p=state.me.person;
 
   $('#app').innerHTML=`
     <div class="app-shell">
@@ -1188,11 +1193,11 @@ function renderApp(){
           ${
             state.me.is_member
               ?`
-                <div class="nav-section">
-                  Cá nhân
-                </div>
-
-                <nav class="nav">
+                <section class="nav-group">
+                  <button type="button" class="nav-section-toggle" data-nav-toggle="personal" aria-expanded="${state.navOpen.personal?'true':'false'}" aria-controls="personalNav">
+                    <span>Cá nhân</span><span class="nav-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                  <nav class="nav" id="personalNav" ${state.navOpen.personal?'':'hidden'}>
 
                   ${navButton(
                     'home',
@@ -1276,7 +1281,8 @@ function renderApp(){
                     'Tài khoản & Hỗ trợ'
                   )}
 
-                </nav>
+                  </nav>
+                </section>
               `
               :''
           }
@@ -1285,11 +1291,11 @@ function renderApp(){
           ${
             canAdmin()
               ?`
-                <div class="nav-section">
-                  Điều hành
-                </div>
-
-                <nav class="nav">
+                <section class="nav-group">
+                  <button type="button" class="nav-section-toggle" data-nav-toggle="admin" aria-expanded="${state.navOpen.admin?'true':'false'}" aria-controls="adminNav">
+                    <span>Điều hành</span><span class="nav-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                  <nav class="nav" id="adminNav" ${state.navOpen.admin?'':'hidden'}>
 
                   ${
                     hasP('request.manage')
@@ -1340,7 +1346,8 @@ function renderApp(){
 
                   ${hasP('member.view')?navButton('admin-work','Trung tâm công việc')+navButton('admin-reports','Báo cáo & thống kê'):''}${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center')+navButton('admin-studio','Cấu hình giao diện & thống kê')+navButton('admin-system','Cấu hình hệ thống'):''}
 
-                </nav>
+                  </nav>
+                </section>
               `
               :''
           }
@@ -1405,6 +1412,16 @@ function renderApp(){
 
 
   $$('[data-view]').forEach(b=>b.onclick=()=>{goView(b.dataset.view);document.body.classList.remove('sidebar-open')});
+  $$('[data-nav-toggle]').forEach(b=>b.onclick=()=>{
+    const key=b.dataset.navToggle;
+    const willOpen=!state.navOpen[key];
+    state.navOpen[key]=willOpen;
+    b.setAttribute('aria-expanded',String(willOpen));
+    const nav=document.getElementById(b.getAttribute('aria-controls'));
+    if(nav)nav.hidden=!willOpen;
+    b.closest('.nav-group')?.classList.toggle('is-open',willOpen);
+  });
+  $$('.nav-group').forEach(group=>group.classList.toggle('is-open',!!state.navOpen[group.querySelector('[data-nav-toggle]')?.dataset.navToggle]));
   $('#openCommand')?.addEventListener('click',openCommandPalette);
   $('#mobileMenu')?.addEventListener('click',()=>document.body.classList.toggle('sidebar-open'));
   $('#sidebarBackdrop')?.addEventListener('click',()=>document.body.classList.remove('sidebar-open'));
@@ -1442,6 +1459,11 @@ function renderApp(){
   }
 
 
+  requestAnimationFrame(()=>{
+    const nav=document.querySelector('.nav-scroll');
+    if(nav)nav.scrollTop=savedNavScroll;
+    window.scrollTo(0,savedWindowScroll);
+  });
   renderView();
   maybeShowOnboarding();
 }
@@ -7703,8 +7725,32 @@ function simplePostModal(
    ADMIN - CƠ CẤU TỔ CHỨC
    ========================================================= */
 
+const LOCKED_CARD_BACK_IDS=new Set(['backtitle','validheading','valid','usageheading','use1','use2','use3','noteheading','note','footer']);
+function lockedCardBackElements(orientation='landscape'){
+  const portrait=orientation==='portrait';
+  const positions=portrait?{
+    backtitle:[6,3,88,8],validheading:[6,12,88,4],valid:[6,17,88,7],usageheading:[6,25,88,4],
+    use1:[6,30,88,10],use2:[6,41,88,10],use3:[6,52,88,10],noteheading:[6,63,88,4],note:[6,68,88,20],footer:[6,90,88,9]
+  }:{
+    backtitle:[6,4,88,9],validheading:[6,14,88,5],valid:[6,19,88,9],usageheading:[6,28,88,5],
+    use1:[6,33,88,10],use2:[6,43,88,10],use3:[6,53,88,10],noteheading:[6,64,88,5],note:[6,69,88,20],footer:[6,90,88,9]
+  };
+  const rows=[
+    ['backtitle','HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG',10,true,'#0b2b49'],
+    ['validheading','THỜI HẠN SỬ DỤNG',8,true,'#173e5d'],
+    ['valid','Có giá trị trong thời hạn ghi trên thẻ và theo trạng thái xác minh của hệ thống.',8,false,'#173e5d'],
+    ['usageheading','HƯỚNG DẪN SỬ DỤNG',8,true,'#173e5d'],
+    ['use1','• Xuất trình thẻ khi cần xác nhận tư cách thành viên hoặc người tham gia chương trình.',8,false,'#314e68'],
+    ['use2','• Sử dụng mã QR ở mặt trước để kiểm tra thông tin và trạng thái thẻ.',8,false,'#314e68'],
+    ['use3','• Không cho mượn, chuyển nhượng hoặc sử dụng thẻ thay cho người khác.',8,false,'#314e68'],
+    ['noteheading','LƯU Ý',8,true,'#173e5d'],
+    ['note','Thẻ chỉ có giá trị xác minh thông qua mã QR ở mặt trước. Thẻ không còn giá trị sử dụng khi hệ thống xác minh thông báo thẻ đã bị hủy.',8,false,'#314e68'],
+    ['footer','Sky First Network · Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First',6,true,'#315f80']
+  ];
+  return rows.map(([id,text,size,bold,color])=>({id,kind:'text',text,...{x:positions[id][0],y:positions[id][1],w:positions[id][2],h:positions[id][3]},color,size,bold,align:'left',radius:0,opacity:1}));
+}
 function defaultCardTemplate(type){
-  return {version:2,accent:'#1677d2',subtitle:'',size:{width_mm:86,height_mm:54},backTitle:'HIỆU LỰC & CÁCH SỬ DỤNG',front:{elements:[
+  return {version:3,accent:'#1677d2',subtitle:'',size:{width_mm:86,height_mm:54},backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG',front:{elements:[
     {id:'brand',kind:'text',text:'SKY FIRST NETWORK',x:5,y:5,w:58,h:6,color:'#ffffff',size:8,bold:true,align:'left'},
     {id:'title',kind:'text',text:type?.name||'THẺ SỰ KIỆN',x:5,y:15,w:60,h:10,color:'#ffffff',size:19,bold:true,align:'left'},
     {id:'photo',kind:'photo',text:'',x:70,y:4,w:25,h:16,color:'#ffffff',size:8,bold:false,align:'center',radius:5},
@@ -7713,37 +7759,31 @@ function defaultCardTemplate(type){
     {id:'event',kind:'text',text:'{{event_name}}',x:5,y:47,w:56,h:6,color:'#dceeff',size:7,bold:false,align:'left'},
     {id:'qr',kind:'qr',text:'',x:72,y:21,w:21,h:25,color:'#ffffff',size:8,bold:false,align:'center'},
     {id:'number',kind:'text',text:'{{card_number}}',x:66,y:48,w:29,h:5,color:'#ffffff',size:6,bold:false,align:'right'}
-  ]},back:{elements:[
-    {id:'backtitle',kind:'text',text:'HIỆU LỰC & CÁCH SỬ DỤNG',x:6,y:7,w:88,h:8,color:'#0b2b49',size:13,bold:true,align:'left'},
-    {id:'valid',kind:'text',text:'Hiệu lực: {{issued_at}} → {{expires_at}}',x:6,y:20,w:88,h:7,color:'#173e5d',size:9,bold:true,align:'left'},
-    {id:'use',kind:'text',text:'Sử dụng thẻ theo quy định của chương trình. QR ở mặt trước dùng để xác minh thẻ.',x:6,y:31,w:88,h:18,color:'#4b657d',size:9,bold:false,align:'left'},
-    {id:'note',kind:'text',text:'Thẻ chỉ có giá trị trong phạm vi và thời gian được ghi trên thẻ.',x:6,y:43,w:88,h:8,color:'#4b657d',size:8,bold:false,align:'left'}
-  ]}};
+  ]},back:{elements:lockedCardBackElements('landscape')}};
 }
 function templateFor(type){
   let t={};try{t=JSON.parse(type?.template_json||'{}')}catch{}
-  const d=defaultCardTemplate(type);
-  const mergeSide=side=>{
-    const saved=Array.isArray(t[side]?.elements)?t[side].elements:null;
-    const elements=saved?[...saved]:[...(d[side]?.elements||[])];
-    const required=side==='front'?['photo','qr']:[];
-    for(const id of required){if(!elements.some(e=>e.id===id||e.kind===id)){const fallback=(d[side]?.elements||[]).find(e=>e.id===id||e.kind===id);if(fallback)elements.push({...fallback})}}
-    return {...(d[side]||{}),...(t[side]||{}),elements};
-  };
   const width=Number(t.size?.width_mm),height=Number(t.size?.height_mm);
-  return {...d,...t,size:width===54&&height===86?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54},front:mergeSide('front'),back:mergeSide('back')};
+  const size=width===54&&height===86?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
+  const orientation=size.width_mm===54?'portrait':'landscape';
+  const d=defaultCardTemplate(type);
+  const mergeFront=()=>{
+    const saved=Array.isArray(t.front?.elements)?[...t.front.elements]:[...d.front.elements];
+    for(const id of ['photo','qr'])if(!saved.some(e=>e.id===id||e.kind===id)){const fallback=d.front.elements.find(e=>e.id===id);if(fallback)saved.push({...fallback})}
+    return {...d.front,...(t.front||{}),elements:saved};
+  };
+  const customBack=(Array.isArray(t.back?.elements)?t.back.elements:[]).filter(e=>!LOCKED_CARD_BACK_IDS.has(e?.id)&&e?.id!=='qr'&&e?.kind!=='qr');
+  const locked=lockedCardBackElements(orientation);
+  return {...d,...t,size,backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG',front:mergeFront(),back:{...d.back,...(t.back||{}),elements:[...customBack,...locked]}};
 }
 function autoLayoutCard(t,orientation){
   const portrait=orientation==='portrait';
   t.size=portrait?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
-  const layouts=portrait?{
-    front:{brand:[6,4,88,5],photo:[6,12,31,20],qr:[63,12,31,20],title:[6,35,88,9],name:[6,46,88,9],role:[6,57,88,6],event:[6,65,88,6],number:[6,73,88,5]},
-    back:{backtitle:[6,7,88,8],valid:[6,20,88,9],use:[6,34,88,24],note:[6,64,88,13]}
-  }:{
-    front:{brand:[5,5,58,6],photo:[70,4,25,16],qr:[72,21,21,25],title:[5,15,60,10],name:[5,29,58,9],role:[5,39,49,7],event:[5,47,56,6],number:[66,48,29,5]},
-    back:{backtitle:[6,7,88,8],valid:[6,20,88,7],use:[6,31,88,18],note:[6,43,88,8]}
-  };
-  for(const side of ['front','back'])for(const el of (t[side]?.elements||[])){const pos=layouts[side][el.id];if(pos)[el.x,el.y,el.w,el.h]=pos}
+  const frontLayouts=portrait?{
+    brand:[6,4,88,5],photo:[6,12,31,20],qr:[63,12,31,20],title:[6,35,88,9],name:[6,46,88,9],role:[6,57,88,6],event:[6,65,88,6],number:[6,73,88,5]
+  }:{brand:[5,5,58,6],photo:[70,4,25,16],qr:[72,21,21,25],title:[5,15,60,10],name:[5,29,58,9],role:[5,39,49,7],event:[5,47,56,6],number:[66,48,29,5]};
+  for(const el of (t.front?.elements||[])){const pos=frontLayouts[el.id];if(pos)[el.x,el.y,el.w,el.h]=pos}
+  t.back.elements=[...(t.back?.elements||[]).filter(e=>!LOCKED_CARD_BACK_IDS.has(e?.id)&&e?.id!=='qr'&&e?.kind!=='qr'),...lockedCardBackElements(orientation)];
   return t;
 }
 function credentialText(t,x){return String(t||'').replaceAll('{{full_name}}',x.full_name||'').replaceAll('{{role_label}}',x.role_label||'').replaceAll('{{event_name}}',x.event_name||'').replaceAll('{{card_number}}',x.card_number||'').replaceAll('{{issued_at}}',x.issued_at||'—').replaceAll('{{expires_at}}',x.expires_at||'Không thời hạn')}
@@ -7758,13 +7798,13 @@ function cardHtml(x,t,side='front',qrUrl=''){
     const w=clamp(e.w,4,100), h=clamp(e.h,4,100);
     const xx=clamp(e.x,0,100-w), yy=clamp(e.y,0,100-h);
     const text=credentialText(e.text,x);
-    const style=`left:${xx}%;top:${yy}%;width:${w}%;height:${h}%;color:${safeCssColor(e.color,side==='front'?'#fff':'#173e5d')};font-size:${clamp(e.size,6,96)}px;font-weight:${e.bold?800:500};text-align:${e.align||'left'};display:flex;align-items:center;justify-content:${e.align==='center'?'center':e.align==='right'?'flex-end':'flex-start'};line-height:1.2;position:absolute;overflow:hidden;`;
+    const lockedBack=side==='back'&&LOCKED_CARD_BACK_IDS.has(e.id);const style=`left:${xx}%;top:${yy}%;width:${w}%;height:${h}%;color:${safeCssColor(e.color,side==='front'?'#fff':'#173e5d')};font-size:calc(${clamp(e.size,6,96)}px * var(--card-font-scale, 1));font-weight:${e.bold?800:500};text-align:${e.align||'left'};display:flex;align-items:center;justify-content:${e.align==='center'?'center':e.align==='right'?'flex-end':'flex-start'};line-height:1.2;position:absolute;overflow:hidden;`;
     if(e.kind==='qr'&&side==='back')return `<span class="sf-card-el" style="${style}">QR xác minh ở mặt trước</span>`;
     if(e.kind==='qr')return `<img class="sf-card-el sf-card-qr" style="${style}padding:2.2%;background:#fff;border-radius:6px;object-fit:contain" src="${esc(qrUrl)}" alt="QR xác minh">`;
-    if(e.kind==='photo')return `<img class="sf-card-el" style="${style}object-fit:cover;border-radius:${clamp(e.radius,0,32)}px;background:#fff" src="${esc(x.photo_url||'/sfn-logo.png')}" alt="Ảnh">`;
+    if(e.kind==='photo')return `<img class="sf-card-el" style="${style}object-fit:contain;border-radius:${clamp(e.radius,0,32)}px;background:#fff" src="${esc(x.photo_url||'/sfn-logo.png')}" alt="Ảnh">`;
     if(e.kind==='logo')return `<img class="sf-card-el" style="${style}object-fit:contain" src="${esc(t.logo_url||'/sfn-logo.png')}" alt="Logo">`;
     if(e.kind==='shape')return `<span class="sf-card-el" style="${style}background:${safeCssColor(e.color,'#ffffff')};border-radius:${clamp(e.radius,0,32)}px;opacity:${clamp(e.opacity,0,1)}"></span>`;
-    return `<span class="sf-card-el" style="${style}">${esc(text)}</span>`;
+    return `<span class="sf-card-el ${lockedBack?'sf-card-locked':''}" style="${style}">${esc(text)}</span>`;
   }).join('');
   const orientation=t.size?.width_mm===54&&t.size?.height_mm===86?'portrait':'landscape';
   return `<div class="sf-card-face" data-orientation="${orientation}" style="width:100%;height:100%;position:relative;background:${bg};overflow:hidden">${body}</div>`;
@@ -7793,7 +7833,7 @@ function cardSvg(x,t,side='front',qr=''){
       const clipId=`clip${side}${i}`;
       parts.push(`<defs><clipPath id="${clipId}"><rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="${e.kind==='photo'?Math.min(rx,2):1}"/></clipPath></defs>`);
       if(e.kind==='qr')parts.push(`<rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="1" fill="#ffffff"/>`);
-      const mode=e.kind==='photo'?'xMidYMid slice':'xMidYMid meet';
+      const mode='xMidYMid meet';
       parts.push(`<image href="${safe(src)}" x="${X}" y="${Y}" width="${W}" height="${H}" preserveAspectRatio="${mode}" clip-path="url(#${clipId})"/>`);continue;
     }
     const raw=credentialText(e.text,x),fontPx=clamp(e.size,6,72),cssCardWidth=size.width/25.4*96,font=fontPx*100/cssCardWidth,lineHeight=font*1.2;
@@ -7837,11 +7877,20 @@ async function exportCardAssets(x,t){
   t={...t,logo_url:logoData||'/sfn-logo.png'};
   return {x:out,t};
 }
+async function canvasJpegBytes(canvas,quality=.96){
+  const blob=await new Promise((resolve,reject)=>canvas.toBlob(v=>v?resolve(v):reject(new Error('Không thể nén hình ảnh thẻ để tạo PDF.')),'image/jpeg',quality));
+  return new Uint8Array(await blob.arrayBuffer());
+}
 async function rasterizeCard(x,t,side,preparedAssets=null){
   const assets=preparedAssets||await exportCardAssets(x,t),size=cardPhysicalSize(t),svg=cardSvg(assets.x,assets.t,side,assets.x._qrData),url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
-  try{const img=new Image();img.decoding='async';img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=size.orientation==='portrait'?638:1016;canvas.height=size.orientation==='portrait'?1016:638;const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Trình duyệt không hỗ trợ tạo PDF.');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.96)}finally{URL.revokeObjectURL(url)}
+  try{
+    const img=new Image();img.decoding='async';img.src=url;await img.decode();
+    const canvas=document.createElement('canvas');canvas.width=size.orientation==='portrait'?638:1016;canvas.height=size.orientation==='portrait'?1016:638;
+    const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Trình duyệt không hỗ trợ tạo PDF.');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    return await canvasJpegBytes(canvas,.96);
+  }finally{URL.revokeObjectURL(url)}
 }
-function dataUrlBytes(dataUrl){const raw=atob(dataUrl.split(',')[1]||''),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out}
 function joinBytes(parts){const len=parts.reduce((n,p)=>n+p.length,0),out=new Uint8Array(len);let offset=0;for(const part of parts){out.set(part,offset);offset+=part.length}return out}
 function makePdfFromImages(pages){
   const enc=new TextEncoder(),bytes=s=>enc.encode(s),chunks=[bytes('%PDF-1.4\n%SkyFirst\n')],offsets=[];let total=chunks[0].length;
@@ -7854,22 +7903,27 @@ async function downloadCardPdf(x,t){
   const size=cardPhysicalSize(t),safe=String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-'),pages=[];
   const template={...t,back:{...(t.back||{}),elements:(t.back?.elements||[]).map(e=>e.kind==='qr'?{...e,kind:'text',text:'QR xác minh ở mặt trước'}:e)}};
   const assets=await exportCardAssets(x,template);
-  for(const side of ['front','back']){const data=await rasterizeCard(x,template,side,assets);pages.push({image:dataUrlBytes(data),widthMm:size.width,heightMm:size.height,widthPx:size.orientation==='portrait'?638:1016,heightPx:size.orientation==='portrait'?1016:638})}
+  for(const side of ['front','back']){const data=await rasterizeCard(x,template,side,assets);pages.push({image:data,widthMm:size.width,heightMm:size.height,widthPx:size.orientation==='portrait'?638:1016,heightPx:size.orientation==='portrait'?1016:638})}
   const blob=makePdfFromImages(pages),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`the-${safe}-2-mat.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);toast(`Đã tải PDF hai mặt · ${size.width} × ${size.height} mm mỗi mặt.`);
 }
 function openCardPrint(x,t){downloadCardPdf(x,t).catch(e=>toast(e.message||'Không thể tạo PDF thẻ.','warn'))}
 async function mountCardDesignStudio(container){
   const d=await api('/api/admin/card-designs'); const items=d.items||[];
   if(!items.length){container.insertAdjacentHTML('beforeend','<section class="card studio-design"><h2>Thiết kế thẻ</h2><p class="muted">Chưa có loại thẻ để thiết kế.</p></section>');return}
-  container.insertAdjacentHTML('beforeend',`<section class="card studio-design"><div class="section-title"><div><div class="eyebrow">CARD STUDIO</div><h2>Thiết kế thẻ 2 mặt</h2><p class="muted">Kéo thả bố cục, chỉnh màu, chữ, vị trí QR và nội dung mặt sau. Dòng “Trung Tâm Thành Viên Số Sky First” không được tự động in lên thẻ.</p></div></div><div class="card-studio-shell"><aside class="card-studio-tools"><label>Loại thẻ<select id="csType">${items.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Chiều thẻ<select id="csOrientation"><option value="landscape">Ngang · 86 × 54 mm</option><option value="portrait">Dọc · 54 × 86 mm</option></select></label><div class="studio-side-tabs"><button class="primary" data-cs-side="front">Mặt trước</button><button class="secondary" data-cs-side="back">Mặt sau</button></div><div id="csElements"></div><div class="toolbar"><button class="secondary" data-add-el="text">+ Chữ</button><button class="secondary" data-add-el="shape">+ Họa tiết</button><button class="secondary" data-add-el="photo">+ Ảnh</button><button class="secondary" data-add-el="logo">+ Logo</button><button class="primary" id="csSave">Lưu mẫu</button></div><div id="csMsg" class="msg"></div></aside><div class="card-studio-preview-wrap"><div class="card-studio-preview" id="csPreview"></div><p class="muted">Chọn ngang 86 × 54 mm hoặc dọc 54 × 86 mm. QR chỉ ở mặt trước.</p></div></div></section>`);
+  container.insertAdjacentHTML('beforeend',`<section class="card studio-design"><div class="section-title"><div><div class="eyebrow">CARD STUDIO</div><h2>Thiết kế thẻ 2 mặt</h2><p class="muted">Kéo thả bố cục mặt trước và các họa tiết tùy chỉnh. Nội dung bắt buộc ở mặt sau được khóa để giữ hướng dẫn xác minh thống nhất; QR chỉ xuất hiện ở mặt trước.</p></div></div><div class="card-studio-shell"><aside class="card-studio-tools"><label>Loại thẻ<select id="csType">${items.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Chiều thẻ<select id="csOrientation"><option value="landscape">Ngang · 86 × 54 mm</option><option value="portrait">Dọc · 54 × 86 mm</option></select></label><div class="studio-side-tabs"><button class="primary" data-cs-side="front">Mặt trước</button><button class="secondary" data-cs-side="back">Mặt sau</button></div><div id="csElements"></div><div class="toolbar"><button class="secondary" data-add-el="text">+ Chữ</button><button class="secondary" data-add-el="shape">+ Họa tiết</button><button class="secondary" data-add-el="photo">+ Ảnh</button><button class="secondary" data-add-el="logo">+ Logo</button><button class="primary" id="csSave">Lưu mẫu</button></div><div id="csMsg" class="msg"></div></aside><div class="card-studio-preview-wrap"><div class="card-studio-preview" id="csPreview"></div><p class="muted">Chọn ngang 86 × 54 mm hoặc dọc 54 × 86 mm. QR chỉ ở mặt trước.</p></div></div></section>`);
   const typeSel=$('#csType'),orientationSel=$('#csOrientation'),preview=$('#csPreview'),elements=$('#csElements');let side='front',type=items[0],t=templateFor(type),selected=null;
   const previewPerson={full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'};
-  const syncPreview=()=>{const size=cardPhysicalSize(t);preview.style.aspectRatio=`${size.width}/${size.height}`;preview.style.width=size.orientation==='portrait'?'min(100%, 350px)':'min(100%, 700px)';preview.innerHTML=cardHtml(previewPerson,t,side,cardQrSrc({verify_token:'PREVIEW'},600));};
+  const syncPreview=()=>{
+    const size=cardPhysicalSize(t);preview.style.aspectRatio=`${size.width}/${size.height}`;preview.style.width=size.orientation==='portrait'?'min(100%, 350px)':'min(100%, 700px)';
+    const physicalCssWidth=size.width/25.4*96;const targetCssWidth=Math.min(preview.parentElement?.clientWidth||700,size.orientation==='portrait'?350:700);
+    preview.style.setProperty('--card-font-scale',String(Math.max(.65,targetCssWidth/physicalCssWidth)));
+    preview.innerHTML=cardHtml(previewPerson,t,side,cardQrSrc({verify_token:'PREVIEW'},600));
+  };
   const redraw=()=>{type=items.find(x=>x.id===typeSel.value)||items[0];t=templateFor(type);orientationSel.value=cardPhysicalSize(t).orientation;syncPreview();renderElements();};
-  const renderElements=()=>{const arr=t[side]?.elements||[];elements.innerHTML=arr.map((e,i)=>`<div class="cs-element ${selected===i?'selected':''}" data-cs-i="${i}"><div><b>${e.kind==='qr'?'QR':e.kind==='photo'?'Ảnh':e.kind==='logo'?'Logo':e.kind==='shape'?'Họa tiết':'Chữ'}</b>${(e.kind==='qr'||e.kind==='photo')&&side==='front'?`<span class="meta">${e.kind==='qr'?'QR bắt buộc':'Ảnh bắt buộc'}</span>`:`<button type="button" data-cs-del="${i}">×</button>`}</div>${e.kind==='text'?`<input data-cs-text="${i}" value="${esc(e.text||'')}" placeholder="Nội dung">`:''}<div class="cs-mini-grid"><label>X<input data-cs-x="${i}" type="number" min="0" max="100" value="${e.x}"></label><label>Y<input data-cs-y="${i}" type="number" min="0" max="100" value="${e.y}"></label><label>Rộng<input data-cs-w="${i}" type="number" min="4" max="100" value="${e.w}"></label><label>Cao<input data-cs-h="${i}" type="number" min="4" max="100" value="${e.h}"></label></div>${e.kind!=='qr'&&e.kind!=='photo'&&e.kind!=='logo'?`<div class="cs-mini-grid"><label>Cỡ chữ<input data-cs-size="${i}" type="number" min="8" max="72" value="${e.size||10}"></label><label>Màu<input data-cs-color="${i}" type="color" value="${safeCssColor(e.color,'#ffffff')}"></label></div>`:''}</div>`).join('');
+  const renderElements=()=>{const arr=t[side]?.elements||[];elements.innerHTML=arr.map((e,i)=>{const locked=side==='back'&&LOCKED_CARD_BACK_IDS.has(e.id);return `<div class="cs-element ${selected===i?'selected':''} ${locked?'cs-element-locked':''}" data-cs-i="${i}"><div><b>${e.kind==='qr'?'QR':e.kind==='photo'?'Ảnh':e.kind==='logo'?'Logo':e.kind==='shape'?'Họa tiết':'Chữ'}</b>${locked?'<span class="meta">Nội dung cố định</span>':(e.kind==='qr'||e.kind==='photo')&&side==='front'?`<span class="meta">${e.kind==='qr'?'QR bắt buộc':'Ảnh bắt buộc'}</span>`:`<button type="button" data-cs-del="${i}">×</button>`}</div>${e.kind==='text'?`<input data-cs-text="${i}" value="${esc(e.text||'')}" placeholder="Nội dung" ${locked?'disabled aria-label="Nội dung cố định"':''}>`:''}<div class="cs-mini-grid"><label>X<input data-cs-x="${i}" type="number" min="0" max="100" value="${e.x}" ${locked?'disabled':''}></label><label>Y<input data-cs-y="${i}" type="number" min="0" max="100" value="${e.y}" ${locked?'disabled':''}></label><label>Rộng<input data-cs-w="${i}" type="number" min="4" max="100" value="${e.w}" ${locked?'disabled':''}></label><label>Cao<input data-cs-h="${i}" type="number" min="4" max="100" value="${e.h}" ${locked?'disabled':''}></label></div>${e.kind!=='qr'&&e.kind!=='photo'&&e.kind!=='logo'?`<div class="cs-mini-grid"><label>Cỡ chữ<input data-cs-size="${i}" type="number" min="8" max="72" value="${e.size||10}" ${locked?'disabled':''}></label><label>Màu<input data-cs-color="${i}" type="color" value="${safeCssColor(e.color,'#ffffff')}" ${locked?'disabled':''}></label></div>`:''}</div>`}).join('');
     $$('[data-cs-del]').forEach(b=>b.onclick=()=>{arr.splice(Number(b.dataset.csDel),1);selected=null;redraw()});
     ['text','x','y','w','h','size','color'].forEach(k=>$$(`[data-cs-${k}]`).forEach(inp=>inp.oninput=()=>{const key=`cs${k[0].toUpperCase()+k.slice(1)}`;const i=Number(inp.dataset[key]);if(k==='text')arr[i].text=inp.value;else arr[i][k]=k==='color'?inp.value:Number(inp.value);syncPreview()}));
-    $$('.sf-card-el').forEach((el,i)=>{el.onpointerdown=e=>{const arr=t[side].elements;const idx=i;const startX=e.clientX,startY=e.clientY,ox=Number(arr[idx].x),oy=Number(arr[idx].y);el.setPointerCapture?.(e.pointerId);const move=ev=>{const r=preview.getBoundingClientRect();arr[idx].x=Math.max(0,Math.min(100,ox+(ev.clientX-startX)/r.width*100));arr[idx].y=Math.max(0,Math.min(100,oy+(ev.clientY-startY)/r.height*100));syncPreview();};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);renderElements()};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}});
+    $$('.sf-card-el').forEach((el,i)=>{el.onpointerdown=e=>{const arr=t[side].elements;const idx=i;if(side==='back'&&LOCKED_CARD_BACK_IDS.has(arr[idx]?.id))return;const startX=e.clientX,startY=e.clientY,ox=Number(arr[idx].x),oy=Number(arr[idx].y);el.setPointerCapture?.(e.pointerId);const move=ev=>{const r=preview.getBoundingClientRect();arr[idx].x=Math.max(0,Math.min(100,ox+(ev.clientX-startX)/r.width*100));arr[idx].y=Math.max(0,Math.min(100,oy+(ev.clientY-startY)/r.height*100));syncPreview();};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);renderElements()};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}});
   };
   typeSel.onchange=redraw;orientationSel.onchange=()=>{autoLayoutCard(t,orientationSel.value);selected=null;syncPreview();renderElements()};$$('[data-cs-side]').forEach(b=>b.onclick=()=>{side=b.dataset.csSide;$$('[data-cs-side]').forEach(x=>x.className=x===b?'primary':'secondary');renderElements();syncPreview()});
   $$('[data-add-el]').forEach(b=>b.onclick=()=>{const kind=b.dataset.addEl;const arr=t[side].elements;arr.push({id:'el_'+Date.now(),kind,text:kind==='text'?'Nội dung mới':'',x:10,y:10,w:35,h:10,color:side==='front'?'#ffffff':'#173e5d',size:kind==='text'?12:10,bold:false,align:'left'});selected=arr.length-1;renderElements();syncPreview()});

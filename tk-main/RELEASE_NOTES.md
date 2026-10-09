@@ -57,3 +57,11 @@ Lưu ý: kiểm tra local/static không thể thay thế smoke test trên Cloudf
 - The release verifier now checks PDF dimensions, orientation, password/email protections, public endpoint throttling, token-only card verification, and absence of legacy image-export controls.
 - Validation: SVG parsed and rendered for both orientations; a generated sample PDF was inspected as two pages with 86 × 54 mm and 54 × 86 mm media boxes; `npm run build` and `npm test` pass.
 - Scope limit: this does not constitute browser E2E testing with live Cloudflare D1/R2 or the deployed host.
+
+## 2026-10-09 — Locked card back and navigation usability
+- The back of both landscape and portrait member cards now receives the required Sky First validity/use instructions from the same canonical definition in the frontend and Worker API.
+- Locked back-side text cannot be edited or dragged in Card Studio; backend save overwrites submitted versions of those fixed lines and rejects a QR element from being persisted on the back.
+- The card footer font is kept consistent across UI/API templates and reduced to fit its print-width line.
+- PDF generation encodes canvas output via `toBlob()` and keeps the two physical card faces on separate pages sized to the selected orientation.
+- Card images preserve their proportions, and navigation sections can be collapsed independently while sidebar/content scroll positions are restored during a view render.
+- Verification: `npm run build` and `npm test` pass, including 29/29 center/API integration checks. Cloudflare D1/R2 production and browser end-to-end behavior have not been verified in this package.

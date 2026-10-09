@@ -1,5 +1,29 @@
 const enc=new TextEncoder();
 const clean=(v,m=1000)=>String(v??'').trim().slice(0,m);
+const LOCKED_CARD_BACK_IDS=new Set(['backtitle','validheading','valid','usageheading','use1','use2','use3','noteheading','note','footer']);
+function lockedCardBackElements(orientation='landscape'){
+  const portrait=orientation==='portrait';
+  const positions=portrait?{
+    backtitle:[6,3,88,8],validheading:[6,12,88,4],valid:[6,17,88,7],usageheading:[6,25,88,4],
+    use1:[6,30,88,10],use2:[6,41,88,10],use3:[6,52,88,10],noteheading:[6,63,88,4],note:[6,68,88,20],footer:[6,90,88,9]
+  }:{
+    backtitle:[6,4,88,9],validheading:[6,14,88,5],valid:[6,19,88,9],usageheading:[6,28,88,5],
+    use1:[6,33,88,10],use2:[6,43,88,10],use3:[6,53,88,10],noteheading:[6,64,88,5],note:[6,69,88,20],footer:[6,90,88,9]
+  };
+  const rows=[
+    ['backtitle','HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG',10,true,'#0b2b49'],
+    ['validheading','THỜI HẠN SỬ DỤNG',8,true,'#173e5d'],
+    ['valid','Có giá trị trong thời hạn ghi trên thẻ và theo trạng thái xác minh của hệ thống.',8,false,'#173e5d'],
+    ['usageheading','HƯỚNG DẪN SỬ DỤNG',8,true,'#173e5d'],
+    ['use1','• Xuất trình thẻ khi cần xác nhận tư cách thành viên hoặc người tham gia chương trình.',8,false,'#314e68'],
+    ['use2','• Sử dụng mã QR ở mặt trước để kiểm tra thông tin và trạng thái thẻ.',8,false,'#314e68'],
+    ['use3','• Không cho mượn, chuyển nhượng hoặc sử dụng thẻ thay cho người khác.',8,false,'#314e68'],
+    ['noteheading','LƯU Ý',8,true,'#173e5d'],
+    ['note','Thẻ chỉ có giá trị xác minh thông qua mã QR ở mặt trước. Thẻ không còn giá trị sử dụng khi hệ thống xác minh thông báo thẻ đã bị hủy.',8,false,'#314e68'],
+    ['footer','Sky First Network · Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First',6,true,'#315f80']
+  ];
+  return rows.map(([id,text,size,bold,color])=>({id,kind:'text',text,x:positions[id][0],y:positions[id][1],w:positions[id][2],h:positions[id][3],color,size,bold,align:'left',radius:0,opacity:1}));
+}
 const dateInVietnam=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return `${v.year}-${v.month}-${v.day}`};
 const uid=(p='id')=>`${p}_${crypto.randomUUID()}`;
 const json=(d,s=200,h={})=>new Response(JSON.stringify(d),{status:s,headers:{'content-type':'application/json; charset=utf-8',...h}});
@@ -1323,7 +1347,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       const requestedW=Number(input.size?.width_mm),requestedH=Number(input.size?.height_mm);
       const requestedOrientation=(requestedW===54&&requestedH===86)?'portrait':'landscape';
       const size=requestedOrientation==='portrait'?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
-      const template={...previous,version:2,accent,subtitle,size,front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:sanitizeElements(input.back?.elements||previous.back?.elements,'back')},backTitle:clean(input.backTitle||previous.backTitle||'HIỆU LỰC & CÁCH SỬ DỤNG',120)};
+      const submittedBack=sanitizeElements(input.back?.elements||previous.back?.elements,'back').filter(x=>!LOCKED_CARD_BACK_IDS.has(x.id)&&x.id!=='qr'&&x.kind!=='qr').slice(0,30);
+      const lockedBack=lockedCardBackElements(requestedOrientation);
+      const template={...previous,version:3,accent,subtitle,size,front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:[...submittedBack,...lockedBack]},backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG'};
       await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
       await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
       return json({ok:true,template});
