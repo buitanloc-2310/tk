@@ -1,3 +1,4 @@
+import { generateQrPng } from './local-qr.js';
 const enc=new TextEncoder();
 const clean=(v,m=1000)=>String(v??'').trim().slice(0,m);
 const LOCKED_CARD_BACK_IDS=new Set(['backtitle','validheading','valid','usageheading','use1','use2','use3','noteheading','note','footer']);
@@ -709,26 +710,19 @@ async function api(req,env,url){
       // Keep the legacy existence check when possible, but don't let a missing
       // table turn PDF/QR export into an HTTP 500. The verify endpoint remains authoritative.
       try{
-        const exists=await env.DB.prepare(`SELECT 1 AS ok FROM member_cards WHERE verify_token=? UNION ALL SELECT 1 AS ok FROM one_time_credentials WHERE verify_token=? LIMIT 1`).bind(code,code).first();
+        const exists=await env.DB.prepare(`SELECT 1 AS ok FROM member_cards WHERE verify_token=? UNION ALL SELECT 1 AS ok FROM one_time_credentials WHERE verify_token=? UNION ALL SELECT 1 AS ok FROM verification_qr_records WHERE verify_token=? LIMIT 1`).bind(code,code,code).first();
         if(!exists)return json({error:'NOT_FOUND'},404);
-      }catch(err){console.error('CARD_QR_EXISTENCE_CHECK_SKIPPED',String(err?.message||err))}
+      }catch(err){console.error('CARD_QR_EXISTENCE_CHECK_FAILED',String(err?.message||err));return json({error:'QR_VERIFICATION_STORE_UNAVAILABLE',detail:'Không xác minh được hồ sơ QR. Hãy kiểm tra migration dữ liệu trước khi tải QR.'},503)}
     }
     const requestedSize=Number(url.searchParams.get('size'));
     const size=[120,170,180,600].includes(requestedSize)?requestedSize:180;
     const verificationUrl=new URL('/verify',url.origin);verificationUrl.searchParams.set('code',code);
-    const qrUrl=new URL('https://quickchart.io/qr');
-    qrUrl.searchParams.set('size',String(size));qrUrl.searchParams.set('margin','2');qrUrl.searchParams.set('ecLevel','H');qrUrl.searchParams.set('format','png');qrUrl.searchParams.set('text',verificationUrl.toString());
     try{
-      const remote=await fetch(qrUrl.toString(),{headers:{accept:'image/png'},signal:AbortSignal.timeout(8000)});
-      const contentType=clean(remote.headers.get('content-type'),100).toLowerCase();
-      if(!remote.ok||!contentType.startsWith('image/png')){
-        console.error('CARD_QR_UPSTREAM_BAD_RESPONSE',remote.status,contentType);
-        return json({error:'QR_GENERATION_FAILED',detail:'Dịch vụ tạo QR không trả về ảnh hợp lệ.'},502);
-      }
-      const image=await remote.arrayBuffer();
-      if(!image.byteLength||image.byteLength>512*1024)return json({error:'QR_IMAGE_INVALID'},502);
+      // QR is generated inside the Worker. Verification tokens are never sent to a third-party QR service.
+      const image=await generateQrPng(verificationUrl.toString(),size);
+      if(!image?.byteLength||image.byteLength>512*1024)return json({error:'QR_IMAGE_INVALID'},502);
       return new Response(image,{status:200,headers:{'content-type':'image/png','cache-control':'public, max-age=86400','x-content-type-options':'nosniff'}});
-    }catch(err){console.error('CARD_QR_UPSTREAM_ERROR',String(err?.message||err));return json({error:'QR_GENERATION_FAILED',detail:'Không kết nối được dịch vụ tạo QR.'},502)}
+    }catch(err){console.error('LOCAL_QR_GENERATION_ERROR',String(err?.message||err));return json({error:'QR_GENERATION_FAILED',detail:'Không tạo được ảnh QR cục bộ.'},502)}
   }
 
   // =========================================================
@@ -799,6 +793,22 @@ async function api(req,env,url){
         type:'one_time',
         valid:oneTime.status==='active' && (!oneTime.expires_at || oneTime.expires_at>=today),
         record:oneTime
+      });
+    }
+
+    const independentQr=await env.DB.prepare(`
+      SELECT credential_title,full_name,role_label,organization_label,reference_number,issued_at,expires_at,status,public_note
+      FROM verification_qr_records
+      WHERE verify_token=?
+      LIMIT 1
+    `).bind(code).first();
+    if(independentQr){
+      const today=dateInVietnam();
+      const effectiveStatus=independentQr.status==='active'&&independentQr.issued_at&&independentQr.issued_at>today?'pending':independentQr.status==='active'&&independentQr.expires_at&&independentQr.expires_at<today?'expired':independentQr.status;
+      return json({
+        type:'verification_qr',
+        valid:effectiveStatus==='active',
+        record:{...independentQr,status:effectiveStatus}
       });
     }
 
@@ -1238,6 +1248,110 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(!sameOrigin(req)) return json({error:'ORIGIN_FORBIDDEN'},403);
 
 
+  // Independent QR issuance for externally designed cards. It is deliberately
+  // separate from member_cards and one_time_credentials.
+  if(url.pathname==='/api/admin/issuance-overview'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    const today=dateInVietnam();
+    const future=new Date(Date.now()+30*86400000);
+    const dateParts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(future).map(x=>[x.type,x.value]));
+    const expiryLimit=`${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+    const [qr,totalOt,activeOt,memberTotal,memberActive,expiring]=await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='active' AND issued_at<=? AND (expires_at IS NULL OR expires_at>=?) THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='revoked' THEN 1 ELSE 0 END) revoked,SUM(CASE WHEN status='active' AND expires_at IS NOT NULL AND expires_at<? THEN 1 ELSE 0 END) expired,SUM(CASE WHEN status='active' AND issued_at>? THEN 1 ELSE 0 END) pending FROM verification_qr_records`).bind(today,today,today,today).first(),
+      env.DB.prepare('SELECT COUNT(*) n FROM one_time_credentials').first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM one_time_credentials WHERE status='active' AND (expires_at IS NULL OR expires_at>=?)`).bind(today).first(),
+      env.DB.prepare('SELECT COUNT(*) n FROM member_cards').first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND (expires_at IS NULL OR expires_at>=?)`).bind(today).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at>=? AND expires_at<=?`).bind(today,expiryLimit).first()
+    ]);
+    return json({today,verification_qr:{total:Number(qr?.total||0),active:Number(qr?.active||0),expired:Number(qr?.expired||0),revoked:Number(qr?.revoked||0),pending:Number(qr?.pending||0)},one_time:{total:Number(totalOt?.n||0),active:Number(activeOt?.n||0)},member_cards:{total:Number(memberTotal?.n||0),active:Number(memberActive?.n||0),expiring_30_days:Number(expiring?.n||0)}});
+  }
+
+  if(url.pathname==='/api/admin/member-cards'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    const q=clean(url.searchParams.get('q'),100);
+    const status=clean(url.searchParams.get('status'),20);
+    const limit=Math.min(250,Math.max(10,Number(url.searchParams.get('limit')||100)));
+    const today=dateInVietnam();
+    const r=await env.DB.prepare(`
+      SELECT c.id,c.person_id,c.card_type_id,c.org_node_id,c.card_number,c.title_on_card,c.issued_at,c.expires_at,
+        CASE WHEN c.status='active' AND c.expires_at IS NOT NULL AND c.expires_at<? THEN 'expired' ELSE c.status END status,
+        c.verify_token,p.full_name,p.member_code,p.avatar_url,t.name card_type_name,t.template_json card_template_json,o.name org_name
+      FROM member_cards c JOIN people p ON p.id=c.person_id
+      LEFT JOIN card_types t ON t.id=c.card_type_id LEFT JOIN org_nodes o ON o.id=c.org_node_id
+      WHERE (?='' OR p.full_name LIKE ? OR p.member_code LIKE ? OR c.card_number LIKE ?)
+        AND (?='' OR c.status=?)
+      ORDER BY c.created_at DESC LIMIT ?
+    `).bind(today,q,`%${q}%`,`%${q}%`,`%${q}%`,status,status,limit).all();
+    return json({items:r.results||[],today});
+  }
+
+  if(url.pathname==='/api/admin/verification-qr'&&['GET','POST'].includes(req.method)){
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(req.method==='GET'){
+      const today=dateInVietnam();
+      const q=clean(url.searchParams.get('q'),100);
+      const r=await env.DB.prepare(`
+        SELECT id,credential_title,full_name,role_label,organization_label,reference_number,issued_at,expires_at,
+          CASE WHEN status='active' AND issued_at>? THEN 'pending' WHEN status='active' AND expires_at IS NOT NULL AND expires_at<? THEN 'expired' ELSE status END effective_status,
+          verify_token,public_note,created_at,updated_at
+        FROM verification_qr_records
+        WHERE (?='' OR full_name LIKE ? OR credential_title LIKE ? OR reference_number LIKE ? OR organization_label LIKE ?)
+        ORDER BY created_at DESC LIMIT 250
+      `).bind(today,today,q,`%${q}%`,`%${q}%`,`%${q}%`,`%${q}%`).all();
+      return json({items:r.results||[],today});
+    }
+    const b=await bodyJson(req);
+    const credentialTitle=clean(b.credential_title,160);
+    const fullName=clean(b.full_name,160);
+    const roleLabel=clean(b.role_label,160)||null;
+    const organization=clean(b.organization_label,200)||null;
+    const issuedAt=clean(b.issued_at,10)||dateInVietnam();
+    const expiresAt=clean(b.expires_at,10)||null;
+    const publicNote=clean(b.public_note,500)||null;
+    const privateNotes=clean(b.private_notes,1000)||null;
+    const validDate=v=>!v||(/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v);
+    if(!credentialTitle||!fullName)return json({error:'CREDENTIAL_TITLE_AND_NAME_REQUIRED',message:'Cần nhập tên thẻ/giấy xác nhận và họ tên.'},400);
+    if(!validDate(issuedAt)||!validDate(expiresAt))return json({error:'INVALID_DATE',message:'Ngày cấp hoặc ngày hết hiệu lực không hợp lệ.'},400);
+    if(expiresAt&&expiresAt<issuedAt)return json({error:'EXPIRY_BEFORE_ISSUE',message:'Ngày hết hiệu lực không được trước ngày cấp.'},400);
+    const id=uid('vqr');
+    let referenceNumber=clean(b.reference_number,80);
+    if(referenceNumber&&!/^[A-Za-z0-9_-]{3,80}$/.test(referenceNumber))return json({error:'INVALID_REFERENCE_NUMBER',message:'Mã hồ sơ chỉ được chứa chữ, số, gạch ngang hoặc gạch dưới.'},400);
+    if(!referenceNumber){
+      for(let attempt=0;attempt<12;attempt++){
+        const digits=new Uint32Array(1);crypto.getRandomValues(digits);
+        const candidate=`SFN-QR-${String(digits[0]%100000000).padStart(8,'0')}`;
+        const exists=await env.DB.prepare('SELECT 1 FROM verification_qr_records WHERE reference_number=? LIMIT 1').bind(candidate).first();
+        if(!exists){referenceNumber=candidate;break}
+      }
+      if(!referenceNumber)return json({error:'REFERENCE_GENERATION_FAILED',message:'Không tạo được mã hồ sơ duy nhất. Vui lòng thử lại.'},503);
+    }
+    const verify=verifyCode('QRV');
+    try{
+      await env.DB.prepare(`INSERT INTO verification_qr_records(id,credential_title,full_name,role_label,organization_label,reference_number,issued_at,expires_at,status,verify_token,public_note,private_notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(id,credentialTitle,fullName,roleLabel,organization,referenceNumber,issuedAt,expiresAt,'active',verify,publicNote,privateNotes,s.account_id).run();
+    }catch(e){
+      const msg=String(e?.message||e);
+      if(msg.includes('UNIQUE'))return json({error:'REFERENCE_NUMBER_ALREADY_USED',message:'Mã hồ sơ đã tồn tại. Hãy dùng mã khác.'},409);
+      console.error('INDEPENDENT_QR_CREATE_FAILED',msg);
+      return json({error:'CREATE_FAILED',message:'Chưa tạo được hồ sơ QR. Dữ liệu chưa được lưu.'},500);
+    }
+    await safeAudit(env,s.account_id,'verification_qr_created','verification_qr_record',id,null,{reference_number:referenceNumber,credential_title:credentialTitle});
+    return json({ok:true,id,reference_number:referenceNumber,verify_token:verify,verification_url:new URL('/verify?code='+encodeURIComponent(verify),url.origin).toString()},201);
+  }
+  const verificationQrAction=url.pathname.match(/^\/api\/admin\/verification-qr\/([^/]+)\/(revoke)$/);
+  if(verificationQrAction&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    const id=decodeURIComponent(verificationQrAction[1]);
+    const row=await env.DB.prepare('SELECT id,status,reference_number FROM verification_qr_records WHERE id=?').bind(id).first();
+    if(!row)return json({error:'NOT_FOUND'},404);
+    if(row.status!=='revoked'){
+      await env.DB.prepare(`UPDATE verification_qr_records SET status='revoked',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(id).run();
+      await safeAudit(env,s.account_id,'verification_qr_revoked','verification_qr_record',id,null,{reference_number:row.reference_number});
+    }
+    return json({ok:true,status:'revoked'});
+  }
+
   if(url.pathname==='/api/admin/one-time-credentials'&&['GET','POST'].includes(req.method)){
     if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
     if(req.method==='GET'){
@@ -1280,10 +1394,37 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     return json({ok:true,status:next});
   }
 
-  if(url.pathname==='/api/admin/card-designs'&&req.method==='GET'){
+  if(url.pathname==='/api/admin/card-designs'&&['GET','POST'].includes(req.method)){
     if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
-    const r=await env.DB.prepare('SELECT id,code,name,template_json,active FROM card_types ORDER BY name').all();
-    return json({items:r.results||[]});
+    if(req.method==='GET'){
+      const r=await env.DB.prepare('SELECT id,code,name,template_json,active FROM card_types ORDER BY name').all();
+      return json({items:r.results||[]});
+    }
+    const b=await bodyJson(req),name=clean(b.name,100);
+    if(!name)return json({error:'TEMPLATE_NAME_REQUIRED',message:'Hãy nhập tên mẫu thẻ.'},400);
+    const duplicate=await env.DB.prepare('SELECT id FROM card_types WHERE lower(name)=lower(?) LIMIT 1').bind(name).first();
+    if(duplicate)return json({error:'TEMPLATE_NAME_ALREADY_USED',message:'Tên mẫu thẻ đã tồn tại.'},409);
+    let code='';
+    for(let attempt=0;attempt<12;attempt++){
+      const bytes=new Uint8Array(4);crypto.getRandomValues(bytes);
+      const candidate='SFN-CUSTOM-'+hex(bytes).toUpperCase();
+      const exists=await env.DB.prepare('SELECT 1 FROM card_types WHERE code=? LIMIT 1').bind(candidate).first();
+      if(!exists){code=candidate;break}
+    }
+    if(!code)return json({error:'TEMPLATE_CODE_GENERATION_FAILED',message:'Chưa tạo được mã mẫu duy nhất. Vui lòng thử lại.'},503);
+    const id=uid('card_type');
+    const template={version:3,accent:'#1677d2',subtitle:'',size:{width_mm:86,height_mm:54},backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG',front:{elements:[
+      {id:'title',kind:'text',text:'THẺ THÀNH VIÊN',x:5,y:12,w:61,h:10,color:'#ffffff',size:17,bold:true,align:'left',font:'Arial'},
+      {id:'name',kind:'text',text:'{{full_name}}',x:5,y:27,w:61,h:9,color:'#ffffff',size:13,bold:true,align:'left',font:'Arial'},
+      {id:'role',kind:'text',text:'{{title_on_card}}',x:5,y:38,w:61,h:7,color:'#dceeff',size:9,bold:false,align:'left',font:'Arial'},
+      {id:'number',kind:'text',text:'{{card_number}}',x:5,y:47,w:61,h:5,color:'#ffffff',size:6,bold:false,align:'left',font:'Arial'},
+      {id:'qr',kind:'qr',text:'',x:72,y:20,w:21,h:27,color:'#ffffff',size:8,bold:false,align:'center',font:'Arial'}
+    ]},back:{elements:lockedCardBackElements('landscape')}};
+    try{
+      await env.DB.prepare('INSERT INTO card_types(id,code,name,description,template_json,active) VALUES(?,?,?,?,?,1)').bind(id,code,name,'Mẫu thẻ được tạo trong Card Studio',JSON.stringify(template)).run();
+    }catch(e){const msg=String(e?.message||e);return json({error:msg.includes('UNIQUE')?'TEMPLATE_ALREADY_EXISTS':'TEMPLATE_CREATE_FAILED',message:msg.includes('UNIQUE')?'Tên hoặc mã mẫu đã tồn tại.':'Không lưu được mẫu thẻ. Vui lòng thử lại.'},msg.includes('UNIQUE')?409:500)}
+    await safeAudit(env,s.account_id,'card_template_created','card_type',id,null,{code,name});
+    return json({ok:true,item:{id,code,name,description:'Mẫu thẻ được tạo trong Card Studio',template_json:JSON.stringify(template),active:1}},201);
   }
   const designer=url.pathname.match(/^\/api\/admin\/card-designs\/([^/]+)(?:\/(logo))?$/);
   if(designer){
@@ -1292,31 +1433,14 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const row=await env.DB.prepare('SELECT id,template_json FROM card_types WHERE id=?').bind(id).first();
     if(!row)return json({error:'CARD_TYPE_NOT_FOUND'},404);
     let previous={};try{previous=JSON.parse(row.template_json||'{}')}catch{}
-    if(designer[2]==='logo'&&req.method==='POST'){
-      const contentType=clean(req.headers.get('content-type'),80).split(';')[0].toLowerCase();
-      const ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[contentType];
-      if(!ext)return json({error:'UNSUPPORTED_LOGO_FORMAT'},415);
-      const bytes=await req.arrayBuffer();
-      if(bytes.byteLength<12||bytes.byteLength>2*1024*1024)return json({error:'LOGO_SIZE_INVALID'},413);
-      const header=new Uint8Array(bytes.slice(0,16));
-      const png=header[0]===137&&header[1]===80&&header[2]===78&&header[3]===71;
-      const jpg=header[0]===255&&header[1]===216&&header[2]===255;
-      const webp=String.fromCharCode(...header.slice(0,4))==='RIFF'&&String.fromCharCode(...header.slice(8,12))==='WEBP';
-      if(!({png,jpg,webp}[ext]))return json({error:'INVALID_LOGO_CONTENT'},415);
-      const key=`branding/cards/${crypto.randomUUID()}.${ext}`;
-      await env.FILES.put(key,bytes,{httpMetadata:{contentType,cacheControl:'public,max-age=31536000,immutable'}});
-      previous.logo_url=`/files/${key}`;
-      await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(previous),id).run();
-      await safeAudit(env,s.account_id,'card_logo_updated','card_type',id,null,{key});
-      return json({ok:true,logo_url:previous.logo_url});
-    }
+    if(designer[2]==='logo')return json({error:'LOGO_UPLOAD_REMOVED',message:'Tải logo cho mẫu thẻ đã được loại bỏ theo cấu hình hiện tại.'},410);
     if(req.method==='PUT'){
       const input=await bodyJson(req),accent=clean(input.accent,7),subtitle=clean(input.subtitle,90);
       if(!/^#[a-f0-9]{6}$/i.test(accent))return json({error:'INVALID_ACCENT'},400);
       const sanitizeElements=(arr,side='front')=>{
         if(!Array.isArray(arr))return [];
-        return arr.slice(0,40).map((x,i)=>{
-          const kind=['text','photo','logo','qr','shape'].includes(x.kind)?x.kind:'text';
+        return arr.filter(x=>x?.kind!=='logo').slice(0,40).map((x,i)=>{
+          const kind=['text','photo','qr','shape'].includes(x.kind)?x.kind:'text';
           const w=Number.isFinite(Number(x.w))?Math.max(4,Math.min(100,Number(x.w))):30;
           const h=Number.isFinite(Number(x.h))?Math.max(4,Math.min(100,Number(x.h))):10;
           const rawX=Number.isFinite(Number(x.x))?Number(x.x):5;
@@ -1332,6 +1456,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
             size:Number.isFinite(Number(x.size))?Math.max(8,Math.min(72,Number(x.size))):14,
             bold:!!x.bold,
             align:['left','center','right'].includes(x.align)?x.align:'left',
+            font:['Arial','Verdana','Georgia','Tahoma'].includes(x.font)?x.font:'Arial',
             radius:Number.isFinite(Number(x.radius))?Math.max(0,Math.min(32,Number(x.radius))):8,
             opacity:Number.isFinite(Number(x.opacity))?Math.max(0,Math.min(1,Number(x.opacity))):1
           };
@@ -1341,15 +1466,13 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(!frontElements.some(x=>x.kind==='qr')){
         frontElements.push({id:'qr',kind:'qr',text:'',x:72,y:18,w:21,h:28,color:'#ffffff',size:8,bold:false,align:'center',radius:6,opacity:1});
       }
-      if(!frontElements.some(x=>x.kind==='photo')){
-        frontElements.push({id:'photo',kind:'photo',text:'',x:70,y:4,w:25,h:16,color:'#ffffff',size:8,bold:false,align:'center',radius:5,opacity:1});
-      }
       const requestedW=Number(input.size?.width_mm),requestedH=Number(input.size?.height_mm);
       const requestedOrientation=(requestedW===54&&requestedH===86)?'portrait':'landscape';
       const size=requestedOrientation==='portrait'?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
       const submittedBack=sanitizeElements(input.back?.elements||previous.back?.elements,'back').filter(x=>!LOCKED_CARD_BACK_IDS.has(x.id)&&x.id!=='qr'&&x.kind!=='qr').slice(0,30);
       const lockedBack=lockedCardBackElements(requestedOrientation);
       const template={...previous,version:3,accent,subtitle,size,front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:[...submittedBack,...lockedBack]},backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG'};
+      delete template.logo_url;
       await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
       await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
       return json({ok:true,template});
@@ -5028,3 +5151,5 @@ export default{
     return env.ASSETS.fetch(request);
   }
 };
+
+export {api};

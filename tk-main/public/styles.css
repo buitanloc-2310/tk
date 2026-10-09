@@ -293,3 +293,36 @@ html{scroll-behavior:smooth}body{background:radial-gradient(circle at 80% -10%,r
 .card-studio-preview .sf-card-face{border-radius:inherit}
 @media(max-width:840px){.nav-section-toggle{padding:11px 9px}.nav-group .nav{grid-template-columns:1fr}.nav-group .nav button{min-height:42px}.sidebar{overflow:hidden}.nav-scroll{max-height:calc(100dvh - 220px);overflow:auto}}
 @media(prefers-reduced-motion:reduce){.nav-chevron{transition:none}}
+
+/* Independent verification QR + five-area issuance workspace */
+.issuance-nav-tabs{flex-wrap:wrap;align-items:center;gap:8px;position:sticky;top:86px;z-index:8;background:rgba(255,255,255,.96);padding:6px 0 14px;backdrop-filter:blur(10px)}
+.issuance-nav-tabs button{white-space:nowrap;min-height:40px}
+.issuance-kpi{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.issuance-kpi .stat strong{font-size:clamp(22px,2vw,30px)}
+.issuance-panel .table-wrap{max-width:100%;overflow:auto}
+.issuance-panel table{min-width:760px}
+.issuance-panel .toolbar{gap:7px;flex-wrap:wrap}
+.issuance-panel .toolbar .secondary,.issuance-panel .toolbar .primary,.issuance-panel .toolbar .danger{white-space:nowrap}
+@media(max-width:900px){.issuance-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs{position:static}}
+@media(max-width:600px){.issuance-kpi{grid-template-columns:1fr}.issuance-nav-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs button{white-space:normal;min-height:44px}.issuance-panel{padding:12px}.issuance-panel .section-title{align-items:flex-start;flex-direction:column}.issuance-panel .section-title input{max-width:100%!important;width:100%}}
+
+/* Independent verification QR + five-area issuance workspace */
+.issuance-nav-tabs{flex-wrap:wrap;align-items:center;gap:8px;position:sticky;top:86px;z-index:8;background:rgba(255,255,255,.96);padding:6px 0 14px;backdrop-filter:blur(10px)}
+.issuance-nav-tabs button{white-space:nowrap;min-height:40px}
+.issuance-kpi{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.issuance-kpi .stat strong{font-size:clamp(22px,2vw,30px)}
+.issuance-panel .table-wrap{max-width:100%;overflow:auto}
+.issuance-panel table{min-width:760px}
+.issuance-panel .toolbar{gap:7px;flex-wrap:wrap}
+.issuance-panel .toolbar .secondary,.issuance-panel .toolbar .primary,.issuance-panel .toolbar .danger{white-space:nowrap}
+@media(max-width:900px){.issuance-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs{position:static}}
+@media(max-width:600px){.issuance-kpi{grid-template-columns:1fr}.issuance-nav-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs button{white-space:normal;min-height:44px}.issuance-panel{padding:12px}.issuance-panel .section-title{align-items:flex-start;flex-direction:column}.issuance-panel .section-title input{max-width:100%!important;width:100%}}
+
+/* Card Studio: compact template creation control and text formatting tools. */
+.cs-new-template-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin:10px 0 12px}
+.cs-new-template-row label{min-width:0;margin:0}
+.cs-new-template-row input{width:100%;min-width:0}
+.cs-new-template-row button{white-space:nowrap;min-height:42px}
+.cs-bold-option{display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0;color:var(--text,#173752)}
+.cs-bold-option input{width:auto;min-height:auto;margin:0}
+@media(max-width:560px){.cs-new-template-row{grid-template-columns:1fr}.cs-new-template-row button{width:100%}}

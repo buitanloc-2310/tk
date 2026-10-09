@@ -7,12 +7,12 @@ errors=[]
 def ok(name): print('[OK]',name)
 def fail(name,msg): errors.append(f'{name}: {msg}'); print('[FAIL]',name,msg)
 
-required=['public/index.html','public/app.js','public/styles.css','public/sfn-logo.png','src/index.js','wrangler.jsonc','migrations/0008_account_request_profile.sql']
+required=['public/index.html','public/app.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql']
 for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
 
-for x in ['public/app.js','src/index.js']:
+for x in ['public/app.js','src/index.js','src/local-qr.js','src/qr-code/index.js']:
     r=subprocess.run(['node','--check',str(ROOT/x)],capture_output=True,text=True)
     if r.returncode==0: ok('syntax '+x)
     else: fail('syntax '+x,r.stderr.strip())
@@ -105,7 +105,7 @@ for name,marker in v4_front_checks.items():
     else: fail(name,'marker missing')
 
 index=(ROOT/'public/index.html').read_text()
-if 'v=20261009-member-v6-locked-back-3' in index: ok('cache busting current release')
+if 'v=20261009-member-v6-independent-qr-1' in index: ok('cache busting current release')
 else: fail('cache busting','index does not force current release assets')
 
 # Locked member-card copy must be enforced in both client and Worker API.
@@ -124,16 +124,44 @@ if all("['footer','Sky First Network · Mạng lưới Giáo dục & Phát tri�
 else: fail('card footer layout','frontend and API footer sizes should match and fit print width')
 
 verify=(ROOT/'public/verify.html').read_text()
-for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning')]:
+for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning'),('x.status===\'pending\'','future-date pending verify warning')]:
     if marker in verify: ok(name)
     else: fail(name,'missing')
+
+# Independent QR flow for externally designed cards.
+for marker,name in [
+    ('import { generateQrPng }','local QR generator is integrated'),
+    ('verification_qr_records','independent QR storage'),
+    ("url.pathname==='/api/admin/verification-qr'",'independent QR admin API'),
+    ("type:'verification_qr'",'independent QR verification type'),
+    ('/api/admin/issuance-overview','real issuance overview API'),
+    ('/api/admin/member-cards','member card management list API'),
+    ("url.pathname==='/api/admin/card-designs'&&['GET','POST'].includes(req.method)",'create and list reusable card templates'),
+    ('data-issuance-tab=\"qr\"','independent QR admin tab'),
+    ('Tải QR PNG','QR PNG download action'),
+    ('async function downloadQrPng(tokenValue,fileName)','validates the QR image before download'),
+    ('Tạo QR xác minh độc lập','independent QR instructions'),
+]:
+    if marker in front+back+verify: ok(name)
+    else: fail(name,'marker missing')
+if 'data-add-el=\"logo\"' in front: fail('logo-free designer','logo add control remains')
+else: ok('logo-free designer controls')
+if "x.photo_url||'/sfn-logo.png'" in front or "t.logo_url||'/sfn-logo.png'" in front: fail('no default logo fallback in card design/export','logo remains as card image fallback')
+else: ok('no default logo fallback in card design/export')
+if "e.kind==='photo'?'Ảnh bắt buộc'" in front or "frontElements.some(x=>x.kind==='photo')" in back: fail('optional member photo','photo is forced by the card UI or API')
+else: ok('member photo is optional and removable')
+if "font:['Arial','Verdana','Georgia','Tahoma'].includes(x.font)?x.font:'Arial'" in back and "['Arial','Verdana','Georgia','Tahoma'].includes(e.font)" in front: ok('allowlisted card font support in API and exports')
+else: fail('card font support','font allowlist missing from API or renderer')
+if "LOGO_UPLOAD_REMOVED" in back and "['text','photo','qr','shape']" in back: ok('logo-free design API')
+else: fail('logo-free design API','server still accepts logo elements or upload')
 
 # 2026-10-09 hardening and card-export contract.
 for marker,name in [
     ('async function downloadCardPdf(x,t)','direct PDF generator'),
     ('function autoLayoutCard(t,orientation)','portrait/landscape auto-layout'),
-    ('Ảnh bắt buộc','front photo is not removable in Card Studio'),
-    ("frontElements.some(x=>x.kind==='photo')",'backend ensures a front photo element'),
+    ('data-cs-font','card text font control'),
+    ('data-cs-align','card text alignment control'),
+    ('data-cs-bold','card text bold control'),
     ('/MediaBox [0 0 ${w.toFixed(4)} ${h.toFixed(4)}]','physical PDF page dimensions'),
     ('PASSWORD_CHANGE_REQUIRED','forced password-change backend gate'),
     ('EMAIL_CHANGE_REQUIRES_VERIFICATION','verified-email change guard'),
