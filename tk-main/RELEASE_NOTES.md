@@ -38,3 +38,22 @@ Lưu ý: kiểm tra local/static không thể thay thế smoke test trên Cloudf
 - Trang xác minh thẻ hiển thị ảnh, thời hạn và trạng thái; không công khai CCCD/địa chỉ/email/SĐT.
 - Thêm SUPER_ADMIN Center với dashboard tài khoản/hệ thống và công cụ kiểm tra ROLE + SCOPE + PERMISSION.
 - Migration 0009 chỉ bổ sung bảng/quyền, không tạo lại D1/R2 và không xóa dữ liệu production.
+
+
+## 2026-10-09 follow-up
+- Card export actions download a two-page PDF directly (front/back on separate physical-size pages); user-facing image/SVG downloads removed.
+- Card designer supports landscape 86 × 54 mm and portrait 54 × 86 mm.
+- Critical evaluation, password-change, rate-limit, card-verification, and service-health fixes are recorded in `AUDIT_WEB_2026-10-08.md`.
+
+
+## 2026-10-09 PDF/rendering follow-up
+- Card face rendering now emits native SVG elements rather than HTML `foreignObject`, with uploaded/local assets embedded before rasterization.
+- QR images now use a rate-limited same-origin endpoint that validates opaque tokens before proxying the QR render, avoiding browser-side CORS when generating PDFs.
+- Added orientation-specific first-pass layout for both card faces; manual drag/drop remains available after the layout is applied.
+- The front photo and QR are protected against deletion and are restored when a legacy card template lacks either element.
+- Bulk membership-card issuance now records the Vietnam-local issue date.
+- Integration tests confirm a one-time card cannot be looked up by its displayed card number; the opaque verification token is required.
+- Existing saved card templates gain a front photo and QR fallback if either is missing; a back-side QR is displayed as a front-side verification note.
+- The release verifier now checks PDF dimensions, orientation, password/email protections, public endpoint throttling, token-only card verification, and absence of legacy image-export controls.
+- Validation: SVG parsed and rendered for both orientations; a generated sample PDF was inspected as two pages with 86 × 54 mm and 54 × 86 mm media boxes; `npm run build` and `npm test` pass.
+- Scope limit: this does not constitute browser E2E testing with live Cloudflare D1/R2 or the deployed host.

@@ -9,7 +9,7 @@ const DB={prepare(sql){let args=[];const q={bind(...a){args=a;return q},async fi
 db.exec(`INSERT INTO people(id,member_code,full_name) VALUES('p','T','Test'); INSERT INTO accounts(id,person_id,username,password_hash,password_salt,force_password_change) VALUES('a','p','test','x','x',0); INSERT INTO account_scopes(id,account_id,role_id,org_node_id) VALUES('scope','a','role_super_admin','org_sfn');`);
 db.prepare("INSERT INTO sessions(id,account_id,token_hash,expires_at) VALUES('s','a',?,datetime('now','+1 day'))").run(createHash('sha256').update('test').digest('hex'));
 const src=readFileSync('src/index.js','utf8');const {api}=await import('data:text/javascript;base64,'+Buffer.from(src+'\nexport {api};').toString('base64'));
-let checks=0;async function call(path,method='GET',b){const req=new Request('https://member.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=test','content-type':'application/json'},body:b?JSON.stringify(b):undefined});const r=await api(req,{DB},new URL(req.url));return {status:r.status,...await r.json()}}
+let checks=0;async function call(path,method='GET',b){const req=new Request('https://member.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=test','content-type':'application/json',origin:'https://member.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const r=await api(req,{DB},new URL(req.url));return {status:r.status,...await r.json()}}
 let r=await call('/api/admin/org','POST',{code:'SF-DMC',name:'Wrong',node_type:'digital_member_center'});assert.equal(r.status,200);const id=r.id;assert.equal(db.prepare('SELECT name FROM org_nodes WHERE id=?').get(id).name,'Trung Tâm Thành Viên Số Sky First');checks++;
 assert.equal((await call('/api/admin/org','POST',{code:'sf-dmc',name:'Duplicate'})).status,409);checks++;
 assert.equal((await call('/api/admin/org/'+id,'PATCH',{parent_id:id})).error,'ORG_CYCLE_FORBIDDEN');checks++;
@@ -28,13 +28,21 @@ r=await call('/api/admin/saved-filters','POST',{name:'Test filter',view:'admin-m
 r=await call('/api/admin/saved-filters');assert.equal(r.status,200);assert(r.items.some(x=>x.name==='Test filter'));const fid=r.items.find(x=>x.name==='Test filter').id;checks++;
 assert.equal((await call('/api/admin/saved-filters/'+fid,'DELETE')).status,200);checks++;
 
+const noOriginReq=new Request('https://member.skyfirst.io.vn/api/admin/org',{method:'POST',headers:{cookie:'sfn_session=test','content-type':'application/json'},body:JSON.stringify({code:'NO-ORIGIN',name:'Blocked'})});
+assert.equal((await api(noOriginReq,{DB},new URL(noOriginReq.url))).status,403);checks++;
 const req=new Request('https://member.skyfirst.io.vn/api/me',{headers:{cookie:'sfn_session=%ZZ'}});assert.equal((await api(req,{DB},new URL(req.url))).status,401);checks++;
 const front=readFileSync('public/app.js','utf8');const apiText=front.slice(front.indexOf('const api='),front.indexOf('const safeStore='));const ctx={fetch:async()=>new Response('<html>',{status:200}),AbortController,setTimeout,clearTimeout};vm.createContext(ctx);vm.runInContext(apiText+'\nglobalThis.testApi=api;',ctx);await assert.rejects(ctx.testApi('/api/test'),/không hợp lệ/);checks++;
 ctx.fetch=async()=>Response.json(null);await assert.rejects(ctx.testApi('/api/test'),/không hợp lệ/);checks++;
 r=await call('/api/admin/one-time-credentials','POST',{full_name:'Nguyen Test',event_name:'Su kien Test',role_label:'TNV',card_type_id:'card_volunteer',expires_at:'2099-12-31'});assert.equal(r.status,200);assert(r.verify_token&&r.card_number);checks++;
 r=await call('/api/admin/one-time-credentials');assert.equal(r.status,200);assert(r.items.some(x=>x.id===r.id||x.card_number));const otc=r.items.find(x=>x.full_name==='Nguyen Test');assert(otc);checks++;
 r=await call('/api/public/verify?code='+encodeURIComponent(otc.verify_token));assert.equal(r.status,200);assert.equal(r.type,'one_time');assert.equal(r.valid,true);checks++;
+r=await call('/api/public/card-qr?code=not-a-real-token');assert.equal(r.status,404);assert.equal(r.error,'NOT_FOUND');checks++;
+r=await call('/api/public/verify?code='+encodeURIComponent(otc.card_number));assert.equal(r.status,404);assert.equal(r.error,'NOT_FOUND');checks++;
 r=await call('/api/admin/one-time-credentials/'+encodeURIComponent(otc.id)+'/revoke','POST',{});assert.equal(r.status,'revoked');checks++;
 r=await call('/api/public/verify?code='+encodeURIComponent(otc.verify_token));assert.equal(r.status,200);assert.equal(r.valid,false);checks++;
+
+db.prepare("UPDATE accounts SET force_password_change=1 WHERE id='a'").run();
+r=await call('/api/dashboard');assert.equal(r.status,403);assert.equal(r.error,'PASSWORD_CHANGE_REQUIRED');checks++;
+r=await call('/api/me/password','POST',{current_password:'',new_password:'StrongPassword2026!'});assert.equal(r.status,200);assert.equal(db.prepare("SELECT force_password_change FROM accounts WHERE id='a'").get().force_password_change,0);checks++;
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

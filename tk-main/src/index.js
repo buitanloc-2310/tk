@@ -1,5 +1,6 @@
 const enc=new TextEncoder();
 const clean=(v,m=1000)=>String(v??'').trim().slice(0,m);
+const dateInVietnam=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return `${v.year}-${v.month}-${v.day}`};
 const uid=(p='id')=>`${p}_${crypto.randomUUID()}`;
 const json=(d,s=200,h={})=>new Response(JSON.stringify(d),{status:s,headers:{'content-type':'application/json; charset=utf-8',...h}});
 const bodyJson=async r=>{try{return await r.json()}catch{return {}}};
@@ -74,9 +75,12 @@ const clientHint=req=>clean(req.headers.get('cf-connecting-ip')||req.headers.get
 const safeEq=(a,b)=>{a=String(a||'');b=String(b||'');if(a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0};
 function sameOrigin(req){
   if(['GET','HEAD','OPTIONS'].includes(req.method))return true;
+  const expected=new URL(req.url).origin;
   const origin=req.headers.get('origin');
-  if(!origin)return true;
-  try{return new URL(origin).origin===new URL(req.url).origin}catch{return false}
+  if(origin){try{return new URL(origin).origin===expected}catch{return false}}
+  const referer=req.headers.get('referer');
+  if(referer){try{return new URL(referer).origin===expected}catch{return false}}
+  return false;
 }
 async function ensureSecurityTables(env){
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS auth_rate_limits(rate_key TEXT PRIMARY KEY,window_start TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,attempts INTEGER NOT NULL DEFAULT 0,blocked_until TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`).run();
@@ -95,7 +99,7 @@ async function rateFail(env,key,limit=8,blockMinutes=15){
 }
 async function rateClear(env,key){await env.DB.prepare(`DELETE FROM auth_rate_limits WHERE rate_key=?`).bind(key).run()}
 async function securityEvent(env,aid,type,req,details={}){await ensureSecurityTables(env);await env.DB.prepare(`INSERT INTO security_events(id,account_id,event_type,ip_hint,user_agent,details_json) VALUES(?,?,?,?,?,?)`).bind(uid('sec'),aid||null,type,clientHint(req),clean(req.headers.get('user-agent'),500),JSON.stringify(details)).run()}
-async function safeRateState(env,key,limit=8,minutes=15){try{return await rateState(env,key,limit,minutes)}catch(err){console.error('RATE_LIMIT_STORAGE_ERROR',err);return {blocked:false,degraded:true}}}
+async function safeRateState(env,key,limit=8,minutes=15){try{return await rateState(env,key,limit,minutes)}catch(err){console.error('RATE_LIMIT_STORAGE_ERROR',err);return {blocked:true,degraded:true}}}
 async function safeRateFail(env,key,limit=8,blockMinutes=15){try{await rateFail(env,key,limit,blockMinutes)}catch(err){console.error('RATE_LIMIT_WRITE_ERROR',err)}}
 async function safeRateClear(env,key){try{await rateClear(env,key)}catch(err){console.error('RATE_LIMIT_CLEAR_ERROR',err)}}
 async function safeSecurityEvent(env,aid,type,req,details={}){try{await securityEvent(env,aid,type,req,details)}catch(err){console.error('SECURITY_EVENT_ERROR',err)}}
@@ -665,11 +669,45 @@ async function api(req,env,url){
   }
 
   // =========================================================
+  // PUBLIC CARD QR IMAGE (same-origin wrapper avoids browser CORS/canvas taint)
+  // =========================================================
+
+  if(url.pathname==='/api/public/card-qr'&&req.method==='GET'){
+    const qrRateKey=`public-card-qr:${await sha256(clientHint(req))}`;
+    const qrRate=await safeRateState(env,qrRateKey,120,15);
+    if(qrRate.blocked)return json({error:'TOO_MANY_QR_REQUESTS'},429,{'retry-after':'900'});
+    await safeRateFail(env,qrRateKey,120,15);
+    const code=clean(url.searchParams.get('code'),120);
+    if(!code)return json({error:'CODE_REQUIRED'},400);
+    if(code!=='PREVIEW'){
+      const exists=await env.DB.prepare(`SELECT 1 AS ok FROM member_cards WHERE verify_token=? UNION ALL SELECT 1 AS ok FROM one_time_credentials WHERE verify_token=? LIMIT 1`).bind(code,code).first();
+      if(!exists)return json({error:'NOT_FOUND'},404);
+    }
+    const requestedSize=Number(url.searchParams.get('size'));
+    const size=[120,170,180,600].includes(requestedSize)?requestedSize:180;
+    const verificationUrl=new URL('/verify',url.origin);verificationUrl.searchParams.set('code',code);
+    const qrUrl=new URL('https://quickchart.io/qr');
+    qrUrl.searchParams.set('size',String(size));qrUrl.searchParams.set('margin','2');qrUrl.searchParams.set('ecLevel','H');qrUrl.searchParams.set('format','png');qrUrl.searchParams.set('text',verificationUrl.toString());
+    try{
+      const remote=await fetch(qrUrl.toString(),{headers:{accept:'image/png'}});
+      const contentType=clean(remote.headers.get('content-type'),100).toLowerCase();
+      if(!remote.ok||!contentType.startsWith('image/png'))return json({error:'QR_GENERATION_FAILED'},502);
+      const image=await remote.arrayBuffer();
+      if(!image.byteLength||image.byteLength>512*1024)return json({error:'QR_IMAGE_INVALID'},502);
+      return new Response(image,{status:200,headers:{'content-type':'image/png','cache-control':'public, max-age=86400','x-content-type-options':'nosniff'}});
+    }catch(err){console.error('CARD_QR_UPSTREAM_ERROR',err);return json({error:'QR_GENERATION_FAILED'},502)}
+  }
+
+  // =========================================================
   // PUBLIC VERIFY
   // =========================================================
 
   if(url.pathname==='/api/public/verify'&&req.method==='GET'){
-    const code=clean(url.searchParams.get('code'),100);
+    const verifyRateKey=`public-verify:${await sha256(clientHint(req))}`;
+    const verifyRate=await safeRateState(env,verifyRateKey,30,15);
+    if(verifyRate.blocked)return json({error:'TOO_MANY_VERIFY_ATTEMPTS'},429,{'retry-after':'900'});
+    await safeRateFail(env,verifyRateKey,30,15);
+    const code=clean(url.searchParams.get('code'),120);
 
     if(!code){
       return json({error:'CODE_REQUIRED'},400);
@@ -692,9 +730,8 @@ async function api(req,env,url){
       JOIN card_types t ON t.id=c.card_type_id
       LEFT JOIN org_nodes o ON o.id=c.org_node_id
       WHERE c.verify_token=?
-         OR c.card_number=?
       LIMIT 1
-    `).bind(code,code).first();
+    `).bind(code).first();
 
     if(card){
       return json({
@@ -702,9 +739,7 @@ async function api(req,env,url){
         valid:
           card.status==='active'&&
           (!card.expires_at||
-            card.expires_at>=new Date()
-              .toISOString()
-              .slice(0,10)),
+            card.expires_at>=dateInVietnam()),
         record:card
       });
     }
@@ -722,11 +757,11 @@ async function api(req,env,url){
         t.name card_type_name
       FROM one_time_credentials o
       LEFT JOIN card_types t ON t.id=o.card_type_id
-      WHERE o.verify_token=? OR o.card_number=?
+      WHERE o.verify_token=?
       LIMIT 1
-    `).bind(code,code).first();
+    `).bind(code).first();
     if(oneTime){
-      const today=new Date().toISOString().slice(0,10);
+      const today=dateInVietnam();
       return json({
         type:'one_time',
         valid:oneTime.status==='active' && (!oneTime.expires_at || oneTime.expires_at>=today),
@@ -829,6 +864,10 @@ async function sendMemberEmail(env,{to,subject,html}){
 }
 
 if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
+  const requestRateKey=`account-request:${await sha256(clientHint(req))}`;
+  const requestRate=await safeRateState(env,requestRateKey,5,60);
+  if(requestRate.blocked)return json({error:'REQUEST_RATE_LIMITED',message:'Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau một giờ.'},429,{'retry-after':'3600'});
+  await safeRateFail(env,requestRateKey,5,60);
   const b=await bodyJson(req);
 
   const fields=[
@@ -1159,6 +1198,10 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     return json({error:'UNAUTHORIZED'},401);
   }
 
+  if(Number(s.force_password_change||0)===1 && !(url.pathname==='/api/me'&&req.method==='GET') && !(url.pathname==='/api/me/password'&&req.method==='POST') && !(url.pathname==='/api/auth/logout'&&req.method==='POST')){
+    return json({error:'PASSWORD_CHANGE_REQUIRED',message:'Bạn cần đổi mật khẩu trước khi tiếp tục.'},403);
+  }
+
   if(!sameOrigin(req)) return json({error:'ORIGIN_FORBIDDEN'},403);
 
 
@@ -1174,10 +1217,19 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(!fullName||!eventName)return json({error:'FULL_NAME_AND_EVENT_REQUIRED'},400);
     const id=uid('otc');
     const verify=verifyCode('EVT');
-    const cardNumber=clean(b.card_number,120)||`SFN-EVT-${String(Date.now()).slice(-8)}`;
+    let cardNumber=clean(b.card_number,120);
+    if(!cardNumber){
+      for(let attempt=0;attempt<8;attempt++){
+        const digits=new Uint32Array(1);crypto.getRandomValues(digits);
+        const candidate=`SFN-EVT-${String(digits[0]%100000000).padStart(8,'0')}`;
+        const exists=await env.DB.prepare('SELECT 1 FROM one_time_credentials WHERE card_number=? LIMIT 1').bind(candidate).first();
+        if(!exists){cardNumber=candidate;break}
+      }
+      if(!cardNumber)return json({error:'CARD_NUMBER_GENERATION_FAILED'},503);
+    }
     const status=['active','used','expired','revoked'].includes(b.status)?b.status:'active';
     try{
-      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,clean(b.photo_url,500)||null,cardNumber,clean(b.issued_at,20)||new Date().toISOString().slice(0,10),clean(b.expires_at,20)||null,status,verify,clean(b.card_type_id,80)||null,clean(b.notes,1000)||null,s.account_id).run();
+      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,clean(b.photo_url,500)||null,cardNumber,clean(b.issued_at,20)||dateInVietnam(),clean(b.expires_at,20)||null,status,verify,clean(b.card_type_id,80)||null,clean(b.notes,1000)||null,s.account_id).run();
     }catch(e){return json({error:String(e).includes('UNIQUE')?'CARD_NUMBER_ALREADY_USED':'CREATE_FAILED'},400)}
     await safeAudit(env,s.account_id,'one_time_credential_issued','one_time_credential',id,null,{event_name:eventName,card_number:cardNumber});
     return json({ok:true,id,verify_token:verify,card_number:cardNumber});
@@ -1239,7 +1291,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
           return {
             id:String(x.id||('el_'+i)).slice(0,60),
             kind:side==='back'&&kind==='qr'?'text':kind,
-            text:clean(x.text,240),
+            text:side==='back'&&kind==='qr'?'QR xác minh ở mặt trước':clean(x.text,240),
             x:Math.max(0,Math.min(100-w,rawX)),
             y:Math.max(0,Math.min(100-h,rawY)),
             w,h,
@@ -1256,7 +1308,13 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(!frontElements.some(x=>x.kind==='qr')){
         frontElements.push({id:'qr',kind:'qr',text:'',x:72,y:18,w:21,h:28,color:'#ffffff',size:8,bold:false,align:'center',radius:6,opacity:1});
       }
-      const template={...previous,version:2,accent,subtitle,size:{width_mm:86,height_mm:54},front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:sanitizeElements(input.back?.elements||previous.back?.elements,'back')},backTitle:clean(input.backTitle||previous.backTitle||'HIỆU LỰC & CÁCH SỬ DỤNG',120)};
+      if(!frontElements.some(x=>x.kind==='photo')){
+        frontElements.push({id:'photo',kind:'photo',text:'',x:70,y:4,w:25,h:16,color:'#ffffff',size:8,bold:false,align:'center',radius:5,opacity:1});
+      }
+      const requestedW=Number(input.size?.width_mm),requestedH=Number(input.size?.height_mm);
+      const requestedOrientation=(requestedW===54&&requestedH===86)?'portrait':'landscape';
+      const size=requestedOrientation==='portrait'?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
+      const template={...previous,version:2,accent,subtitle,size,front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:sanitizeElements(input.back?.elements||previous.back?.elements,'back')},backTitle:clean(input.backTitle||previous.backTitle||'HIỆU LỰC & CÁCH SỬ DỤNG',120)};
       await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
       await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
       return json({ok:true,template});
@@ -1493,6 +1551,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(!next[key])return json({error:'PERSONAL_FIELD_REQUIRED',field:key,message:`Vui lòng nhập ${label}.`},400);
     }
     if(next.email&&!/^\S+@\S+\.\S+$/.test(next.email))return json({error:'EMAIL_INVALID',field:'email',message:'Email không hợp lệ.'},400);
+    if(next.email!==String(current.email||''))return json({error:'EMAIL_CHANGE_REQUIRES_VERIFICATION',field:'email',message:'Email đăng nhập chỉ được thay đổi sau khi xác minh email mới. Vui lòng liên hệ support@skyfirst.io.vn để cập nhật an toàn.'},409);
     if(next.id_number&& !/^\d{12}$/.test(next.id_number))return json({error:'ID_NUMBER_MUST_BE_12_DIGITS',field:'id_number',message:'CCCD phải gồm đúng 12 chữ số.'},400);
 
     try{
@@ -1538,7 +1597,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       WHERE id=?
     `).bind(s.account_id).first();
 
-    const currentOK=await verifyPassword(
+    const forcedChange=Number(s.force_password_change||0)===1;
+    const currentOK=forcedChange || await verifyPassword(
       old,
       a.password_salt,
       a.password_iterations,
@@ -2566,7 +2626,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         }
         if(!unique){results.push({id:m.id,ok:false,error:'CARD_NUMBER_GENERATION_FAILED'});continue;}
         const cardId=uid('card'),verify=verifyCode('CARD');
-        await env.DB.prepare(`INSERT INTO member_cards(id,person_id,card_type_id,org_node_id,card_number,title_on_card,issued_at,expires_at,status,verify_token) VALUES(?,?,?,?,?,?,CURRENT_DATE,?, 'active',?)`).bind(cardId,m.id,cardType,org,cardNumber,clean(b.title_on_card,180)||null,clean(b.expires_at,20)||null,verify).run();
+        await env.DB.prepare(`INSERT INTO member_cards(id,person_id,card_type_id,org_node_id,card_number,title_on_card,issued_at,expires_at,status,verify_token) VALUES(?,?,?,?,?,?,?,?, 'active',?)`).bind(cardId,m.id,cardType,org,cardNumber,clean(b.title_on_card,180)||null,dateInVietnam(),clean(b.expires_at,20)||null,verify).run();
         await audit(env,s.account_id,'card_issued_bulk','member_card',cardId,org,{person_id:m.id,batch:true,verify_token:verify});
         results.push({id:m.id,ok:true,card_id:cardId,card_number:cardNumber});
       }
@@ -4667,7 +4727,7 @@ env.DB.prepare(`
   if(url.pathname==='/api/admin/system-health'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     let database='error',schema_version=null;try{await env.DB.prepare('SELECT 1 n').first();database='ok';schema_version=(await env.DB.prepare('SELECT MAX(version) v FROM schema_version').first())?.v||null}catch{}
-    return json({database,schema_version,r2_binding:!!env.R2,email_binding:!!env.RESEND_API_KEY});
+    return json({database,schema_version,r2_binding:!!env.FILES,email_binding:!!env.RESEND_API_KEY});
   }
 
   if(url.pathname==='/api/admin/saved-filters'&&req.method==='GET'){
@@ -4694,7 +4754,7 @@ env.DB.prepare(`
     const action=evaluationMatch[3]||null;
     if(!(await hasPerm(env,s.account_id,'evaluation.manage')) && !(await isSuper(env,s.account_id))) return json({error:'FORBIDDEN'},403);
     if(!(await canAccessPerson(env,s.account_id,pid))) return json({error:'SCOPE_FORBIDDEN'},403);
-    const b=['POST','PATCH'].includes(req.method)?await body(req):{};
+    const b=['POST','PATCH'].includes(req.method)?await bodyJson(req):{};
     if(req.method==='POST'&&!eid){
       if(b.org_node_id&&!(await canAccessOrg(env,s.account_id,b.org_node_id))) return json({error:'SCOPE_FORBIDDEN'},403);
       const id=uid('eval');

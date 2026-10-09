@@ -28,6 +28,7 @@ const api=async(url,opt={})=>{
 const safeStore={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 
 const logo='/sfn-logo.png';
+const vietnamDateInput=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return `${v.year}-${v.month}-${v.day}`};
 
 const PORTALS=[
   ['Cổng chính Sky First Network','https://skyfirst.io.vn'],
@@ -182,6 +183,7 @@ async function boot(){
   window.__SFN_APP_STARTED__=true;
   try{
     state.me=await api('/api/me');
+    if(state.me.force_password_change){renderForcedPasswordChange();return}
     state.dashboard=await api('/api/dashboard');
     renderApp();
   }catch(e){
@@ -202,6 +204,10 @@ function routePublic(path){
   scrollTo({top:0,behavior:'instant'});
 }
 window.addEventListener('popstate',()=>{if(!state.me)routePublic(location.pathname)});
+function renderForcedPasswordChange(){
+  $('#app').innerHTML=`<main class="standalone"><section class="standalone-panel" style="max-width:560px;margin:8vh auto"><img src="${logo}" alt="Sky First Network" style="width:64px;height:64px;object-fit:contain"><div class="eyebrow">BẢO MẬT TÀI KHOẢN</div><h1>Thiết lập mật khẩu mới</h1><p class="muted">Tài khoản vừa được cấp hoặc đặt lại. Hãy tạo mật khẩu riêng trước khi tiếp tục sử dụng hệ thống.</p><form id="forcedPasswordForm" class="modern-form"><label>Mật khẩu mới<input type="password" name="password" minlength="10" autocomplete="new-password" required></label><label>Nhập lại mật khẩu mới<input type="password" name="confirm" minlength="10" autocomplete="new-password" required></label><div id="forcedPasswordMsg" role="status" aria-live="polite"></div><button class="primary">Lưu mật khẩu và tiếp tục</button></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
+  $('#forcedPasswordForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),password=String(f.get('password')||''),confirm=String(f.get('confirm')||''),msg=$('#forcedPasswordMsg'),btn=e.target.querySelector('button');if(password!==confirm){msg.textContent='Mật khẩu nhập lại chưa khớp.';return}if(password.length<10){msg.textContent='Mật khẩu cần ít nhất 10 ký tự.';return}btn.disabled=true;msg.textContent='Đang cập nhật mật khẩu...';try{await api('/api/me/password',{method:'POST',body:JSON.stringify({current_password:'',new_password:password})});state.me=await api('/api/me');state.dashboard=await api('/api/dashboard');renderApp();toast('Đã đổi mật khẩu. Tài khoản của bạn đã sẵn sàng.')}catch(err){msg.textContent=err.data?.message||err.data?.error||err.message}finally{btn.disabled=false}};
+}
 function renderRegistrationStatus(){
   $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" alt="Sky First Network"> Trung tâm Thành viên Số</a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">SKY FIRST MEMBER IDENTITY</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
   wirePublicLinks();
@@ -2413,7 +2419,8 @@ function cardQrSrc(x, size = 180){
   if(!x?.verify_token) return '';
   const url = cardVerifyUrl(x);
   if(!url) return '';
-  return `https://quickchart.io/qr?size=${size}&margin=2&ecLevel=H&text=${encodeURIComponent(url)}`;
+  const allowedSize=[120,170,180,600].includes(Number(size))?Number(size):180;
+  return `/api/public/card-qr?size=${allowedSize}&code=${encodeURIComponent(x.verify_token)}`;
 }
 
 function printCardWindow(x,p){
@@ -2425,7 +2432,7 @@ function printCardWindow(x,p){
 async function downloadMemberCard(x,p,side='front'){
   if(!x?.verify_token){toast('Thẻ chưa có QR xác minh.','warn');return}
   const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});
-  await downloadCardSvg({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t,side);
+  await downloadCardPdf({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t);
 }
 
 function renderCards(c){
@@ -2435,7 +2442,7 @@ function renderCards(c){
     $('#cardsBox').outerHTML=`<div id="cardsBox" class="card-wallet">${d.items?.length?d.items.map(x=>`
       <div class="member-card ${cardClass(x)}" style="position:relative;min-height:294px;padding-right:126px;${cardClass(x)==='leadership'?'':`background:linear-gradient(135deg,#071b31,${cardTheme(x).accent})`}">
         <img class="member-card-logo" src="${esc(cardTheme(x).logo_url)}" alt="Logo đơn vị / chương trình">
-        <div class="eyebrow">${esc(cardTheme(x).subtitle||'TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST')}</div>
+        <div class="eyebrow">${esc(cardTheme(x).subtitle||'SKY FIRST NETWORK')}</div>
         <h3>${esc(x.card_type_name||'THẺ THÀNH VIÊN')}</h3>
         <img src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh ${esc(p.full_name)}" style="width:82px;height:104px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.55);margin:7px 0">
         <div style="font-size:18px;font-weight:850">${esc(p.full_name)}</div>
@@ -2445,13 +2452,10 @@ function renderCards(c){
         <div class="small">Hiệu lực: ${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</div>
         ${x.verify_token?`<img src="${esc(cardQrSrc(x,170))}" alt="QR xác minh" style="position:absolute;right:22px;top:88px;width:92px;height:92px;background:#fff;padding:4px;border-radius:8px">`:`<div class="card-qr-missing">Thẻ chưa có QR xác minh — liên hệ quản trị để xử lý</div>`}
         <div class="card-status">${statusVi(x.status)}</div>
-        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||'')}" ${x.verify_token?'':'disabled title="Thẻ chưa có mã QR xác minh"'}>Xác minh</button><button data-card-print="${esc(x.id)}" ${x.verify_token?'':'disabled'}>In / PDF</button><button data-card-png="${esc(x.id)}" ${x.verify_token?'':'disabled'}>PNG</button><button data-card-jpg="${esc(x.id)}" ${x.verify_token?'':'disabled'}>JPG</button><button data-card-download="${esc(x.id)}" ${x.verify_token?'':'disabled'}>SVG</button></div>
+        <div class="toolbar" style="margin-top:10px"><button data-card-verify="${esc(x.verify_token||'')}" ${x.verify_token?'':'disabled title="Thẻ chưa có mã QR xác minh"'}>Xác minh</button><button data-card-print="${esc(x.id)}" ${x.verify_token?'':'disabled'}>Tải PDF hai mặt</button></div>
       </div>`).join(''):'<div class="empty">Chưa có thẻ điện tử.</div>'}</div>`;
     $$('[data-card-verify]').forEach(b=>b.onclick=()=>{if(b.dataset.cardVerify)window.open('/verify?code='+encodeURIComponent(b.dataset.cardVerify),'_blank','noopener')});
-    $$('[data-card-print]').forEach(b=>b.onclick=()=>{const x=d.items.find(v=>v.id===b.dataset.cardPrint);if(x)printCardWindow(x,p)});
-    $$('[data-card-download]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardDownload);if(!x)return;try{await downloadMemberCard(x,p,'front')}catch(e){toast(e.message||'Không thể xuất thẻ.','warn')}});
-    $$('[data-card-png]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardPng);if(!x)return;try{const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});await downloadCardImage({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t,'front','image/png')}catch(e){toast(e.message||'Không thể xuất PNG.','warn')}});
-    $$('[data-card-jpg]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardJpg);if(!x)return;try{const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});await downloadCardImage({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t,'front','image/jpeg')}catch(e){toast(e.message||'Không thể xuất JPG.','warn')}});
+    $$('[data-card-print]').forEach(b=>b.onclick=async()=>{const x=d.items.find(v=>v.id===b.dataset.cardPrint);if(!x)return;b.disabled=true;try{await downloadMemberCard(x,p)}catch(e){toast(e.message||'Không thể tạo PDF thẻ.','warn')}finally{b.disabled=false}});
   }).catch(err=>{$('#cardsBox').textContent='Không thể tải thẻ: '+(err.data?.message||err.data?.error||err.message)});
 }
 
@@ -6602,7 +6606,7 @@ if(tab==='membership'){
             <input
               type="date"
               name="issued_at"
-              value="${new Date().toISOString().slice(0,10)}"
+              value="${vietnamDateInput()}"
             >
           </label>
 
@@ -6890,7 +6894,7 @@ if(tab==='membership'){
                     </div>
 
                     <div class="card-status">${esc(x.status)}</div>
-                    <div class="toolbar" style="margin-top:8px"><button onclick="window.open('/verify?code=${encodeURIComponent(x.verify_token)}','_blank')">Xác minh</button><button data-print-card="${esc(x.id)}">In / Xuất PDF</button></div>
+                    <div class="toolbar" style="margin-top:8px"><button onclick="window.open('/verify?code=${encodeURIComponent(x.verify_token)}','_blank')">Xác minh</button><button data-print-card="${esc(x.id)}">Tải PDF 2 mặt</button></div>
 
                   </div>
                 `
@@ -6979,7 +6983,7 @@ if(tab==='membership'){
             <input
               type="date"
               name="issued_at"
-              value="${new Date().toISOString().slice(0,10)}"
+              value="${vietnamDateInput()}"
             >
           </label>
 
@@ -7702,11 +7706,12 @@ function simplePostModal(
 function defaultCardTemplate(type){
   return {version:2,accent:'#1677d2',subtitle:'',size:{width_mm:86,height_mm:54},backTitle:'HIỆU LỰC & CÁCH SỬ DỤNG',front:{elements:[
     {id:'brand',kind:'text',text:'SKY FIRST NETWORK',x:5,y:5,w:58,h:6,color:'#ffffff',size:8,bold:true,align:'left'},
-    {id:'title',kind:'text',text:type?.name||'THẺ SỰ KIỆN',x:5,y:15,w:62,h:10,color:'#ffffff',size:19,bold:true,align:'left'},
-    {id:'name',kind:'text',text:'{{full_name}}',x:5,y:29,w:49,h:9,color:'#ffffff',size:15,bold:true,align:'left'},
+    {id:'title',kind:'text',text:type?.name||'THẺ SỰ KIỆN',x:5,y:15,w:60,h:10,color:'#ffffff',size:19,bold:true,align:'left'},
+    {id:'photo',kind:'photo',text:'',x:70,y:4,w:25,h:16,color:'#ffffff',size:8,bold:false,align:'center',radius:5},
+    {id:'name',kind:'text',text:'{{full_name}}',x:5,y:29,w:58,h:9,color:'#ffffff',size:15,bold:true,align:'left'},
     {id:'role',kind:'text',text:'{{role_label}}',x:5,y:39,w:49,h:7,color:'#dceeff',size:9,bold:false,align:'left'},
     {id:'event',kind:'text',text:'{{event_name}}',x:5,y:47,w:56,h:6,color:'#dceeff',size:7,bold:false,align:'left'},
-    {id:'qr',kind:'qr',text:'',x:72,y:18,w:21,h:28,color:'#ffffff',size:8,bold:false,align:'center'},
+    {id:'qr',kind:'qr',text:'',x:72,y:21,w:21,h:25,color:'#ffffff',size:8,bold:false,align:'center'},
     {id:'number',kind:'text',text:'{{card_number}}',x:66,y:48,w:29,h:5,color:'#ffffff',size:6,bold:false,align:'right'}
   ]},back:{elements:[
     {id:'backtitle',kind:'text',text:'HIỆU LỰC & CÁCH SỬ DỤNG',x:6,y:7,w:88,h:8,color:'#0b2b49',size:13,bold:true,align:'left'},
@@ -7715,7 +7720,32 @@ function defaultCardTemplate(type){
     {id:'note',kind:'text',text:'Thẻ chỉ có giá trị trong phạm vi và thời gian được ghi trên thẻ.',x:6,y:43,w:88,h:8,color:'#4b657d',size:8,bold:false,align:'left'}
   ]}};
 }
-function templateFor(type){let t={};try{t=JSON.parse(type?.template_json||'{}')}catch{};const d=defaultCardTemplate(type);return {...d,...t,front:{...d.front,...(t.front||{})},back:{...d.back,...(t.back||{})}}}
+function templateFor(type){
+  let t={};try{t=JSON.parse(type?.template_json||'{}')}catch{}
+  const d=defaultCardTemplate(type);
+  const mergeSide=side=>{
+    const saved=Array.isArray(t[side]?.elements)?t[side].elements:null;
+    const elements=saved?[...saved]:[...(d[side]?.elements||[])];
+    const required=side==='front'?['photo','qr']:[];
+    for(const id of required){if(!elements.some(e=>e.id===id||e.kind===id)){const fallback=(d[side]?.elements||[]).find(e=>e.id===id||e.kind===id);if(fallback)elements.push({...fallback})}}
+    return {...(d[side]||{}),...(t[side]||{}),elements};
+  };
+  const width=Number(t.size?.width_mm),height=Number(t.size?.height_mm);
+  return {...d,...t,size:width===54&&height===86?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54},front:mergeSide('front'),back:mergeSide('back')};
+}
+function autoLayoutCard(t,orientation){
+  const portrait=orientation==='portrait';
+  t.size=portrait?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
+  const layouts=portrait?{
+    front:{brand:[6,4,88,5],photo:[6,12,31,20],qr:[63,12,31,20],title:[6,35,88,9],name:[6,46,88,9],role:[6,57,88,6],event:[6,65,88,6],number:[6,73,88,5]},
+    back:{backtitle:[6,7,88,8],valid:[6,20,88,9],use:[6,34,88,24],note:[6,64,88,13]}
+  }:{
+    front:{brand:[5,5,58,6],photo:[70,4,25,16],qr:[72,21,21,25],title:[5,15,60,10],name:[5,29,58,9],role:[5,39,49,7],event:[5,47,56,6],number:[66,48,29,5]},
+    back:{backtitle:[6,7,88,8],valid:[6,20,88,7],use:[6,31,88,18],note:[6,43,88,8]}
+  };
+  for(const side of ['front','back'])for(const el of (t[side]?.elements||[])){const pos=layouts[side][el.id];if(pos)[el.x,el.y,el.w,el.h]=pos}
+  return t;
+}
 function credentialText(t,x){return String(t||'').replaceAll('{{full_name}}',x.full_name||'').replaceAll('{{role_label}}',x.role_label||'').replaceAll('{{event_name}}',x.event_name||'').replaceAll('{{card_number}}',x.card_number||'').replaceAll('{{issued_at}}',x.issued_at||'—').replaceAll('{{expires_at}}',x.expires_at||'Không thời hạn')}
 function safeCssColor(v,fallback='#ffffff'){return /^#[a-f0-9]{6}$/i.test(v||'')?v:fallback}
 function cardHtml(x,t,side='front',qrUrl=''){
@@ -7729,109 +7759,111 @@ function cardHtml(x,t,side='front',qrUrl=''){
     const xx=clamp(e.x,0,100-w), yy=clamp(e.y,0,100-h);
     const text=credentialText(e.text,x);
     const style=`left:${xx}%;top:${yy}%;width:${w}%;height:${h}%;color:${safeCssColor(e.color,side==='front'?'#fff':'#173e5d')};font-size:${clamp(e.size,6,96)}px;font-weight:${e.bold?800:500};text-align:${e.align||'left'};display:flex;align-items:center;justify-content:${e.align==='center'?'center':e.align==='right'?'flex-end':'flex-start'};line-height:1.2;position:absolute;overflow:hidden;`;
+    if(e.kind==='qr'&&side==='back')return `<span class="sf-card-el" style="${style}">QR xác minh ở mặt trước</span>`;
     if(e.kind==='qr')return `<img class="sf-card-el sf-card-qr" style="${style}padding:2.2%;background:#fff;border-radius:6px;object-fit:contain" src="${esc(qrUrl)}" alt="QR xác minh">`;
     if(e.kind==='photo')return `<img class="sf-card-el" style="${style}object-fit:cover;border-radius:${clamp(e.radius,0,32)}px;background:#fff" src="${esc(x.photo_url||'/sfn-logo.png')}" alt="Ảnh">`;
     if(e.kind==='logo')return `<img class="sf-card-el" style="${style}object-fit:contain" src="${esc(t.logo_url||'/sfn-logo.png')}" alt="Logo">`;
     if(e.kind==='shape')return `<span class="sf-card-el" style="${style}background:${safeCssColor(e.color,'#ffffff')};border-radius:${clamp(e.radius,0,32)}px;opacity:${clamp(e.opacity,0,1)}"></span>`;
     return `<span class="sf-card-el" style="${style}">${esc(text)}</span>`;
   }).join('');
-  return `<div class="sf-card-face" style="background:${bg}">${body}</div>`;
+  const orientation=t.size?.width_mm===54&&t.size?.height_mm===86?'portrait':'landscape';
+  return `<div class="sf-card-face" data-orientation="${orientation}" style="width:100%;height:100%;position:relative;background:${bg};overflow:hidden">${body}</div>`;
 }
-function openCardPrint(x,t){
-  const qr=cardQrSrc(x, 600); const w=window.open('','_blank','width=980,height=820');
-  if(!w){toast('Trình duyệt đang chặn cửa sổ in. Hãy cho phép cửa sổ bật lên.','warn');return}
-  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Thẻ · ${esc(x.full_name||'')}</title><style>*{box-sizing:border-box}body{margin:0;padding:16mm;background:#fff;font-family:Arial,sans-serif}.page{display:flex;flex-direction:column;gap:12mm;align-items:center}.sf-card-face{position:relative;width:86mm;height:54mm;overflow:hidden;border-radius:4mm;box-shadow:0 4mm 12mm rgba(0,0,0,.12);print-color-adjust:exact;-webkit-print-color-adjust:exact}.sf-card-el{font-family:Arial,sans-serif;box-sizing:border-box}@page{size:A4;margin:10mm}@media print{body{padding:0}.sf-card-face{box-shadow:none;border-radius:0}}.label{font-size:9pt;color:#667085;margin:0}</style></head><body><div class="page"><div><p class="label">Mặt trước</p>${cardHtml(x,t,'front',qr)}</div><div><p class="label">Mặt sau</p>${cardHtml(x,t,'back',qr)}</div></div><script>addEventListener('load',()=>setTimeout(()=>print(),500));<\/script></body></html>`);w.document.close();
-}
+function cardPhysicalSize(t){return t?.size?.width_mm===54&&t?.size?.height_mm===86?{width:54,height:86,orientation:'portrait'}:{width:86,height:54,orientation:'landscape'}};
 function cardSvg(x,t,side='front',qr=''){
-  const inner=cardHtml(x,t,side,qr)
-    .replace(/<img\b([^>]*?)>/gi,'<img$1 />');
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1016" height="638" viewBox="0 0 100 62.75"><foreignObject x="0" y="0" width="100" height="62.75"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;font-family:Arial,sans-serif">${inner}</div></foreignObject></svg>`;
+  const size=cardPhysicalSize(t),viewW=100,viewH=viewW*size.height/size.width;
+  const safe=(v)=>esc(String(v??''));
+  const bg=side==='front'?['#082b4b',safeCssColor(t.accent,'#1677d2')]:['#f8fcff','#eaf5ff'];
+  const clamp=(v,min,max)=>Math.max(min,Math.min(max,Number.isFinite(Number(v))?Number(v):min));
+  const parts=[`<svg xmlns="http://www.w3.org/2000/svg" width="${size.orientation==='portrait'?638:1016}" height="${size.orientation==='portrait'?1016:638}" viewBox="0 0 ${viewW} ${viewH}">`,
+    `<defs><linearGradient id="cardbg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${bg[0]}"/><stop offset="100%" stop-color="${bg[1]}"/></linearGradient></defs>`,
+    `<rect width="100" height="${viewH}" fill="url(#cardbg)"/>`];
+  for(const [i,e] of (t[side]?.elements||[]).entries()){
+    const w=clamp(e.w,4,100),h=clamp(e.h,4,100),xx=clamp(e.x,0,100-w),yy=clamp(e.y,0,100-h);
+    const X=xx,Y=viewH*yy/100,W=w,H=viewH*h/100,rx=clamp(e.radius,0,32)*100/viewW/4;
+    const color=safeCssColor(e.color,side==='front'?'#ffffff':'#173e5d');
+    if(e.kind==='qr'&&side==='back'){
+      const cssCardWidth=size.width/25.4*96,backFont=clamp(e.size,6,72)*100/cssCardWidth;parts.push(`<text x="${X}" y="${Y+Math.min(H,backFont)}" fill="${color}" font-family="Arial,sans-serif" font-size="${backFont}">QR xác minh ở mặt trước</text>`);continue;
+    }
+    if(e.kind==='shape'){
+      parts.push(`<rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="${rx}" fill="${color}" opacity="${clamp(e.opacity,0,1)}"/>`);continue;
+    }
+    if(['photo','logo','qr'].includes(e.kind)){
+      const src=e.kind==='qr'?qr:(e.kind==='photo'?(x.photo_url||'/sfn-logo.png'):(t.logo_url||'/sfn-logo.png'));
+      const clipId=`clip${side}${i}`;
+      parts.push(`<defs><clipPath id="${clipId}"><rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="${e.kind==='photo'?Math.min(rx,2):1}"/></clipPath></defs>`);
+      if(e.kind==='qr')parts.push(`<rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="1" fill="#ffffff"/>`);
+      const mode=e.kind==='photo'?'xMidYMid slice':'xMidYMid meet';
+      parts.push(`<image href="${safe(src)}" x="${X}" y="${Y}" width="${W}" height="${H}" preserveAspectRatio="${mode}" clip-path="url(#${clipId})"/>`);continue;
+    }
+    const raw=credentialText(e.text,x),fontPx=clamp(e.size,6,72),cssCardWidth=size.width/25.4*96,font=fontPx*100/cssCardWidth,lineHeight=font*1.2;
+    const chars=Math.max(1,Math.floor(W*cssCardWidth/100/(fontPx*.56))),words=raw.split(/\s+/),lines=[];let line='';
+    for(const word of words){const next=line?`${line} ${word}`:word;if(next.length>chars&&line){lines.push(line);line=word}else line=next}if(line)lines.push(line);
+    const visible=lines.slice(0,Math.max(1,Math.floor(H/lineHeight)));const blockHeight=visible.length*lineHeight;
+    const anchor=e.align==='center'?'middle':e.align==='right'?'end':'start';
+    const tx=e.align==='center'?X+W/2:e.align==='right'?X+W:X;
+    const ty=Y+(H-blockHeight)/2+font;
+    const spans=visible.map((line,j)=>`<tspan x="${tx}" dy="${j===0?0:lineHeight}">${safe(line)}</tspan>`).join('');
+    parts.push(`<text x="${tx}" y="${ty}" fill="${color}" font-family="Arial,sans-serif" font-size="${font}" font-weight="${e.bold?800:500}" text-anchor="${anchor}">${spans}</text>`);
+  }
+  parts.push('</svg>');return parts.join('');
 }
 async function fetchAsDataUrl(url){
   if(!url)return '';
-  const r=await fetch(url,{credentials:'same-origin'});
-  if(!r.ok)throw new Error(`Không thể tải asset (${r.status}).`);
-  const blob=await r.blob();
-  return await new Promise((resolve,reject)=>{
-    const fr=new FileReader();
-    fr.onload=()=>resolve(String(fr.result));
-    fr.onerror=()=>reject(new Error('Không thể đọc asset.'));
-    fr.readAsDataURL(blob);
-  });
+  const r=await fetch(url,{credentials:'same-origin'});if(!r.ok)throw new Error(`Không thể tải tài nguyên thẻ (${r.status}).`);
+  const blob=await r.blob();return await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result));fr.onerror=()=>reject(new Error('Không thể đọc tài nguyên thẻ.'));fr.readAsDataURL(blob)});
 }
 async function exportCardAssets(x,t){
-  const out={...x};
-  const qr=cardQrSrc(x,600);
-  out._qrData=await fetchAsDataUrl(qr);
-  out.photo_url=await fetchAsDataUrl(x.photo_url||'/sfn-logo.png');
-  if(t.logo_url)t={...t,logo_url:await fetchAsDataUrl(t.logo_url)};
+  const out={...x};out._qrData=await fetchAsDataUrl(cardQrSrc(x,600));
+  try{out.photo_url=await fetchAsDataUrl(x.photo_url||'/sfn-logo.png')}catch{out.photo_url=await fetchAsDataUrl('/sfn-logo.png');if(x.photo_url)toast('Ảnh ngoài website không cho phép nhúng vào PDF; tạm dùng logo thay thế.','warn')}
+  if(t.logo_url){try{t={...t,logo_url:await fetchAsDataUrl(t.logo_url)}}catch{t={...t,logo_url:await fetchAsDataUrl('/sfn-logo.png')};toast('Logo mẫu không thể nhúng vào PDF; đang dùng logo Sky First.','warn')}}
   return {x:out,t};
 }
-function cardSvg(x,t,side='front',qr=''){
-  const inner=cardHtml(x,t,side,qr)
-    .replace(/<img\b([^>]*?)>/gi,'<img$1 />');
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1016" height="638" viewBox="0 0 100 62.75"><foreignObject x="0" y="0" width="100" height="62.75"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;font-family:Arial,sans-serif">${inner}</div></foreignObject></svg>`;
+async function rasterizeCard(x,t,side,preparedAssets=null){
+  const assets=preparedAssets||await exportCardAssets(x,t),size=cardPhysicalSize(t),svg=cardSvg(assets.x,assets.t,side,assets.x._qrData),url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
+  try{const img=new Image();img.decoding='async';img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=size.orientation==='portrait'?638:1016;canvas.height=size.orientation==='portrait'?1016:638;const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Trình duyệt không hỗ trợ tạo PDF.');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.96)}finally{URL.revokeObjectURL(url)}
 }
-async function rasterizeCard(x,t,side,mime){
-  const assets=await exportCardAssets(x,t);
-  const qr=assets.x._qrData;
-  const svg=cardSvg(assets.x,assets.t,side,qr);
-  const url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
-  try{
-    const img=new Image();
-    img.decoding='async';
-    img.src=url;
-    await img.decode();
-    const canvas=document.createElement('canvas');
-    canvas.width=1016;canvas.height=638;
-    const ctx=canvas.getContext('2d');
-    if(!ctx)throw new Error('Trình duyệt không hỗ trợ xuất ảnh.');
-    ctx.drawImage(img,0,0,1016,638);
-    return canvas.toDataURL(mime,mime==='image/jpeg'?0.96:1);
-  }finally{URL.revokeObjectURL(url)}
+function dataUrlBytes(dataUrl){const raw=atob(dataUrl.split(',')[1]||''),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out}
+function joinBytes(parts){const len=parts.reduce((n,p)=>n+p.length,0),out=new Uint8Array(len);let offset=0;for(const part of parts){out.set(part,offset);offset+=part.length}return out}
+function makePdfFromImages(pages){
+  const enc=new TextEncoder(),bytes=s=>enc.encode(s),chunks=[bytes('%PDF-1.4\n%SkyFirst\n')],offsets=[];let total=chunks[0].length;
+  const kids=pages.map((_,i)=>`${3+i*3} 0 R`).join(' '),objs=[];objs[1]=bytes('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');objs[2]=bytes(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>\nendobj\n`);
+  pages.forEach((p,i)=>{const pn=3+i*3,cn=pn+1,inNo=pn+2,w=p.widthMm/25.4*72,h=p.heightMm/25.4*72,content=bytes(`q\n${w.toFixed(4)} 0 0 ${h.toFixed(4)} 0 0 cm\n/Im0 Do\nQ\n`);objs[pn]=bytes(`${pn} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w.toFixed(4)} ${h.toFixed(4)}] /Resources << /XObject << /Im0 ${inNo} 0 R >> >> /Contents ${cn} 0 R >>\nendobj\n`);objs[cn]=joinBytes([bytes(`${cn} 0 obj\n<< /Length ${content.length} >>\nstream\n`),content,bytes('endstream\nendobj\n')]);objs[inNo]=joinBytes([bytes(`${inNo} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${p.widthPx} /Height ${p.heightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.image.length} >>\nstream\n`),p.image,bytes('\nendstream\nendobj\n')])});
+  for(let i=1;i<objs.length;i++){offsets[i]=total;chunks.push(objs[i]);total+=objs[i].length}const xrefOffset=total;let xref=`xref\n0 ${objs.length}\n0000000000 65535 f \n`;for(let i=1;i<objs.length;i++)xref+=`${String(offsets[i]).padStart(10,'0')} 00000 n \n`;chunks.push(bytes(xref+`trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`));return new Blob([joinBytes(chunks)],{type:'application/pdf'});
 }
-function downloadDataUrl(dataUrl,name){
-  const a=document.createElement('a');a.href=dataUrl;a.download=name;a.click();
+async function downloadCardPdf(x,t){
+  if(!x?.verify_token)throw new Error('Thẻ chưa có mã xác minh hợp lệ.');
+  const size=cardPhysicalSize(t),safe=String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-'),pages=[];
+  const template={...t,back:{...(t.back||{}),elements:(t.back?.elements||[]).map(e=>e.kind==='qr'?{...e,kind:'text',text:'QR xác minh ở mặt trước'}:e)}};
+  const assets=await exportCardAssets(x,template);
+  for(const side of ['front','back']){const data=await rasterizeCard(x,template,side,assets);pages.push({image:dataUrlBytes(data),widthMm:size.width,heightMm:size.height,widthPx:size.orientation==='portrait'?638:1016,heightPx:size.orientation==='portrait'?1016:638})}
+  const blob=makePdfFromImages(pages),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`the-${safe}-2-mat.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);toast(`Đã tải PDF hai mặt · ${size.width} × ${size.height} mm mỗi mặt.`);
 }
-async function downloadCardImage(x,t,side='front',mime='image/png'){
-  if(!x?.verify_token)throw new Error('Thẻ chưa có QR xác minh.');
-  const ext=mime==='image/jpeg'?'jpg':'png';
-  const data=await rasterizeCard(x,t,side,mime);
-  downloadDataUrl(data,`the-${String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-')}-${side}.${ext}`);
-  toast(`Đã xuất mặt thẻ dạng ${ext.toUpperCase()}.`);
-}
-async function downloadCardSvg(x,t,side='front'){
-  if(!x?.verify_token)throw new Error('Thẻ chưa có QR xác minh.');
-  const assets=await exportCardAssets(x,t);
-  const svg=cardSvg(assets.x,assets.t,side,assets.x._qrData);
-  const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download=`the-${String(x.card_number||x.id||'sky-first').replace(/[^a-z0-9_-]+/gi,'-')}-${side}.svg`;
-  a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
-  toast('Đã tải mặt thẻ dạng SVG.');
-}
+function openCardPrint(x,t){downloadCardPdf(x,t).catch(e=>toast(e.message||'Không thể tạo PDF thẻ.','warn'))}
 async function mountCardDesignStudio(container){
   const d=await api('/api/admin/card-designs'); const items=d.items||[];
   if(!items.length){container.insertAdjacentHTML('beforeend','<section class="card studio-design"><h2>Thiết kế thẻ</h2><p class="muted">Chưa có loại thẻ để thiết kế.</p></section>');return}
-  container.insertAdjacentHTML('beforeend',`<section class="card studio-design"><div class="section-title"><div><div class="eyebrow">CARD STUDIO</div><h2>Thiết kế thẻ 2 mặt</h2><p class="muted">Kéo thả bố cục, chỉnh màu, chữ, vị trí QR và nội dung mặt sau. Dòng “Trung Tâm Thành Viên Số Sky First” không được tự động in lên thẻ.</p></div></div><div class="card-studio-shell"><aside class="card-studio-tools"><label>Loại thẻ<select id="csType">${items.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><div class="studio-side-tabs"><button class="primary" data-cs-side="front">Mặt trước</button><button class="secondary" data-cs-side="back">Mặt sau</button></div><div id="csElements"></div><div class="toolbar"><button class="secondary" data-add-el="text">+ Chữ</button><button class="secondary" data-add-el="shape">+ Họa tiết</button><button class="secondary" data-add-el="photo">+ Ảnh</button><button class="secondary" data-add-el="logo">+ Logo</button><button class="primary" id="csSave">Lưu mẫu</button></div><div id="csMsg" class="msg"></div></aside><div class="card-studio-preview-wrap"><div class="card-studio-preview" id="csPreview"></div><p class="muted">Kích thước chuẩn 86 × 54 mm · QR luôn ở mặt trước.</p></div></div></section>`);
-  const typeSel=$('#csType'),preview=$('#csPreview'),elements=$('#csElements');let side='front',type=items[0],t=templateFor(type),selected=null;
-  const redraw=()=>{type=items.find(x=>x.id===typeSel.value)||items[0];t=templateFor(type);preview.innerHTML=cardHtml({full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'},t,side,cardQrSrc({verify_token:'PREVIEW'},600));renderElements();};
-  const renderElements=()=>{const arr=t[side]?.elements||[];elements.innerHTML=arr.map((e,i)=>`<div class="cs-element ${selected===i?'selected':''}" data-cs-i="${i}"><div><b>${e.kind==='qr'?'QR':e.kind==='photo'?'Ảnh':e.kind==='logo'?'Logo':e.kind==='shape'?'Họa tiết':'Chữ'}</b><button type="button" data-cs-del="${i}">×</button></div>${e.kind==='text'?`<input data-cs-text="${i}" value="${esc(e.text||'')}" placeholder="Nội dung">`:''}<div class="cs-mini-grid"><label>X<input data-cs-x="${i}" type="number" min="0" max="100" value="${e.x}"></label><label>Y<input data-cs-y="${i}" type="number" min="0" max="100" value="${e.y}"></label><label>Rộng<input data-cs-w="${i}" type="number" min="4" max="100" value="${e.w}"></label><label>Cao<input data-cs-h="${i}" type="number" min="4" max="100" value="${e.h}"></label></div>${e.kind!=='qr'&&e.kind!=='photo'&&e.kind!=='logo'?`<div class="cs-mini-grid"><label>Cỡ chữ<input data-cs-size="${i}" type="number" min="8" max="72" value="${e.size||10}"></label><label>Màu<input data-cs-color="${i}" type="color" value="${safeCssColor(e.color,'#ffffff')}"></label></div>`:''}</div>`).join('');
+  container.insertAdjacentHTML('beforeend',`<section class="card studio-design"><div class="section-title"><div><div class="eyebrow">CARD STUDIO</div><h2>Thiết kế thẻ 2 mặt</h2><p class="muted">Kéo thả bố cục, chỉnh màu, chữ, vị trí QR và nội dung mặt sau. Dòng “Trung Tâm Thành Viên Số Sky First” không được tự động in lên thẻ.</p></div></div><div class="card-studio-shell"><aside class="card-studio-tools"><label>Loại thẻ<select id="csType">${items.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Chiều thẻ<select id="csOrientation"><option value="landscape">Ngang · 86 × 54 mm</option><option value="portrait">Dọc · 54 × 86 mm</option></select></label><div class="studio-side-tabs"><button class="primary" data-cs-side="front">Mặt trước</button><button class="secondary" data-cs-side="back">Mặt sau</button></div><div id="csElements"></div><div class="toolbar"><button class="secondary" data-add-el="text">+ Chữ</button><button class="secondary" data-add-el="shape">+ Họa tiết</button><button class="secondary" data-add-el="photo">+ Ảnh</button><button class="secondary" data-add-el="logo">+ Logo</button><button class="primary" id="csSave">Lưu mẫu</button></div><div id="csMsg" class="msg"></div></aside><div class="card-studio-preview-wrap"><div class="card-studio-preview" id="csPreview"></div><p class="muted">Chọn ngang 86 × 54 mm hoặc dọc 54 × 86 mm. QR chỉ ở mặt trước.</p></div></div></section>`);
+  const typeSel=$('#csType'),orientationSel=$('#csOrientation'),preview=$('#csPreview'),elements=$('#csElements');let side='front',type=items[0],t=templateFor(type),selected=null;
+  const previewPerson={full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'};
+  const syncPreview=()=>{const size=cardPhysicalSize(t);preview.style.aspectRatio=`${size.width}/${size.height}`;preview.style.width=size.orientation==='portrait'?'min(100%, 350px)':'min(100%, 700px)';preview.innerHTML=cardHtml(previewPerson,t,side,cardQrSrc({verify_token:'PREVIEW'},600));};
+  const redraw=()=>{type=items.find(x=>x.id===typeSel.value)||items[0];t=templateFor(type);orientationSel.value=cardPhysicalSize(t).orientation;syncPreview();renderElements();};
+  const renderElements=()=>{const arr=t[side]?.elements||[];elements.innerHTML=arr.map((e,i)=>`<div class="cs-element ${selected===i?'selected':''}" data-cs-i="${i}"><div><b>${e.kind==='qr'?'QR':e.kind==='photo'?'Ảnh':e.kind==='logo'?'Logo':e.kind==='shape'?'Họa tiết':'Chữ'}</b>${(e.kind==='qr'||e.kind==='photo')&&side==='front'?`<span class="meta">${e.kind==='qr'?'QR bắt buộc':'Ảnh bắt buộc'}</span>`:`<button type="button" data-cs-del="${i}">×</button>`}</div>${e.kind==='text'?`<input data-cs-text="${i}" value="${esc(e.text||'')}" placeholder="Nội dung">`:''}<div class="cs-mini-grid"><label>X<input data-cs-x="${i}" type="number" min="0" max="100" value="${e.x}"></label><label>Y<input data-cs-y="${i}" type="number" min="0" max="100" value="${e.y}"></label><label>Rộng<input data-cs-w="${i}" type="number" min="4" max="100" value="${e.w}"></label><label>Cao<input data-cs-h="${i}" type="number" min="4" max="100" value="${e.h}"></label></div>${e.kind!=='qr'&&e.kind!=='photo'&&e.kind!=='logo'?`<div class="cs-mini-grid"><label>Cỡ chữ<input data-cs-size="${i}" type="number" min="8" max="72" value="${e.size||10}"></label><label>Màu<input data-cs-color="${i}" type="color" value="${safeCssColor(e.color,'#ffffff')}"></label></div>`:''}</div>`).join('');
     $$('[data-cs-del]').forEach(b=>b.onclick=()=>{arr.splice(Number(b.dataset.csDel),1);selected=null;redraw()});
-    ['text','x','y','w','h','size','color'].forEach(k=>$$(`[data-cs-${k}]`).forEach(inp=>inp.oninput=()=>{const key=`cs${k[0].toUpperCase()+k.slice(1)}`;const i=Number(inp.dataset[key]);if(k==='text')arr[i].text=inp.value;else arr[i][k]=k==='color'?inp.value:Number(inp.value);preview.innerHTML=cardHtml({full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'},t,side,cardQrSrc({verify_token:'PREVIEW'},600))}));
-    $$('.sf-card-el').forEach((el,i)=>{el.onpointerdown=e=>{const arr=t[side].elements;const idx=i;const startX=e.clientX,startY=e.clientY,ox=Number(arr[idx].x),oy=Number(arr[idx].y);el.setPointerCapture?.(e.pointerId);const move=ev=>{const r=preview.getBoundingClientRect();arr[idx].x=Math.max(0,Math.min(100,ox+(ev.clientX-startX)/r.width*100));arr[idx].y=Math.max(0,Math.min(100,oy+(ev.clientY-startY)/r.height*100));preview.innerHTML=cardHtml({full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'},t,side,cardQrSrc({verify_token:'PREVIEW'},600));};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);renderElements()};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}});
+    ['text','x','y','w','h','size','color'].forEach(k=>$$(`[data-cs-${k}]`).forEach(inp=>inp.oninput=()=>{const key=`cs${k[0].toUpperCase()+k.slice(1)}`;const i=Number(inp.dataset[key]);if(k==='text')arr[i].text=inp.value;else arr[i][k]=k==='color'?inp.value:Number(inp.value);syncPreview()}));
+    $$('.sf-card-el').forEach((el,i)=>{el.onpointerdown=e=>{const arr=t[side].elements;const idx=i;const startX=e.clientX,startY=e.clientY,ox=Number(arr[idx].x),oy=Number(arr[idx].y);el.setPointerCapture?.(e.pointerId);const move=ev=>{const r=preview.getBoundingClientRect();arr[idx].x=Math.max(0,Math.min(100,ox+(ev.clientX-startX)/r.width*100));arr[idx].y=Math.max(0,Math.min(100,oy+(ev.clientY-startY)/r.height*100));syncPreview();};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);renderElements()};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}});
   };
-  typeSel.onchange=redraw;$$('[data-cs-side]').forEach(b=>b.onclick=()=>{side=b.dataset.csSide;$$('[data-cs-side]').forEach(x=>x.className=x===b?'primary':'secondary');renderElements();preview.innerHTML=cardHtml({full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'},t,side,cardQrSrc({verify_token:'PREVIEW'},600))});
-  $$('[data-add-el]').forEach(b=>b.onclick=()=>{const kind=b.dataset.addEl;const arr=t[side].elements;arr.push({id:'el_'+Date.now(),kind,text:kind==='text'?'Nội dung mới':'',x:10,y:10,w:35,h:10,color:side==='front'?'#ffffff':'#173e5d',size:kind==='text'?12:10,bold:false,align:'left'});selected=arr.length-1;renderElements();preview.innerHTML=cardHtml({full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:'/sfn-logo.png'},t,side,cardQrSrc({verify_token:'PREVIEW'},600))});
-  $('#csSave').onclick=async()=>{const b=$('#csSave');b.disabled=true;try{const r=await api(`/api/admin/card-designs/${encodeURIComponent(type.id)}`,{method:'PUT',body:JSON.stringify({accent:t.accent||'#1677d2',subtitle:'',front:t.front,back:t.back,backTitle:t.backTitle})});type.template_json=JSON.stringify(r.template);toast('Đã lưu mẫu thẻ 2 mặt.');$('#csMsg').textContent='Đã lưu mẫu thiết kế.'}catch(e){$('#csMsg').textContent=e.data?.error||e.message}finally{b.disabled=false}};
+  typeSel.onchange=redraw;orientationSel.onchange=()=>{autoLayoutCard(t,orientationSel.value);selected=null;syncPreview();renderElements()};$$('[data-cs-side]').forEach(b=>b.onclick=()=>{side=b.dataset.csSide;$$('[data-cs-side]').forEach(x=>x.className=x===b?'primary':'secondary');renderElements();syncPreview()});
+  $$('[data-add-el]').forEach(b=>b.onclick=()=>{const kind=b.dataset.addEl;const arr=t[side].elements;arr.push({id:'el_'+Date.now(),kind,text:kind==='text'?'Nội dung mới':'',x:10,y:10,w:35,h:10,color:side==='front'?'#ffffff':'#173e5d',size:kind==='text'?12:10,bold:false,align:'left'});selected=arr.length-1;renderElements();syncPreview()});
+  $('#csSave').onclick=async()=>{const b=$('#csSave');b.disabled=true;try{const r=await api(`/api/admin/card-designs/${encodeURIComponent(type.id)}`,{method:'PUT',body:JSON.stringify({accent:t.accent||'#1677d2',subtitle:'',size:t.size,front:t.front,back:t.back,backTitle:t.backTitle})});type.template_json=JSON.stringify(r.template);toast('Đã lưu mẫu thẻ 2 mặt.');$('#csMsg').textContent='Đã lưu mẫu thiết kế.'}catch(e){$('#csMsg').textContent=e.data?.error||e.message}finally{b.disabled=false}};
   redraw();
 }
 async function renderIssuanceStudio(c){
   c.innerHTML=`<div class="section-title"><div><div class="eyebrow">CẤP PHÁT & NGHIỆP VỤ KHÔNG TÀI KHOẢN</div><h1>Tạo thẻ & cấp phát</h1><p class="muted">Người nhận không cần tài khoản Member, không tạo Member ID và không trở thành thành viên.</p></div></div><section class="card issuance-panel"><div class="issuance-tabs"><button class="primary" data-itab="create">Tạo thẻ một lần</button><button class="secondary" data-itab="list">Đã cấp</button></div><div id="issuanceBody"></div></section>`;
   const body=$('#issuanceBody');let current=[];
-  const load=async()=>{const d=await api('/api/admin/one-time-credentials');current=d.items||[];body.innerHTML=`<div class="issuance-summary"><span><b>${current.length}</b> lượt cấp phát</span><span><b>${current.filter(x=>x.status==='active').length}</b> đang hiệu lực</span></div><div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Sự kiện</th><th>Vai trò</th><th>Hiệu lực</th><th>Trạng thái</th><th></th></tr></thead><tbody>${current.map(x=>`<tr><td><b>${esc(x.full_name)}</b><div class="meta">${esc(x.card_number)}</div></td><td>${esc(x.event_name)}</td><td>${esc(x.role_label||'—')}</td><td>${esc(x.issued_at)} → ${esc(x.expires_at||'Không thời hạn')}</td><td>${esc(x.status)}</td><td><button class="secondary" data-ot-print="${esc(x.id)}">In / PDF</button><button class="secondary" data-ot-svg="${esc(x.id)}">Tải SVG</button>${x.status==='active'?`<button class="danger" data-ot-revoke="${esc(x.id)}">Thu hồi</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có nghiệp vụ cấp phát.</td></tr>'}</tbody></table></div>`;$$('[data-ot-print]').forEach(b=>b.onclick=()=>{const x=current.find(v=>v.id===b.dataset.otPrint);if(x){let type=(currentTypes||[]).find(v=>v.id===x.card_type_id);openCardPrint(x,templateFor(type||{}))}});$$('[data-ot-svg]').forEach(b=>b.onclick=()=>{const x=current.find(v=>v.id===b.dataset.otSvg);if(x){let type=(currentTypes||[]).find(v=>v.id===x.card_type_id);downloadCardSvg(x,templateFor(type||{}),'front')}});$$('[data-ot-revoke]').forEach(b=>b.onclick=async()=>{if(!confirm('Thu hồi thẻ này?'))return;await api(`/api/admin/one-time-credentials/${encodeURIComponent(b.dataset.otRevoke)}/revoke`,{method:'POST',body:'{}'});await load()})};
+  const load=async()=>{const d=await api('/api/admin/one-time-credentials');current=d.items||[];body.innerHTML=`<div class="issuance-summary"><span><b>${current.length}</b> lượt cấp phát</span><span><b>${current.filter(x=>x.status==='active').length}</b> đang hiệu lực</span></div><div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Sự kiện</th><th>Vai trò</th><th>Hiệu lực</th><th>Trạng thái</th><th></th></tr></thead><tbody>${current.map(x=>`<tr><td><b>${esc(x.full_name)}</b><div class="meta">${esc(x.card_number)}</div></td><td>${esc(x.event_name)}</td><td>${esc(x.role_label||'—')}</td><td>${esc(x.issued_at)} → ${esc(x.expires_at||'Không thời hạn')}</td><td>${esc(x.status)}</td><td><button class="secondary" data-ot-pdf="${esc(x.id)}">Tải PDF hai mặt</button>${x.status==='active'?`<button class="danger" data-ot-revoke="${esc(x.id)}">Thu hồi</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có nghiệp vụ cấp phát.</td></tr>'}</tbody></table></div>`;$$('[data-ot-pdf]').forEach(b=>b.onclick=async()=>{const x=current.find(v=>v.id===b.dataset.otPdf);if(!x)return;b.disabled=true;try{let type=(currentTypes||[]).find(v=>v.id===x.card_type_id);await downloadCardPdf(x,templateFor(type||{}))}catch(e){toast(e.message||'Không thể tạo PDF.','warn')}finally{b.disabled=false}});$$('[data-ot-revoke]').forEach(b=>b.onclick=async()=>{if(!confirm('Thu hồi thẻ này?'))return;await api(`/api/admin/one-time-credentials/${encodeURIComponent(b.dataset.otRevoke)}/revoke`,{method:'POST',body:'{}'});await load()})};
   let currentTypes=[];try{currentTypes=(await api('/api/admin/card-designs')).items||[]}catch{}
-  const create=()=>{body.innerHTML=`<form id="oneTimeForm" class="form-grid two"><label>Họ và tên<input name="full_name" required maxlength="160"></label><label>Tên sự kiện / chương trình<input name="event_name" required maxlength="200"></label><label>Vai trò trên thẻ<input name="role_label" placeholder="Tình nguyện viên"></label><label>Số thẻ / mã cấp phát<input name="card_number" placeholder="Để trống để tự tạo"></label><label>Loại mẫu thẻ<select name="card_type_id">${currentTypes.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Ngày cấp<input type="date" name="issued_at" value="${new Date().toISOString().slice(0,10)}"></label><label>Ngày hết hiệu lực<input type="date" name="expires_at"></label><label>Ảnh người nhận (URL nếu cần)<input name="photo_url" placeholder="Không bắt buộc"></label><label style="grid-column:1/-1">Ghi chú<textarea name="notes" rows="3"></textarea></label><div class="toolbar" style="grid-column:1/-1"><button class="primary">Tạo thẻ & mở bản in</button><button type="button" class="secondary" id="openDesignFromIssue">Mở trình thiết kế</button></div><div id="oneTimeMsg" class="msg" style="grid-column:1/-1"></div></form>`;$('#oneTimeForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button.primary');b.disabled=true;try{const d=await api('/api/admin/one-time-credentials',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});const x={...Object.fromEntries(new FormData(e.target)),id:d.id,verify_token:d.verify_token,card_number:d.card_number,status:'active'};const type=currentTypes.find(v=>v.id===x.card_type_id)||{};openCardPrint(x,templateFor(type));toast('Đã tạo thẻ. Người nhận không cần tài khoản.')}catch(err){$('#oneTimeMsg').textContent=err.data?.error||err.message}finally{b.disabled=false}};$('#openDesignFromIssue').onclick=()=>{document.querySelector('[data-itab="list"]')?.click();toast('Trình thiết kế nằm ở phần cuối trang.')}};
+  const create=()=>{body.innerHTML=`<form id="oneTimeForm" class="form-grid two"><label>Họ và tên<input name="full_name" required maxlength="160"></label><label>Tên sự kiện / chương trình<input name="event_name" required maxlength="200"></label><label>Vai trò trên thẻ<input name="role_label" placeholder="Tình nguyện viên"></label><label>Số thẻ / mã cấp phát<input name="card_number" placeholder="Để trống để tự tạo"></label><label>Loại mẫu thẻ<select name="card_type_id">${currentTypes.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Ngày cấp<input type="date" name="issued_at" value="${vietnamDateInput()}"></label><label>Ngày hết hiệu lực<input type="date" name="expires_at"></label><label>Ảnh người nhận (URL nếu cần)<input name="photo_url" placeholder="Không bắt buộc"></label><label style="grid-column:1/-1">Ghi chú<textarea name="notes" rows="3"></textarea></label><div class="toolbar" style="grid-column:1/-1"><button class="primary">Tạo thẻ & tải PDF</button><button type="button" class="secondary" id="openDesignFromIssue">Mở trình thiết kế</button></div><div id="oneTimeMsg" class="msg" style="grid-column:1/-1"></div></form>`;$('#oneTimeForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button.primary');b.disabled=true;try{const d=await api('/api/admin/one-time-credentials',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});const x={...Object.fromEntries(new FormData(e.target)),id:d.id,verify_token:d.verify_token,card_number:d.card_number,status:'active'};const type=currentTypes.find(v=>v.id===x.card_type_id)||{};openCardPrint(x,templateFor(type));toast('Đã tạo thẻ. Người nhận không cần tài khoản.')}catch(err){$('#oneTimeMsg').textContent=err.data?.error||err.message}finally{b.disabled=false}};$('#openDesignFromIssue').onclick=()=>{document.querySelector('[data-itab="list"]')?.click();toast('Trình thiết kế nằm ở phần cuối trang.')}};
   $$('[data-itab]').forEach(b=>b.onclick=()=>{if(b.dataset.itab==='create')create();else load()});create();
   await mountCardDesignStudio(c);
 }

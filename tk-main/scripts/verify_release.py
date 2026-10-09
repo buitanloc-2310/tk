@@ -105,13 +105,38 @@ for name,marker in v4_front_checks.items():
     else: fail(name,'marker missing')
 
 index=(ROOT/'public/index.html').read_text()
-if 'v=20261008-member-v6-web-audit-2' in index: ok('cache busting current release')
+if 'v=20261009-member-v6-pdf-final-2' in index: ok('cache busting current release')
 else: fail('cache busting','index does not force current release assets')
 
 verify=(ROOT/'public/verify.html').read_text()
 for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning')]:
     if marker in verify: ok(name)
     else: fail(name,'missing')
+
+# 2026-10-09 hardening and card-export contract.
+for marker,name in [
+    ('async function downloadCardPdf(x,t)','direct PDF generator'),
+    ('function autoLayoutCard(t,orientation)','portrait/landscape auto-layout'),
+    ('Ảnh bắt buộc','front photo is not removable in Card Studio'),
+    ("frontElements.some(x=>x.kind==='photo')",'backend ensures a front photo element'),
+    ('/MediaBox [0 0 ${w.toFixed(4)} ${h.toFixed(4)}]','physical PDF page dimensions'),
+    ('PASSWORD_CHANGE_REQUIRED','forced password-change backend gate'),
+    ('EMAIL_CHANGE_REQUIRES_VERIFICATION','verified-email change guard'),
+    ('TOO_MANY_VERIFY_ATTEMPTS','public verification throttling'),
+    ("url.pathname==='/api/public/card-qr'",'same-origin QR endpoint avoids browser CORS'),
+    ('REQUEST_RATE_LIMITED','public account-request throttling'),
+    ('WHERE c.verify_token=?','opaque member-card verification token'),
+    ('bodyJson(req):{}','evaluation request parser')]:
+    if marker in front+back: ok(name)
+    else: fail(name,'marker missing')
+for marker,name in [
+    ('data-card-png','no card PNG export control'),
+    ('data-card-jpg','no card JPG export control'),
+    ('data-card-download','no card SVG export control'),
+    ('downloadCardImage(','no legacy raster export handler'),
+    ('downloadCardSvg(','no legacy SVG download handler')]:
+    if marker in front: fail(name,'legacy user-facing/export code remains')
+    else: ok(name)
 
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')
