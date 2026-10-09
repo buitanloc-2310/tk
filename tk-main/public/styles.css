@@ -10,8 +10,8 @@
 .auth-brand-row{display:flex;align-items:center;gap:14px}.auth-logo{width:62px;height:62px;object-fit:contain}.brand{font-weight:950;letter-spacing:.075em;font-size:23px}.subtitle{margin-top:4px;color:#2563eb;font-weight:850}.muted{color:var(--muted)}
 .form-grid{display:grid;gap:14px;margin-top:22px}.form-grid.two{grid-template-columns:1fr 1fr}.form-grid label{display:grid;gap:7px;font-size:13px;font-weight:750}.form-grid input,.form-grid select,.form-grid textarea,.toolbar input,.toolbar select{width:100%;border:1px solid #cfd5df;border-radius:12px;padding:11px 12px;background:#fff;color:var(--ink)}
 .form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus,.toolbar input:focus,.toolbar select:focus{outline:3px solid #dbeafe;border-color:#60a5fa}
-.primary,.ghost,.secondary,.danger,.soft{border:0;border-radius:12px;padding:10px 14px;cursor:pointer;font-weight:800}.primary{background:#111827;color:#fff}.primary:hover{background:#1f2937}.secondary{background:#e8eefc;color:#1e3a8a}.ghost{background:#eef2f7;color:#111827}.soft{background:#f8fafc;border:1px solid #e5e7eb}.danger{background:#fee2e2;color:#991b1b}.msg{min-height:20px;color:#b91c1c}.help{font-size:13px;line-height:1.65;margin-top:18px}.auth-links,.portal-links{display:flex;flex-wrap:wrap;gap:9px 15px;margin-top:14px}.auth-links a,.portal-links a{text-decoration:none;color:#315a8e}.auth-links a:hover,.portal-links a:hover{text-decoration:underline}.portal-block{border-top:1px solid var(--line);margin-top:18px;padding-top:15px}.legal{border-top:1px solid var(--line);margin-top:18px;padding-top:14px;font-size:12.5px;line-height:1.65;color:#667085}.legal a{text-decoration:none}
-.app-shell{display:grid;grid-template-columns:292px minmax(0,1fr);min-height:100vh}.sidebar{background:linear-gradient(180deg,#0b1220,#101827 62%,#0b1220);color:#fff;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:18px 14px 16px;overflow:hidden;box-shadow:12px 0 35px rgba(15,23,42,.06)}
+.primary,.ghost,.secondary,.danger,.soft{border:0;border-radius:12px;padding:10px 14px;cursor:pointer;font-weight:800}.primary{background:var(--blue);color:#fff}.primary:hover{filter:brightness(.92)}.secondary{background:#e8eefc;color:#1e3a8a}.ghost{background:#eef2f7;color:#111827}.soft{background:#f8fafc;border:1px solid #e5e7eb}.danger{background:#fee2e2;color:#991b1b}.msg{min-height:20px;color:#b91c1c}.help{font-size:13px;line-height:1.65;margin-top:18px}.auth-links,.portal-links{display:flex;flex-wrap:wrap;gap:9px 15px;margin-top:14px}.auth-links a,.portal-links a{text-decoration:none;color:#315a8e}.auth-links a:hover,.portal-links a:hover{text-decoration:underline}.portal-block{border-top:1px solid var(--line);margin-top:18px;padding-top:15px}.legal{border-top:1px solid var(--line);margin-top:18px;padding-top:14px;font-size:12.5px;line-height:1.65;color:#667085}.legal a{text-decoration:none}
+.app-shell{display:grid;grid-template-columns:292px minmax(0,1fr);min-height:100vh}.sidebar{background:linear-gradient(180deg,var(--nav),color-mix(in srgb,var(--nav) 88%,#fff) 62%,var(--nav));color:#fff;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:18px 14px 16px;overflow:hidden;box-shadow:12px 0 35px rgba(15,23,42,.06)}
 .side-brand{display:flex;align-items:center;gap:12px;padding:3px 8px 17px;border-bottom:1px solid rgba(255,255,255,.09);flex:0 0 auto}.side-logo{width:44px;height:44px;object-fit:contain;filter:drop-shadow(0 5px 10px rgba(0,0,0,.18))}.side-brand-title{font-weight:950;letter-spacing:.045em;font-size:14px}.side-brand-sub{font-size:11px;color:#94a3b8;margin-top:2px}
 .nav-scroll{flex:1;min-height:0;overflow-y:auto;padding:10px 2px;scrollbar-width:thin}.nav-section{font-size:10px;font-weight:900;letter-spacing:.13em;color:#64748b;padding:11px 10px 6px;text-transform:uppercase}.nav{display:grid;gap:4px}.nav button{border:0;background:transparent;color:#cbd5e1;text-align:left;padding:10px 12px;border-radius:11px;cursor:pointer;width:100%;font-size:14px}.nav button.active,.nav button:hover{background:linear-gradient(90deg,#1d2a43,#1b2a47);color:#fff;transform:translateX(1px)}
 .sidebar-links{border-top:1px solid rgba(255,255,255,.08);padding:10px 8px 0;display:grid;gap:6px}.sidebar-links a{font-size:12px;color:#94a3b8;text-decoration:none}.sidebar-links a:hover{color:#fff}.side-bottom{flex:0 0 auto;padding-top:10px}.side-bottom button{width:100%;background:#f8fafc;color:#111827}
@@ -138,10 +138,7 @@ button:disabled{opacity:.6;cursor:wait}
 .register-panel button.primary,.standalone-panel button.primary{background:linear-gradient(100deg,#125c9c,#248ce0);color:#fff}
 .card-qr-missing{position:absolute;right:14px;top:82px;width:110px;background:#fff4db;color:#824706;border-radius:8px;font-size:10px;padding:6px;line-height:1.5}
 
-.studio-design{margin-top:20px}.studio-design-fields{display:grid;grid-template-columns:180px 1fr;gap:12px}.studio-design-fields label{display:grid;gap:7px;font-size:13px;font-weight:700}
-.card-design-preview{display:flex;flex-direction:column;justify-content:space-between;min-height:190px;width:min(100%,440px);padding:20px 23px;border-radius:22px;background:linear-gradient(140deg,#0b2342,#2366c9);color:#fff;box-shadow:0 14px 28px rgba(18,51,80,.19)}
-.card-design-preview span{font-size:10px;letter-spacing:.14em}.card-design-preview b{font-size:24px}.card-design-preview small{font-size:9px;letter-spacing:.08em}
-@media(max-width:620px){.studio-design-fields{grid-template-columns:1fr}}
+
 
 /* =========================================================
    SKY FIRST MEMBER CENTER V5 — SUPER INTERFACE
@@ -256,15 +253,8 @@ html{scroll-behavior:smooth}body{background:radial-gradient(circle at 80% -10%,r
 .bulk-bar:not(.is-active) .toolbar button:not(#calendarSelectAll){opacity:.72}.bulk-bar .toolbar{margin:0}.bulk-bar button{white-space:nowrap}.bulk-check{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:#587186;margin-bottom:8px}.org-summary{padding:12px 15px;margin:10px 0;color:#587186;font-size:11px}.org-summary b{color:#123e5d;font-size:15px}
 @media(max-width:720px){.bulk-bar{align-items:flex-start}.bulk-bar .toolbar{width:100%;overflow:auto;flex-wrap:nowrap;padding-bottom:2px}.bulk-bar button{flex:0 0 auto}.org-summary{font-size:10px}}
 
-/* V6 CARD STUDIO + ONE-TIME ISSUANCE */
-.card-studio-shell{display:grid;grid-template-columns:minmax(330px,430px) minmax(0,1fr);gap:24px;align-items:start}
-.card-studio-tools{display:grid;gap:12px}.card-studio-tools label{display:grid;gap:7px;font-size:13px;font-weight:800}.card-studio-tools select{border:1px solid #cfd5df;border-radius:12px;padding:11px;background:#fff}
-.studio-side-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px}.studio-side-tabs button{border:0;border-radius:11px;padding:10px;font-weight:800;cursor:pointer}
-.card-studio-preview-wrap{display:grid;place-items:center;gap:10px;min-height:390px;padding:20px;border:1px solid #dbe8f2;border-radius:22px;background:radial-gradient(circle at 15% 10%,#e5f5ff,transparent 34%),#f7fbff}
-.card-studio-preview{width:min(100%,700px);aspect-ratio:86/54;position:relative}.sf-card-face{position:relative;width:100%;height:100%;overflow:hidden;border-radius:4.5%;box-shadow:0 20px 50px rgba(9,48,80,.18);print-color-adjust:exact;-webkit-print-color-adjust:exact}.sf-card-el{cursor:grab;user-select:none}.sf-card-el:active{cursor:grabbing}
-.cs-element{border:1px solid #dce6ef;border-radius:12px;background:#f9fbfd;padding:9px;display:grid;gap:7px}.cs-element.selected{border-color:#5aa9e8;box-shadow:0 0 0 3px #eaf6ff}.cs-element>div:first-child{display:flex;justify-content:space-between;align-items:center}.cs-element button{border:0;background:#fee2e2;color:#991b1b;border-radius:8px;padding:2px 8px;cursor:pointer}.cs-element input{min-width:0;border:1px solid #d5dde6;border-radius:9px;padding:7px 8px;background:#fff}.cs-mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.cs-mini-grid label{font-size:10px!important;font-weight:700!important}.cs-mini-grid input{width:100%;padding:6px!important}
+sf-card-face{position:relative;width:100%;height:100%;overflow:hidden;border-radius:4.5%;box-shadow:0 20px 50px rgba(9,48,80,.18);print-color-adjust:exact;-webkit-print-color-adjust:exact}.sf-card-el{cursor:grab;user-select:none}.sf-card-el:active{cursor:grabbing}
 .issuance-panel{overflow:hidden}.issuance-tabs{display:flex;gap:8px;border-bottom:1px solid #e7edf3;padding-bottom:14px;margin-bottom:16px}.issuance-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.issuance-summary span{padding:10px 13px;border-radius:12px;background:#eff7ff;color:#174c74;border:1px solid #d8ebf8}.issuance-panel table td{vertical-align:top}.issuance-panel .meta{font-size:11px;color:#718096;margin-top:3px}
-@media(max-width:900px){.card-studio-shell{grid-template-columns:1fr}.card-studio-preview-wrap{min-height:300px}.cs-mini-grid{grid-template-columns:repeat(2,1fr)}}
 
 /* Premium public verification experience */
 .verify-page{padding:clamp(16px,4vw,38px);background:radial-gradient(ellipse at 8% 0,rgba(56,189,248,.24),transparent 32%),radial-gradient(ellipse at 95% 12%,rgba(37,99,235,.2),transparent 34%),linear-gradient(145deg,#eaf5ff 0%,#f5f8ff 48%,#eaf2ff 100%)}
@@ -275,7 +265,7 @@ html{scroll-behavior:smooth}body{background:radial-gradient(circle at 80% -10%,r
 @media(max-width:600px){.verify-page .public-head{gap:10px}.verify-page .public-head img{width:48px;height:48px}.verify-page .public-head b{font-size:12px}.verify-page .public-card{border-radius:20px}.verify-card-top{padding:22px 18px;gap:12px}.verify-icon{width:44px;height:44px;flex-basis:44px;border-radius:14px}.verify-result{padding:22px 18px}.verify-person{grid-template-columns:84px minmax(0,1fr);gap:14px}.verify-person-photo{width:84px;height:108px;border-radius:13px}.verify-person h2{font-size:21px}.verify-person p{font-size:13px;padding:8px 0}.verify-foot{padding:13px 18px}}
 
 
-/* 2026-10-09 usability hardening: compact accordion navigation and faithful card preview */
+/* 2026-10-09 usability hardening: compact accordion navigation */
 .nav-group{display:grid;gap:2px;margin:0 0 5px}
 .nav-section-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;border-radius:10px;background:transparent;color:#96bad1;padding:13px 10px 8px;font-size:10px;font-weight:900;letter-spacing:.15em;text-align:left;text-transform:uppercase;cursor:pointer}
 .nav-section-toggle:hover,.nav-section-toggle:focus-visible{background:rgba(255,255,255,.06);color:#fff}
@@ -286,11 +276,6 @@ html{scroll-behavior:smooth}body{background:radial-gradient(circle at 80% -10%,r
 .nav-group .nav{padding:0 0 4px}
 .nav-scroll{overscroll-behavior:contain;scroll-behavior:auto;scrollbar-color:rgba(152,194,221,.35) transparent}
 .sf-card-el{max-width:100%;max-height:100%;user-select:none;-webkit-user-drag:none}.sf-card-el.sf-card-locked{cursor:default!important}
-.cs-element-locked{border-color:#c7dff2;background:#f3f9fe}
-.cs-element-locked>div:first-child .meta{display:inline-flex;align-items:center;gap:4px;color:#23648e;background:#e2f2ff;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800}
-.cs-element-locked input:disabled{background:#f2f7fb;color:#48657c;opacity:1;cursor:not-allowed}
-.card-studio-preview{overflow:hidden;border:1px solid #cfe0ee;border-radius:14px;box-shadow:0 16px 35px rgba(8,43,75,.12);background:#f8fcff}
-.card-studio-preview .sf-card-face{border-radius:inherit}
 @media(max-width:840px){.nav-section-toggle{padding:11px 9px}.nav-group .nav{grid-template-columns:1fr}.nav-group .nav button{min-height:42px}.sidebar{overflow:hidden}.nav-scroll{max-height:calc(100dvh - 220px);overflow:auto}}
 @media(prefers-reduced-motion:reduce){.nav-chevron{transition:none}}
 
@@ -307,22 +292,18 @@ html{scroll-behavior:smooth}body{background:radial-gradient(circle at 80% -10%,r
 @media(max-width:600px){.issuance-kpi{grid-template-columns:1fr}.issuance-nav-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs button{white-space:normal;min-height:44px}.issuance-panel{padding:12px}.issuance-panel .section-title{align-items:flex-start;flex-direction:column}.issuance-panel .section-title input{max-width:100%!important;width:100%}}
 
 /* Independent verification QR + five-area issuance workspace */
-.issuance-nav-tabs{flex-wrap:wrap;align-items:center;gap:8px;position:sticky;top:86px;z-index:8;background:rgba(255,255,255,.96);padding:6px 0 14px;backdrop-filter:blur(10px)}
-.issuance-nav-tabs button{white-space:nowrap;min-height:40px}
-.issuance-kpi{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.issuance-kpi .stat strong{font-size:clamp(22px,2vw,30px)}
-.issuance-panel .table-wrap{max-width:100%;overflow:auto}
-.issuance-panel table{min-width:760px}
-.issuance-panel .toolbar{gap:7px;flex-wrap:wrap}
-.issuance-panel .toolbar .secondary,.issuance-panel .toolbar .primary,.issuance-panel .toolbar .danger{white-space:nowrap}
-@media(max-width:900px){.issuance-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs{position:static}}
-@media(max-width:600px){.issuance-kpi{grid-template-columns:1fr}.issuance-nav-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.issuance-nav-tabs button{white-space:normal;min-height:44px}.issuance-panel{padding:12px}.issuance-panel .section-title{align-items:flex-start;flex-direction:column}.issuance-panel .section-title input{max-width:100%!important;width:100%}}
 
-/* Card Studio: compact template creation control and text formatting tools. */
-.cs-new-template-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin:10px 0 12px}
-.cs-new-template-row label{min-width:0;margin:0}
-.cs-new-template-row input{width:100%;min-width:0}
-.cs-new-template-row button{white-space:nowrap;min-height:42px}
-.cs-bold-option{display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0;color:var(--text,#173752)}
-.cs-bold-option input{width:auto;min-height:auto;margin:0}
-@media(max-width:560px){.cs-new-template-row{grid-template-columns:1fr}.cs-new-template-row button{width:100%}}
+/* Hệ sinh thái Sky First: menu gọn, hỗ trợ chuột, chạm và bàn phím. */
+.ecosystem-dropdown{position:relative;color:inherit}.ecosystem-dropdown>summary{list-style:none;cursor:pointer;font-weight:800;padding:10px 12px;border-radius:10px;user-select:none}.ecosystem-dropdown>summary::-webkit-details-marker{display:none}.ecosystem-dropdown>summary:after{content:'⌄';margin-left:9px}.ecosystem-dropdown[open]>summary:after{content:'⌃'}.ecosystem-dropdown>summary:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}.ecosystem-dropdown nav{display:grid;gap:2px;margin-top:7px}.ecosystem-dropdown nav a{display:grid;gap:3px;text-decoration:none;padding:10px 12px;border-radius:10px}.ecosystem-dropdown nav a:hover,.ecosystem-dropdown nav a:focus-visible{background:rgba(56,189,248,.12);outline-offset:2px}.ecosystem-dropdown nav small{font-size:11px;font-weight:500;opacity:.72}.auth-ecosystem .ecosystem-dropdown{border-top:1px solid var(--line);margin-top:12px;padding-top:9px}.auth-ecosystem .ecosystem-dropdown nav{grid-template-columns:repeat(2,minmax(0,1fr))}.auth-ecosystem .ecosystem-dropdown nav a{border:1px solid var(--line);background:#fff}.sidebar-links .ecosystem-dropdown{font-size:12px}.sidebar-links .ecosystem-dropdown>summary{padding:5px 0;color:#cbd5e1}.sidebar-links .ecosystem-dropdown nav a{color:#cbd5e1;font-size:12px;padding:7px}.sidebar-links .ecosystem-dropdown nav small{display:none}.portal-links .ecosystem-dropdown{width:100%}@media(max-width:620px){.auth-ecosystem .ecosystem-dropdown nav{grid-template-columns:1fr}}
+
+
+/* Cấu hình giao diện từ trang quản trị */
+:root{--ui-radius:18px;--content-max-width:1500px}
+.card,.modal,.auth-card,.public-card,.list-item,.member-card{border-radius:var(--ui-radius)}
+.primary{background:var(--blue)}
+.auth-heading span,.gate-kicker,.subtitle{color:var(--sf-blue,var(--blue))}
+.auth-submit:focus-visible,.link-button:focus-visible,.nav button:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+.main>#content{max-width:var(--content-max-width);width:100%;margin-left:auto;margin-right:auto}.main>#content>.section-title{max-width:100%}
+.ecosystem-dropdown[open] nav{max-width:420px}
+
+.ecosystem-dropdown nav a{grid-template-columns:28px minmax(0,1fr) 16px;align-items:center;gap:9px}.ecosystem-dropdown .portal-mark{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:rgba(56,189,248,.14);color:var(--blue);font-size:16px;font-weight:900}.ecosystem-dropdown .portal-copy{display:grid;gap:3px;min-width:0}.ecosystem-dropdown .portal-copy>span{font-weight:800;line-height:1.4}.ecosystem-dropdown .portal-copy small{line-height:1.4}.ecosystem-dropdown .portal-open{font-size:12px;opacity:.6;align-self:start;padding-top:2px}

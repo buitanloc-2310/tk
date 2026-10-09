@@ -7,12 +7,12 @@ errors=[]
 def ok(name): print('[OK]',name)
 def fail(name,msg): errors.append(f'{name}: {msg}'); print('[FAIL]',name,msg)
 
-required=['public/index.html','public/app.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql']
+required=['public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql']
 for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
 
-for x in ['public/app.js','src/index.js','src/local-qr.js','src/qr-code/index.js']:
+for x in ['public/app.js','public/brand.js','src/index.js','src/local-qr.js','src/qr-code/index.js']:
     r=subprocess.run(['node','--check',str(ROOT/x)],capture_output=True,text=True)
     if r.returncode==0: ok('syntax '+x)
     else: fail('syntax '+x,r.stderr.strip())
@@ -66,6 +66,12 @@ for name,marker in checks.items():
     if marker in back: ok(name)
     else: fail(name,'backend marker missing')
 
+# The retired designer must not leave visible UI or obsolete styling behind.
+css=(ROOT/'public/styles.css').read_text()
+for marker in ['card-studio-shell','card-studio-tools','card-studio-preview-wrap','card-studio-preview','cs-mini-grid','cs-element-locked']:
+    if marker in css: fail('retired card designer CSS',f'obsolete style remains: {marker}')
+if not any(x.startswith('retired card designer CSS:') for x in errors): ok('retired card designer CSS removed')
+
 if '/api/me/profile' in front: fail('profile API compatibility','obsolete /api/me/profile call remains')
 else: ok('profile API compatibility')
 
@@ -97,32 +103,27 @@ v4_front_checks={
  'member card QR':'cardQrSrc(x,170)',
  'member card verify action':'data-card-verify',
  'member card print/PDF action':'data-card-print',
- 'card print photo':'class="photo"',
- 'card print QR':'class="qr"',
+ 'card print photo':"if(e.kind==='photo')return x.photo_url?",
+ 'card print QR':'class="sf-card-el sf-card-qr"',
 }
 for name,marker in v4_front_checks.items():
     if marker in front: ok(name)
     else: fail(name,'marker missing')
 
 index=(ROOT/'public/index.html').read_text()
-if 'v=20261009-member-v6-independent-qr-1' in index: ok('cache busting current release')
+if 'v=20261009-member-v8-audit-fix' in index: ok('cache busting current release')
 else: fail('cache busting','index does not force current release assets')
 
-# Locked member-card copy must be enforced in both client and Worker API.
+# The card designer is retired per product requirements; legacy fixed copy/data remains intact.
 locked_copy = ['HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG','THỜI HẠN SỬ DỤNG','Có giá trị trong thời hạn ghi trên thẻ và theo trạng thái xác minh của hệ thống.','HƯỚNG DẪN SỬ DỤNG','Xuất trình thẻ khi cần xác nhận tư cách thành viên hoặc người tham gia chương trình.','Sử dụng mã QR ở mặt trước để kiểm tra thông tin và trạng thái thẻ.','Không cho mượn, chuyển nhượng hoặc sử dụng thẻ thay cho người khác.','LƯU Ý','Thẻ chỉ có giá trị xác minh thông qua mã QR ở mặt trước. Thẻ không còn giá trị sử dụng khi hệ thống xác minh thông báo thẻ đã bị hủy.','Sky First Network · Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First']
-if all(x in front and x in back for x in locked_copy): ok('locked back-of-card copy')
+if all(x in front and x in back for x in locked_copy): ok('locked back-of-card copy preserved')
 else: fail('locked back-of-card copy','canonical copy missing from client or API')
-if 'lockedCardBackElements(requestedOrientation)' in back and 'LOCKED_CARD_BACK_IDS.has(x.id)' in back: ok('back-card content enforced server-side')
-else: fail('back-card content enforcement','API does not replace user-supplied fixed text')
+if "FEATURE_REMOVED" in back and "url.pathname==='/api/admin/card-designs'||url.pathname.startsWith('/api/admin/card-designs/')" in back and 'template_json card_template_json' in back: ok('card designer retired while existing cards remain exportable')
+else: fail('card designer retirement','legacy designer endpoint or existing-card export path missing')
 if 'canvas.toBlob' in front and 'toDataURL(' not in front: ok('PDF rasterization uses Blob, not data URL')
 else: fail('PDF rasterization','legacy canvas data URL remains')
 if 'data-nav-toggle' in front and 'savedNavScroll' in front and 'nav-section-toggle' in (ROOT/'public/styles.css').read_text(): ok('collapsible navigation and scroll preservation')
 else: fail('navigation usability','accordion or scroll preservation missing')
-if "locked?'disabled aria-label=\"Nội dung cố định\"'" in front and "LOCKED_CARD_BACK_IDS.has(arr[idx]?.id)" in front: ok('fixed card-back editor controls are disabled')
-else: fail('fixed card-back editor controls','locked copy can be edited or dragged in the designer')
-if all("['footer','Sky First Network · Mạng lưới Giáo dục & Phát triển Cộng đồng Sky First',6,true" in x for x in (front,back)): ok('footer fits single line at physical card size')
-else: fail('card footer layout','frontend and API footer sizes should match and fit print width')
-
 verify=(ROOT/'public/verify.html').read_text()
 for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning'),('x.status===\'pending\'','future-date pending verify warning')]:
     if marker in verify: ok(name)
@@ -136,7 +137,7 @@ for marker,name in [
     ("type:'verification_qr'",'independent QR verification type'),
     ('/api/admin/issuance-overview','real issuance overview API'),
     ('/api/admin/member-cards','member card management list API'),
-    ("url.pathname==='/api/admin/card-designs'&&['GET','POST'].includes(req.method)",'create and list reusable card templates'),
+    ("url.pathname==='/api/admin/card-designs'||url.pathname.startsWith('/api/admin/card-designs/')",'card design editor API explicitly retired'),
     ('data-issuance-tab=\"qr\"','independent QR admin tab'),
     ('Tải QR PNG','QR PNG download action'),
     ('async function downloadQrPng(tokenValue,fileName)','validates the QR image before download'),
@@ -150,18 +151,13 @@ if "x.photo_url||'/sfn-logo.png'" in front or "t.logo_url||'/sfn-logo.png'" in f
 else: ok('no default logo fallback in card design/export')
 if "e.kind==='photo'?'Ảnh bắt buộc'" in front or "frontElements.some(x=>x.kind==='photo')" in back: fail('optional member photo','photo is forced by the card UI or API')
 else: ok('member photo is optional and removable')
-if "font:['Arial','Verdana','Georgia','Tahoma'].includes(x.font)?x.font:'Arial'" in back and "['Arial','Verdana','Georgia','Tahoma'].includes(e.font)" in front: ok('allowlisted card font support in API and exports')
-else: fail('card font support','font allowlist missing from API or renderer')
-if "LOGO_UPLOAD_REMOVED" in back and "['text','photo','qr','shape']" in back: ok('logo-free design API')
-else: fail('logo-free design API','server still accepts logo elements or upload')
+if "safeImageUrl(x.photo_url,'')" in front and 'localImagePath' in back: ok('card/profile images only use local uploaded assets')
+else: fail('uploaded-only images','external image URL can still reach an image renderer')
 
 # 2026-10-09 hardening and card-export contract.
 for marker,name in [
     ('async function downloadCardPdf(x,t)','direct PDF generator'),
     ('function autoLayoutCard(t,orientation)','portrait/landscape auto-layout'),
-    ('data-cs-font','card text font control'),
-    ('data-cs-align','card text alignment control'),
-    ('data-cs-bold','card text bold control'),
     ('/MediaBox [0 0 ${w.toFixed(4)} ${h.toFixed(4)}]','physical PDF page dimensions'),
     ('PASSWORD_CHANGE_REQUIRED','forced password-change backend gate'),
     ('EMAIL_CHANGE_REQUIRES_VERIFICATION','verified-email change guard'),
@@ -180,6 +176,40 @@ for marker,name in [
     ('downloadCardSvg(','no legacy SVG download handler')]:
     if marker in front: fail(name,'legacy user-facing/export code remains')
     else: ok(name)
+
+
+# Brand configuration and uploaded-image-only contracts.
+for marker,name in [
+    ("Trang Thông Tin Điện Tử Sky First",'current official portal naming'),
+    ("Trung Tâm Thư Điện Tử Sky First",'email portal naming'),
+    ('/api/admin/site-assets','uploaded site asset endpoint'),
+    ('INVALID_LOGO_PATH','reject external logo URLs'),
+    ('baseFontSize','editable common font size'),
+    ('cornerRadius','editable corner rounding'),
+    ('contentMaxWidth','editable page content width'),
+    ('data-portal-link','editable portal links'),
+    ('data-portal-menu','accessible ecosystem dropdown'),
+]:
+    if marker in front+back: ok(name)
+    else: fail(name,'required branding/CMS marker missing')
+
+# Uploaded-only image and branded public-page checks. External links are allowed for navigation,
+# but an image element/style must not fetch image bytes from another host.
+image_url_hits=[]
+for asset in (ROOT/'public').rglob('*'):
+    if not asset.is_file() or asset.suffix.lower() not in {'.html','.css','.js'}: continue
+    txt=asset.read_text(errors='ignore')
+    for pat in [r"<img\b[^>]*\bsrc\s*=\s*['\"]https?://",
+                r"<source\b[^>]*\bsrcset\s*=\s*['\"][^'\"]*https?://",
+                r"url\(\s*['\"]?https?://"]:
+        if re.search(pat, txt, re.I): image_url_hits.append(str(asset.relative_to(ROOT)))
+if image_url_hits: fail('external image sources',', '.join(sorted(set(image_url_hits))))
+else: ok('no direct external image sources in public HTML/CSS/JS')
+for page in ['contact.html','privacy.html','terms.html','support.html','verify.html','setup.html']:
+    txt=(ROOT/'public'/page).read_text()
+    if 'brand.js?v=20261009-brand-v1' in txt and 'styles.css?v=20261009-member-v8-audit-fix' in txt:
+        ok('shared brand/theme cache '+page)
+    else: fail('shared brand/theme cache '+page,'brand or style cache version missing')
 
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')

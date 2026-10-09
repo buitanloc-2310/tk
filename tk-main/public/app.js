@@ -27,16 +27,59 @@ const api=async(url,opt={})=>{
 };
 const safeStore={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 
-const logo='/sfn-logo.png';
+let logo='/sfn-logo.png';
 const vietnamDateInput=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return `${v.year}-${v.month}-${v.day}`};
 
-const PORTALS=[
-  ['Cổng chính Sky First Network','https://skyfirst.io.vn'],
-  ['Cổng Thông tin','https://ctt.skyfirst.io.vn'],
-  ['Cổng Tình nguyện viên','https://tnv.skyfirst.io.vn'],
-  ['Cổng SFEC','https://sfec.skyfirst.io.vn'],
-  ['Lớp học trực tuyến','https://slc.skyfirst.io.vn']
+let PORTALS=[
+  ['Trang Thông Tin Điện Tử Sky First','https://www.skyfirst.io.vn/','Thông tin chính thức của Sky First'],
+  ['Cổng Thông Tin Số Sky First','https://ctt.skyfirst.io.vn/','Thông tin, chương trình và tiện ích số'],
+  ['Trung Tâm Tình Nguyện Viên Sky First','https://tnv.skyfirst.io.vn/','Hoạt động tình nguyện và cộng đồng'],
+  ['Trung Tâm Học Tập Số Sky First','https://slc.skyfirst.io.vn/','Học tập và lớp học trực tuyến'],
+  ['Trung Tâm Thư Điện Tử Sky First','https://mail.skyfirst.io.vn/','Dịch vụ thư điện tử']
 ];
+const safeImageUrl=(value,fallback='')=>{
+  const raw=String(value||'').trim();
+  if(!raw)return fallback;
+  try{
+    const u=new URL(raw,location.origin);
+    if(u.origin!==location.origin||u.username||u.password||u.pathname.includes('..'))return fallback;
+    if(u.pathname==='/sfn-logo.png')return '/sfn-logo.png';
+    if(!u.pathname.startsWith('/files/'))return fallback;
+    if(!/\.(png|jpe?g|webp)$/i.test(u.pathname))return fallback;
+    return u.pathname;
+  }catch{return fallback}
+};
+const allowedPortalUrl=value=>{
+  try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='skyfirst.io.vn'||u.hostname.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}
+};
+function applyPortalConfig(data){
+  const d=data&&typeof data==='object'?data:{};
+  const brand=d.brand&&typeof d.brand==='object'?d.brand:{};
+  const color=(v,f)=>/^#[0-9a-f]{6}$/i.test(String(v||''))?String(v):f;
+  const size=Math.min(20,Math.max(14,Number(brand.baseFontSize)||16));
+  const fonts=['Arial','Verdana','Georgia','Tahoma','system'];
+  const font=fonts.includes(brand.fontFamily)?brand.fontFamily:'system';
+  document.documentElement.style.setProperty('--blue',color(brand.primaryColor,'#2563eb'));
+  document.documentElement.style.setProperty('--cyan',color(brand.accentColor,'#38bdf8'));
+  document.documentElement.style.setProperty('--nav',color(brand.navColor,'#0b1220'));
+  document.documentElement.style.setProperty('--sf-blue',color(brand.primaryColor,'#1677d2'));
+  document.documentElement.style.setProperty('--sf-blue-2',color(brand.accentColor,'#4aa7f5'));
+  document.documentElement.style.setProperty('--sf-navy',color(brand.navColor,'#082b4b'));
+  document.documentElement.style.setProperty('--ui-radius',Math.min(24,Math.max(8,Number(brand.cornerRadius)||18))+'px');
+  document.documentElement.style.setProperty('--content-max-width',Math.min(1680,Math.max(1080,Number(brand.contentMaxWidth)||1500))+'px');
+  document.documentElement.style.fontSize=size+'px';
+  document.documentElement.style.fontFamily=font==='system'?'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif':font+',sans-serif';
+  logo=safeImageUrl(brand.logoUrl,'/sfn-logo.png');
+  document.title=String(brand.siteName||'Trung Tâm Thành Viên Số Sky First').slice(0,100);
+  document.querySelectorAll('[data-site-name]').forEach(el=>{el.textContent=brand.siteName||'Trung Tâm Thành Viên Số Sky First'});
+  document.querySelectorAll('img[data-brand-logo],.side-logo,.gate-brand img,.auth-mobile-brand img,.standalone-header img,.standalone-panel>img').forEach(el=>{el.src=logo});
+  if(Array.isArray(d.links)&&d.links.length===5){
+    const links=d.links.map(x=>[String(x?.name||'').slice(0,100),allowedPortalUrl(x?.url)||'',String(x?.description||'').slice(0,140)]);
+    if(links.length===5&&links.every(x=>x[0]&&x[1]))PORTALS=links;
+  }
+  refreshPortalMenus();
+}
+
 
 const state={
   me:null,
@@ -101,23 +144,17 @@ const initials=n=>(
   ||'Sky First Network'
 );
 
-const avatar=(p,cls='avatar')=>
-  p?.avatar_url
-    ?`<span class="${cls}">
-        <img src="${esc(p.avatar_url)}" alt="">
-      </span>`
-    :`<span class="${cls}">
-        <span class="avatar-fallback">
-          ${esc(initials(p?.full_name))}
-        </span>
-      </span>`;
+const avatar=(p,cls='avatar')=>{
+  const image=safeImageUrl(p?.avatar_url,'');
+  return image?`<span class="${cls}"><img src="${esc(image)}" alt=""></span>`:`<span class="${cls}"><span class="avatar-fallback">${esc(initials(p?.full_name))}</span></span>`;
+};
 
-const portals=()=>PORTALS
-  .map(
-    ([n,u])=>
-      `<a href="${u}" target="_blank" rel="noopener">${n}</a>`
-  )
-  .join('');
+const PORTAL_MARKS=['⌂','▦','♡','✦','✉'];
+const portals=()=>PORTALS.map(([n,u,d],i)=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer"><span class="portal-mark" aria-hidden="true">${PORTAL_MARKS[i]||'↗'}</span><span class="portal-copy"><span>${esc(n)}</span>${d?`<small>${esc(d)}</small>`:''}</span><span class="portal-open" aria-hidden="true">↗</span></a>`).join('');
+const portalMenu=()=>`<details class="ecosystem-dropdown" data-portal-menu><summary>Hệ sinh thái Sky First</summary><nav aria-label="Các nền tảng Sky First">${portals()}</nav></details>`;
+function refreshPortalMenus(){
+  document.querySelectorAll('[data-portal-menu]').forEach(el=>{const open=el.open;el.outerHTML=portalMenu().replace('<details class="ecosystem-dropdown" data-portal-menu>','<details class="ecosystem-dropdown" data-portal-menu'+(open?' open':'')+'>')});
+}
 
 async function compressAvatar(file){
   if(!file||!file.type.startsWith('image/')){
@@ -187,7 +224,7 @@ async function uploadBinary(url,blob){
 
 async function boot(){
   window.__SFN_APP_STARTED__=true;
-  try{
+  try{try{applyPortalConfig(await api('/api/public/portal-config'))}catch{}
     state.me=await api('/api/me');
     if(state.me.force_password_change){renderForcedPasswordChange();return}
     state.dashboard=await api('/api/dashboard');
@@ -215,14 +252,14 @@ function renderForcedPasswordChange(){
   $('#forcedPasswordForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),password=String(f.get('password')||''),confirm=String(f.get('confirm')||''),msg=$('#forcedPasswordMsg'),btn=e.target.querySelector('button');if(password!==confirm){msg.textContent='Mật khẩu nhập lại chưa khớp.';return}if(password.length<10){msg.textContent='Mật khẩu cần ít nhất 10 ký tự.';return}btn.disabled=true;msg.textContent='Đang cập nhật mật khẩu...';try{await api('/api/me/password',{method:'POST',body:JSON.stringify({current_password:'',new_password:password})});state.me=await api('/api/me');state.dashboard=await api('/api/dashboard');renderApp();toast('Đã đổi mật khẩu. Tài khoản của bạn đã sẵn sàng.')}catch(err){msg.textContent=err.data?.message||err.data?.error||err.message}finally{btn.disabled=false}};
 }
 function renderRegistrationStatus(){
-  $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" alt="Sky First Network"> Trung tâm Thành viên Số</a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">SKY FIRST MEMBER IDENTITY</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
+  $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung Tâm Thành Viên Số Sky First</span></a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">HỒ SƠ THÀNH VIÊN SKY FIRST</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
   wirePublicLinks();
   const qs=new URLSearchParams(location.search);if(qs.has('request'))$('#statusForm').elements.code.value=qs.get('request');if(qs.has('email'))$('#statusForm').elements.email.value=qs.get('email');
   $('#statusForm').onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target),out=$('#statusResult');out.textContent='Đang kiểm tra hồ sơ...';try{const d=await api('/api/public/account-request/status?code='+encodeURIComponent(dta.get('code'))+'&email='+encodeURIComponent(dta.get('email')));out.innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <strong>${esc(statusVi(d.request.status))}</strong>${d.request.admin_note?`<p>Phản hồi: ${esc(d.request.admin_note)}</p>`:''}</div>`}catch{out.textContent='Không tìm thấy hồ sơ phù hợp. Vui lòng kiểm tra lại mã và email.'}};
 }
 function wirePublicLinks(){document.querySelectorAll('[data-public-path]').forEach(a=>a.onclick=e=>{e.preventDefault();routePublic(a.dataset.publicPath)})}
 function showRegistrationPage(title,html){
-  $('#app').innerHTML=`<main class="standalone register-screen"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" alt="Sky First Network"> Trung tâm Thành viên Số</a><a href="/registration-status" data-public-path="/registration-status">Tra cứu đăng ký →</a></header><section class="standalone-panel register-panel"><div class="eyebrow">THAM GIA SKY FIRST NETWORK</div><h1>${esc(title)}</h1><p class="muted">Hoàn thành các bước bên dưới. Thông tin chỉ được xử lý để xét duyệt và quản lý hồ sơ theo chính sách của hệ thống.</p><div class="wizard-progress" id="wizardProgress" aria-live="polite"></div>${html}</section></main>`;
+  $('#app').innerHTML=`<main class="standalone register-screen"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung Tâm Thành Viên Số Sky First</span></a><a href="/registration-status" data-public-path="/registration-status">Tra cứu đăng ký →</a></header><section class="standalone-panel register-panel"><div class="eyebrow">THAM GIA SKY FIRST NETWORK</div><h1>${esc(title)}</h1><p class="muted">Hoàn thành các bước bên dưới. Thông tin chỉ được xử lý để xét duyệt và quản lý hồ sơ theo chính sách của hệ thống.</p><div class="wizard-progress" id="wizardProgress" aria-live="polite"></div>${html}</section></main>`;
   wirePublicLinks();
 }
 function initRegistrationWizard(form){
@@ -255,6 +292,7 @@ async function loadPublicStats(){
   const box=$('#impactNumbers');if(!box)return;
   try{
     const d=await api('/api/public/portal-config');
+    applyPortalConfig(d);
     if(!$('#impactNumbers'))return;
     box.innerHTML=(d.stats||[]).map((x,i)=>`<article class="impact-stat"><strong data-count="${Number(x.value)||0}" data-index="${i}">0</strong><span>${esc(x.label)}</span></article>`).join('')||'<span class="muted">Chào mừng đến với Sky First Network</span>';
     $('#impactTagline').textContent=d.tagline||'';
@@ -276,9 +314,9 @@ function renderLogin(){
   $('#app').innerHTML=`
     <main class="identity-gate">
       <section class="gate-story" aria-label="Sky First Network">
-        <div class="gate-brand"><img src="${logo}" alt="Sky First Network"><div><strong>SKY FIRST NETWORK</strong><span>MEMBER IDENTITY</span></div></div>
+        <div class="gate-brand"><img src="${logo}" alt="Sky First Network"><div><strong data-site-name>TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</strong><span>HỒ SƠ THÀNH VIÊN</span></div></div>
         <div class="gate-copy">
-          <span class="gate-kicker">TRUNG TÂM THÀNH VIÊN SỐ · DIGITAL MEMBER CENTER</span>
+          <span class="gate-kicker">TRUNG TÂM THÀNH VIÊN SỐ </span>
           <h1>Một hồ sơ.<br>Mọi hành trình<br>tại Sky First.</h1>
           <p>Không gian định danh số dành cho thành viên: vai trò, đơn vị, hoạt động, hồ sơ, thành tích và những đóng góp được kết nối trong cùng một nơi.</p>
           <div class="impact-row"><span>GIÁO DỤC</span><span>CỘNG ĐỒNG</span><span>TÌNH NGUYỆN</span></div>
@@ -289,10 +327,10 @@ function renderLogin(){
       </section>
       <section class="gate-panel">
         <div class="auth-box">
-          <div class="auth-mobile-brand"><img src="${logo}" alt=""><b>SKY FIRST NETWORK</b></div>
+          <div class="auth-mobile-brand"><img src="${logo}" alt=""><b data-site-name>TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</b></div>
           <div class="auth-tabs"><button class="active" data-auth-tab="login">ĐĂNG NHẬP</button><button data-auth-tab="register">ĐĂNG KÝ</button></div>
           <div id="authLoginPane">
-            <div class="auth-heading"><span>MEMBER ACCESS</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng tài khoản thành viên Sky First của bạn.</p></div>
+            <div class="auth-heading"><span>ĐĂNG NHẬP THÀNH VIÊN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng tài khoản thành viên Sky First của bạn.</p></div>
             <form id="loginForm" class="modern-form">
               <label>Tên đăng nhập / Email<input name="login" required autocomplete="username" placeholder="Nhập tên đăng nhập hoặc email"></label>
               <label>Mật khẩu<div class="password-wrap"><input name="password" type="password" required autocomplete="current-password" placeholder="Nhập mật khẩu"><button type="button" id="togglePassword" aria-label="Hiện mật khẩu">◉</button></div></label>
@@ -302,13 +340,13 @@ function renderLogin(){
             <div class="auth-actions"><button type="button" id="forgotPassword" class="link-button">Quên mật khẩu?</button><button type="button" id="checkRequest" class="link-button">Tra cứu đăng ký</button></div>
           </div>
           <div id="authRegisterPane" hidden>
-            <div class="auth-heading"><span>MEMBER REGISTRATION</span><h2>Đăng ký thành viên.</h2><p>Hồ sơ được gửi đến Sky First để xác minh trước khi tài khoản được kích hoạt.</p></div>
+            <div class="auth-heading"><span>ĐĂNG KÝ THÀNH VIÊN</span><h2>Đăng ký thành viên.</h2><p>Hồ sơ được gửi đến Sky First để xác minh trước khi tài khoản được kích hoạt.</p></div>
             <div class="register-preview"><div><b>01</b><span>Cá nhân &amp; định danh</span></div><div><b>02</b><span>Học tập &amp; công việc</span></div><div><b>03</b><span>Đơn vị Sky First</span></div><div><b>04</b><span>Xác minh &amp; cam kết</span></div></div>
             <button type="button" id="startRegistration" class="primary auth-submit">BẮT ĐẦU ĐĂNG KÝ <span>→</span></button>
             <button type="button" id="checkRequestRegister" class="link-button register-lookup">Tra cứu đăng ký đã gửi</button>
           </div>
           <div class="auth-trust"><span>Thông tin định danh được giới hạn quyền truy cập.</span><span>Tài khoản chỉ kích hoạt sau khi Sky First xác nhận.</span></div>
-          <div class="auth-ecosystem"><b>Hệ sinh thái Sky First</b><div>${portals()}</div></div>
+          <div class="auth-ecosystem">${portalMenu()}</div>
           <div class="auth-legal"><a href="/support.html">Hỗ trợ</a><a href="/privacy.html">Bảo mật</a><a href="/terms.html">Điều khoản</a></div>
         </div>
       </section>
@@ -1111,7 +1149,7 @@ function navButton(id,label){
 
 const VIEW_META={
   home:['Tổng quan','Không gian điều hành hành trình thành viên'],profile:['Hồ sơ của tôi','Định danh và thông tin thành viên'],journey:['Hành trình của tôi','Các cột mốc và đóng góp'],goals:['Mục tiêu & Tiến độ','Theo dõi mục tiêu cá nhân'],tasks:['Công việc','Nhiệm vụ và tiến độ'],activities:['Hoạt động','Các hoạt động đã tham gia'],certificates:['Chứng nhận','Kho chứng nhận đã xác minh'],achievements:['Thành tích & Ghi nhận','Những dấu mốc nổi bật'],evaluations:['Đánh giá của tôi','Kết quả và lịch sử đánh giá'],history:['Quá trình công tác','Vai trò và đơn vị theo thời gian'],documents:['Tài liệu của tôi','Tài liệu cá nhân và minh chứng'],cards:['Thẻ của tôi','Thẻ thành viên và xác minh QR'],cv:['CV / Hồ sơ năng lực','Hồ sơ năng lực một trang A4'],notifications:['Thông báo','Thông tin mới và việc cần chú ý'],calendar:['Lịch của tôi','Lịch hoạt động và lịch cá nhân'],security:['Bảo mật & Phiên đăng nhập','Thiết bị và phiên truy cập'],support:['Tài khoản & Hỗ trợ','Cài đặt và trung tâm hỗ trợ'],
-  'admin-issuance':['Cấp phát & thẻ','QR xác minh, thẻ thành viên và lịch sử cấp phát'], 'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-work':['Trung tâm công việc','Việc đang chờ xử lý và cảnh báo'], 'admin-reports':['Báo cáo & thống kê','Số liệu vận hành từ dữ liệu thật'], 'admin-super':['SUPER_ADMIN Center','Tổng quan và kiểm soát hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Điều chỉnh nội dung và số liệu'], 'admin-system':['Cấu hình hệ thống','Bộ lọc, an toàn và tình trạng dịch vụ']
+  'admin-issuance':['Cấp phát & thẻ','QR xác minh, thẻ thành viên và lịch sử cấp phát'], 'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-work':['Trung tâm công việc','Việc đang chờ xử lý và cảnh báo'], 'admin-reports':['Báo cáo & thống kê','Số liệu vận hành từ dữ liệu thật'], 'admin-super':['Quản trị cấp cao','Quản lý quyền quản trị và kiểm soát hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Điều chỉnh nội dung và số liệu'], 'admin-system':['Cấu hình hệ thống','Bộ lọc, an toàn và tình trạng dịch vụ']
 };
 function currentViewMeta(){return VIEW_META[state.view]||['Trung tâm thành viên số','Không gian quản trị Sky First'];}
 
@@ -1176,7 +1214,7 @@ function renderApp(){
           <div>
 
             <div class="side-brand-title">
-              TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST
+              <span data-site-name>TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</span>
             </div>
 
             <div class="side-brand-sub">
@@ -1344,7 +1382,7 @@ function renderApp(){
                       :''
                   }
 
-                  ${hasP('member.view')?navButton('admin-work','Trung tâm công việc')+navButton('admin-reports','Báo cáo & thống kê'):''}${state.me?.is_super?navButton('admin-super','SUPER_ADMIN Center')+navButton('admin-studio','Cấu hình giao diện & thống kê')+navButton('admin-system','Cấu hình hệ thống'):''}
+                  ${hasP('member.view')?navButton('admin-work','Trung tâm công việc')+navButton('admin-reports','Báo cáo & thống kê'):''}${state.me?.is_super?navButton('admin-super','Quản trị cấp cao')+navButton('admin-studio','Cấu hình giao diện & thống kê')+navButton('admin-system','Cấu hình hệ thống'):''}
 
                   </nav>
                 </section>
@@ -1357,7 +1395,7 @@ function renderApp(){
 
         <div class="sidebar-links">
 
-          ${portals()}
+          ${portalMenu()}
 
           <a href="mailto:support@skyfirst.io.vn">
             Hỗ trợ: support@skyfirst.io.vn
@@ -1742,7 +1780,7 @@ async function renderView(){
         <section class="dashboard-hero">
           <div class="dashboard-hero-glow"></div>
           <div class="dashboard-hero-copy">
-            <span class="hero-kicker">DIGITAL MEMBER IDENTITY · ${esc(statusVi(p.status)).toUpperCase()}</span>
+            <span class="hero-kicker">HỒ SƠ THÀNH VIÊN · ${esc(statusVi(p.status)).toUpperCase()}</span>
             <h1>Xin chào, ${esc(p.display_name||p.full_name)}.</h1>
             <p>Mọi vai trò, hoạt động và cột mốc của bạn được kết nối trong một hồ sơ số duy nhất.</p>
             <div class="hero-actions"><button class="primary" data-view-jump="profile">Hoàn thiện hồ sơ <span>→</span></button><button class="hero-ghost" data-view-jump="cards">Mở thẻ thành viên</button></div>
@@ -2446,15 +2484,15 @@ function cardQrSrc(x, size = 180){
 }
 
 function printCardWindow(x,p){
-  // V4 compatibility: printed card keeps class="photo" and class="qr" semantics through Card Studio.
+  // Giữ nguyên bố cục ảnh và mã QR khi in thẻ thành viên hiện có.
   if(!x?.verify_token){toast('Không thể in thẻ thiếu mã QR xác minh hợp lệ.','warn');return}
   const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});
-  openCardPrint({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t);
+  openCardPrint({...x,full_name:p?.full_name||x.full_name,photo_url:safeImageUrl(p?.avatar_url||x.photo_url,'')},t);
 }
 async function downloadMemberCard(x,p,side='front'){
   if(!x?.verify_token){toast('Thẻ chưa có QR xác minh.','warn');return}
   const t=templateFor({name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'});
-  await downloadCardPdf({...x,full_name:p?.full_name||x.full_name,photo_url:p?.avatar_url||x.photo_url},t);
+  await downloadCardPdf({...x,full_name:p?.full_name||x.full_name,photo_url:safeImageUrl(p?.avatar_url||x.photo_url,'')},t);
 }
 
 function renderCards(c){
@@ -2463,10 +2501,10 @@ function renderCards(c){
     const p=state.me.person;
     $('#cardsBox').outerHTML=`<div id="cardsBox" class="card-wallet">${d.items?.length?d.items.map(x=>`
       <div class="member-card ${cardClass(x)}" style="position:relative;min-height:294px;padding-right:126px;${cardClass(x)==='leadership'?'':`background:linear-gradient(135deg,#071b31,${cardTheme(x).accent})`}">
-        <img class="member-card-logo" src="${esc(cardTheme(x).logo_url)}" alt="Logo đơn vị / chương trình">
+        <img class="member-card-logo" src="${esc(safeImageUrl(cardTheme(x).logo_url,logo))}" alt="Logo đơn vị / chương trình">
         <div class="eyebrow">${esc(cardTheme(x).subtitle||'SKY FIRST NETWORK')}</div>
         <h3>${esc(x.card_type_name||'THẺ THÀNH VIÊN')}</h3>
-        <img src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh ${esc(p.full_name)}" style="width:82px;height:104px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.55);margin:7px 0">
+        <img src="${esc(safeImageUrl(p.avatar_url,'/sfn-logo.png'))}" alt="Ảnh ${esc(p.full_name)}" style="width:82px;height:104px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.55);margin:7px 0">
         <div style="font-size:18px;font-weight:850">${esc(p.full_name)}</div>
         <div class="small">${esc(p.member_code||'')}</div>
         <div class="small">${esc(x.card_number||'')} · ${esc(x.org_name||'Sky First Network')}</div>
@@ -2715,7 +2753,7 @@ function printOnePageCV({p,memberships,activities,certificates,achievements}){
   h2{font-size:10.5pt;color:#0d659e;letter-spacing:.06em;border-bottom:1px solid #b7dbf3;padding:0 0 6px;margin:9px 0}
   .entry{padding:6px 0;border-bottom:1px solid #edf2f6;break-inside:avoid}.entry b{display:block;font-size:9pt}.entry small{font-size:8pt;color:#607c92}.note{font-size:8pt;color:#698095}
   .footer{display:flex;justify-content:space-between;border-top:1px solid #d6e8f4;margin-top:9px;padding-top:8px;color:#6e8397;font-size:7.5pt}
-  </style></head><body><div class="sheet"><header class="head"><img src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh thành viên"><div><div style="font-size:8pt;letter-spacing:.11em">SKY FIRST NETWORK · HỒ SƠ NĂNG LỰC</div><div class="name">${name}</div><div class="id">${esc(p.member_code||'')}</div><p>${esc(role?.title||role?.role_label||'Thành viên')} · ${esc(role?.org_name||'Sky First Network')}</p></div></header>
+  </style></head><body><div class="sheet"><header class="head"><img src="${esc(safeImageUrl(p.avatar_url,'/sfn-logo.png'))}" alt="Ảnh thành viên"><div><div style="font-size:8pt;letter-spacing:.11em">SKY FIRST NETWORK · HỒ SƠ NĂNG LỰC</div><div class="name">${name}</div><div class="id">${esc(p.member_code||'')}</div><p>${esc(role?.title||role?.role_label||'Thành viên')} · ${esc(role?.org_name||'Sky First Network')}</p></div></header>
   <div class="intro"><div><b>Học tập / Công tác</b><br>${esc(p.school_or_workplace||'Chưa cập nhật')}<br><span class="note">${esc(p.class_or_major||'')}</span></div>${includeContact?`<div><b>Liên hệ</b><br>${esc(p.email||'')}<br>${esc(p.phone||'')}</div>`:'<div><b>Quyền riêng tư</b><br>Thông tin liên hệ được ẩn</div>'}</div>
   <main class="columns"><section><div class="group"><h2>VAI TRÒ & HÀNH TRÌNH</h2>${list(memberships,x=>`<div class="entry"><b>${esc(x.title||x.role_label||'Thành viên')}</b><span>${esc(x.org_name||'Sky First Network')}</span><br><small>${esc(x.started_at||'')} — ${esc(x.ended_at||'hiện tại')}</small></div>`,4)}</div><div class="group"><h2>THÀNH TÍCH & GHI NHẬN</h2>${list(achievements,x=>`<div class="entry"><b>${esc(x.title||'Ghi nhận')}</b><small>${esc(x.achieved_at||'')} · ${esc(x.issuer||'Sky First Network')}</small></div>`,3)}</div></section>
   <section><div class="group"><h2>HOẠT ĐỘNG TIÊU BIỂU</h2>${list(activities,x=>`<div class="entry"><b>${esc(x.name||'Hoạt động')}</b><small>${esc(x.role_label||'Thành viên')} · ${esc(x.starts_at||'')}</small></div>`,4)}</div><div class="group"><h2>CHỨNG NHẬN</h2>${list(certificates,x=>`<div class="entry"><b>${esc(x.title||'Chứng nhận')}</b><small>${esc(x.issuer||'Sky First Network')} · ${esc(x.issued_at||'')}</small></div>`,3)}</div></section></main>
@@ -3053,9 +3091,7 @@ function renderSupport(c){
           </a>
         </p>
 
-        <div class="portal-links">
-          ${portals()}
-        </div>
+        ${portalMenu()}
 
       </div>
 
@@ -6686,7 +6722,7 @@ if(tab==='membership'){
 
             <input
               name="file_url"
-              placeholder="https://..."
+              placeholder="Dán đường dẫn đến tệp PDF"
             >
           </label>
 
@@ -6901,7 +6937,7 @@ if(tab==='membership'){
                       ${esc(x.card_type_name)}
                     </h3>
 
-                    <img class="avatar large" src="${esc(p.avatar_url||'/sfn-logo.png')}" alt="Ảnh thành viên" style="width:88px;height:108px;object-fit:cover;border-radius:10px;margin:8px 0">
+                    <img class="avatar large" src="${esc(safeImageUrl(p.avatar_url,'/sfn-logo.png'))}" alt="Ảnh thành viên" style="width:88px;height:108px;object-fit:cover;border-radius:10px;margin:8px 0">
                     <img src="${esc(cardQrSrc(x,170))}" alt="QR xác minh" style="width:92px;height:92px;background:#fff;padding:4px;border-radius:8px;margin:8px">
                     <div><b>${esc(p.full_name)}</b></div>
 
@@ -7801,7 +7837,7 @@ function cardHtml(x,t,side='front',qrUrl=''){
     const lockedBack=side==='back'&&LOCKED_CARD_BACK_IDS.has(e.id);const fontFamily=['Arial','Verdana','Georgia','Tahoma'].includes(e.font)?e.font:'Arial';const style=`left:${xx}%;top:${yy}%;width:${w}%;height:${h}%;color:${safeCssColor(e.color,side==='front'?'#fff':'#173e5d')};font-family:${fontFamily},sans-serif;font-size:calc(${clamp(e.size,6,96)}px * var(--card-font-scale, 1));font-weight:${e.bold?800:500};text-align:${e.align||'left'};display:flex;align-items:center;justify-content:${e.align==='center'?'center':e.align==='right'?'flex-end':'flex-start'};line-height:1.2;position:absolute;overflow:hidden;`;
     if(e.kind==='qr'&&side==='back')return `<span class="sf-card-el" style="${style}">QR xác minh ở mặt trước</span>`;
     if(e.kind==='qr')return `<img class="sf-card-el sf-card-qr" style="${style}padding:2.2%;background:#fff;border-radius:6px;object-fit:contain" src="${esc(qrUrl)}" alt="QR xác minh">`;
-    if(e.kind==='photo')return x.photo_url?`<img class="sf-card-el" style="${style}object-fit:contain;border-radius:${clamp(e.radius,0,32)}px;background:transparent" src="${esc(x.photo_url)}" alt="Ảnh thành viên">`:'';
+    if(e.kind==='photo')return x.photo_url?`<img class="sf-card-el" style="${style}object-fit:contain;border-radius:${clamp(e.radius,0,32)}px;background:transparent" src="${esc(safeImageUrl(x.photo_url,''))}" alt="Ảnh thành viên">`:'';
     if(e.kind==='logo')return '';
     if(e.kind==='shape')return `<span class="sf-card-el" style="${style}background:${safeCssColor(e.color,'#ffffff')};border-radius:${clamp(e.radius,0,32)}px;opacity:${clamp(e.opacity,0,1)}"></span>`;
     return `<span class="sf-card-el ${lockedBack?'sf-card-locked':''}" style="${style}">${esc(text)}</span>`;
@@ -7831,7 +7867,7 @@ function cardSvg(x,t,side='front',qr=''){
       parts.push(`<rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="${rx}" fill="${color}" opacity="${clamp(e.opacity,0,1)}"/>`);continue;
     }
     if(['photo','logo','qr'].includes(e.kind)){
-      const src=e.kind==='qr'?qr:(e.kind==='photo'?x.photo_url:'');
+      const src=e.kind==='qr'?qr:(e.kind==='photo'?safeImageUrl(x.photo_url,''):'');
       const clipId=`clip${side}${i}`;
       parts.push(`<defs><clipPath id="${clipId}"><rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="${e.kind==='photo'?Math.min(rx,2):1}"/></clipPath></defs>`);
       if(e.kind==='qr')parts.push(`<rect x="${X}" y="${Y}" width="${W}" height="${H}" rx="1" fill="#ffffff"/>`);
@@ -7860,8 +7896,9 @@ async function fetchAsDataUrl(url, label='tài nguyên'){
   return await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result));fr.onerror=()=>reject(new Error(`Không thể đọc ${label}.`));fr.readAsDataURL(blob)});
 }
 async function fetchOptionalCardPhoto(url){
-  if(!url)return '';
-  try{return await fetchAsDataUrl(url,'ảnh thành viên')}
+  const local=safeImageUrl(url,'');
+  if(!local)return '';
+  try{return await fetchAsDataUrl(local,'ảnh thành viên')}
   catch(error){console.warn('Optional card photo unavailable; exporting without photo.',error);return ''}
 }
 async function exportCardAssets(x,t){
@@ -7901,33 +7938,6 @@ async function downloadCardPdf(x,t){
   const blob=makePdfFromImages(pages),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`the-${safe}-2-mat.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);toast(`Đã tải PDF hai mặt · ${size.width} × ${size.height} mm mỗi mặt.`);
 }
 function openCardPrint(x,t){downloadCardPdf(x,t).catch(e=>toast(e.message||'Không thể tạo PDF thẻ.','warn'))}
-async function mountCardDesignStudio(container,onTemplateCreated=null){
-  const d=await api('/api/admin/card-designs'); const items=d.items||[];
-  if(!items.length){container.insertAdjacentHTML('beforeend','<section class="card studio-design"><h2>Thiết kế thẻ</h2><p class="muted">Chưa có loại thẻ để thiết kế.</p></section>');return}
-  // Khởi tạo mẫu trước khi dựng HTML: template literal bên dưới cần đọc t.accent.
-  // Nếu khai báo t sau insertAdjacentHTML, JavaScript sẽ ném lỗi TDZ: Cannot access 't' before initialization.
-  let side='front',type=items[0],t=templateFor(type),selected=null;
-  container.insertAdjacentHTML('beforeend',`<section class="card studio-design"><div class="section-title"><div><div class="eyebrow">CARD STUDIO</div><h2>Thiết kế thẻ 2 mặt</h2><p class="muted">Kéo thả bố cục mặt trước và các họa tiết tùy chỉnh. Nội dung bắt buộc ở mặt sau được khóa để giữ hướng dẫn xác minh thống nhất; QR chỉ xuất hiện ở mặt trước.</p></div></div><div class="card-studio-shell"><aside class="card-studio-tools"><label>Loại thẻ<select id="csType">${items.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><div class="cs-new-template-row"><label>Tên mẫu mới<input id="csNewTemplateName" maxlength="100" placeholder="Ví dụ: Thẻ cộng tác viên"></label><button type="button" class="secondary" id="csCreateTemplate">Tạo mẫu</button></div><label>Chiều thẻ<select id="csOrientation"><option value="landscape">Ngang · 86 × 54 mm</option><option value="portrait">Dọc · 54 × 86 mm</option></select></label><label>Màu nền mặt trước<input id="csAccent" type="color" value="${safeCssColor(t.accent,'#1677d2')}"></label><div class="studio-side-tabs"><button class="primary" data-cs-side="front">Mặt trước</button><button class="secondary" data-cs-side="back">Mặt sau</button></div><div id="csElements"></div><div class="toolbar"><button class="secondary" data-add-el="text">+ Chữ</button><button class="secondary" data-add-el="shape">+ Họa tiết</button><button class="secondary" data-add-el="photo">+ Ảnh</button><button class="primary" id="csSave">Lưu mẫu</button></div><div id="csMsg" class="msg"></div></aside><div class="card-studio-preview-wrap"><div class="card-studio-preview" id="csPreview"></div><p class="muted">Chọn ngang 86 × 54 mm hoặc dọc 54 × 86 mm. QR chỉ ở mặt trước.</p></div></div></section>`);
-  const typeSel=$('#csType'),orientationSel=$('#csOrientation'),accentInput=$('#csAccent'),preview=$('#csPreview'),elements=$('#csElements');
-  const previewPerson={full_name:'NGUYỄN VĂN A',role_label:'Tình nguyện viên',event_name:'Sự kiện Sky First',card_number:'SFN-EVT-00000001',issued_at:'01/10/2026',expires_at:'31/10/2026',photo_url:''};
-  const syncPreview=()=>{
-    const size=cardPhysicalSize(t);preview.style.aspectRatio=`${size.width}/${size.height}`;preview.style.width=size.orientation==='portrait'?'min(100%, 350px)':'min(100%, 700px)';
-    const physicalCssWidth=size.width/25.4*96;const targetCssWidth=Math.min(preview.parentElement?.clientWidth||700,size.orientation==='portrait'?350:700);
-    preview.style.setProperty('--card-font-scale',String(Math.max(.65,targetCssWidth/physicalCssWidth)));
-    preview.innerHTML=cardHtml(previewPerson,t,side,cardQrSrc({verify_token:'PREVIEW'},600));
-  };
-  const redraw=()=>{type=items.find(x=>x.id===typeSel.value)||items[0];t=templateFor(type);orientationSel.value=cardPhysicalSize(t).orientation;accentInput.value=safeCssColor(t.accent,'#1677d2');syncPreview();renderElements();};
-  const renderElements=()=>{const arr=t[side]?.elements||[];elements.innerHTML=arr.map((e,i)=>{const locked=side==='back'&&LOCKED_CARD_BACK_IDS.has(e.id);return `<div class="cs-element ${selected===i?'selected':''} ${locked?'cs-element-locked':''}" data-cs-i="${i}"><div><b>${e.kind==='qr'?'QR':e.kind==='photo'?'Ảnh tùy chọn':e.kind==='logo'?'Logo cũ':e.kind==='shape'?'Họa tiết':'Chữ'}</b>${locked?'<span class="meta">Nội dung cố định</span>':e.kind==='qr'&&side==='front'?`<span class="meta">QR bắt buộc</span>`:`<button type="button" data-cs-del="${i}">×</button>`}</div>${e.kind==='text'?`<input data-cs-text="${i}" value="${esc(e.text||'')}" placeholder="Nội dung" ${locked?'disabled aria-label="Nội dung cố định"':''}>`:''}<div class="cs-mini-grid"><label>X<input data-cs-x="${i}" type="number" min="0" max="100" value="${e.x}" ${locked?'disabled':''}></label><label>Y<input data-cs-y="${i}" type="number" min="0" max="100" value="${e.y}" ${locked?'disabled':''}></label><label>Rộng<input data-cs-w="${i}" type="number" min="4" max="100" value="${e.w}" ${locked?'disabled':''}></label><label>Cao<input data-cs-h="${i}" type="number" min="4" max="100" value="${e.h}" ${locked?'disabled':''}></label></div>${e.kind==='text'?`<div class="cs-mini-grid"><label>Cỡ chữ<input data-cs-size="${i}" type="number" min="8" max="72" value="${e.size||10}" ${locked?'disabled':''}></label><label>Màu chữ<input data-cs-color="${i}" type="color" value="${safeCssColor(e.color,'#ffffff')}" ${locked?'disabled':''}></label></div><div class="cs-mini-grid"><label>Phông chữ<select data-cs-font="${i}" ${locked?'disabled':''}><option ${(!e.font||e.font==='Arial')?'selected':''}>Arial</option><option ${e.font==='Verdana'?'selected':''}>Verdana</option><option ${e.font==='Georgia'?'selected':''}>Georgia</option><option ${e.font==='Tahoma'?'selected':''}>Tahoma</option></select></label><label>Căn lề<select data-cs-align="${i}" ${locked?'disabled':''}><option value="left" ${(!e.align||e.align==='left')?'selected':''}>Trái</option><option value="center" ${e.align==='center'?'selected':''}>Giữa</option><option value="right" ${e.align==='right'?'selected':''}>Phải</option></select></label></div><label class="cs-bold-option"><input data-cs-bold="${i}" type="checkbox" ${e.bold?'checked':''} ${locked?'disabled':''}> Chữ đậm</label>`:e.kind==='shape'?`<label>Màu họa tiết<input data-cs-color="${i}" type="color" value="${safeCssColor(e.color,'#ffffff')}" ${locked?'disabled':''}></label>`:''}</div>`}).join('');
-    $$('[data-cs-del]').forEach(b=>b.onclick=()=>{arr.splice(Number(b.dataset.csDel),1);selected=null;redraw()});
-    ['text','x','y','w','h','size','color','font','align','bold'].forEach(k=>$$(`[data-cs-${k}]`).forEach(inp=>{const update=()=>{const key=`cs${k[0].toUpperCase()+k.slice(1)}`;const i=Number(inp.dataset[key]);if(!arr[i])return;if(k==='text')arr[i].text=inp.value;else if(k==='color'||k==='font'||k==='align')arr[i][k]=inp.value;else if(k==='bold')arr[i].bold=inp.checked;else arr[i][k]=Number(inp.value);syncPreview()};inp.oninput=update;inp.onchange=update}));
-    $$('.sf-card-el').forEach((el,i)=>{el.onpointerdown=e=>{const arr=t[side].elements;const idx=i;if(side==='back'&&LOCKED_CARD_BACK_IDS.has(arr[idx]?.id))return;const startX=e.clientX,startY=e.clientY,ox=Number(arr[idx].x),oy=Number(arr[idx].y);el.setPointerCapture?.(e.pointerId);const move=ev=>{const r=preview.getBoundingClientRect();arr[idx].x=Math.max(0,Math.min(100,ox+(ev.clientX-startX)/r.width*100));arr[idx].y=Math.max(0,Math.min(100,oy+(ev.clientY-startY)/r.height*100));syncPreview();};const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);renderElements()};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}});
-  };
-  $('#csCreateTemplate').onclick=async()=>{const name=$('#csNewTemplateName').value.trim(),button=$('#csCreateTemplate'),msg=$('#csMsg');if(!name){msg.textContent='Hãy nhập tên mẫu thẻ trước khi tạo.';$('#csNewTemplateName').focus();return}button.disabled=true;try{const result=await api('/api/admin/card-designs',{method:'POST',body:JSON.stringify({name})});const item=result.item;items.push(item);typeSel.insertAdjacentHTML('beforeend',`<option value="${esc(item.id)}">${esc(item.name)}</option>`);typeSel.value=item.id;$('#csNewTemplateName').value='';redraw();if(typeof onTemplateCreated==='function')onTemplateCreated(item);msg.textContent='Đã tạo và lưu mẫu mới. Bạn có thể chỉnh sửa rồi bấm “Lưu mẫu”.';toast('Đã tạo mẫu thẻ mới.')}catch(e){msg.textContent=e.data?.message||e.data?.error||e.message}finally{button.disabled=false}};
-  accentInput.oninput=()=>{t.accent=safeCssColor(accentInput.value,'#1677d2');syncPreview()};typeSel.onchange=redraw;orientationSel.onchange=()=>{autoLayoutCard(t,orientationSel.value);selected=null;syncPreview();renderElements()};$$('[data-cs-side]').forEach(b=>b.onclick=()=>{side=b.dataset.csSide;$$('[data-cs-side]').forEach(x=>x.className=x===b?'primary':'secondary');renderElements();syncPreview()});
-  $$('[data-add-el]').forEach(b=>b.onclick=()=>{const kind=b.dataset.addEl;const arr=t[side].elements;arr.push({id:'el_'+Date.now(),kind,text:kind==='text'?'Nội dung mới':'',x:10,y:10,w:35,h:10,color:side==='front'?'#ffffff':'#173e5d',size:kind==='text'?12:10,bold:false,align:'left',font:'Arial'});selected=arr.length-1;renderElements();syncPreview()});
-  $('#csSave').onclick=async()=>{const b=$('#csSave');b.disabled=true;try{const r=await api(`/api/admin/card-designs/${encodeURIComponent(type.id)}`,{method:'PUT',body:JSON.stringify({accent:t.accent||'#1677d2',subtitle:'',size:t.size,front:t.front,back:t.back,backTitle:t.backTitle})});type.template_json=JSON.stringify(r.template);toast('Đã lưu mẫu thẻ 2 mặt.');$('#csMsg').textContent='Đã lưu mẫu thiết kế.'}catch(e){$('#csMsg').textContent=e.data?.error||e.message}finally{b.disabled=false}};
-  redraw();
-}
 async function renderIssuanceStudio(c){
   c.innerHTML=`<div class="section-title"><div><div class="eyebrow">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div><h1>Cấp phát & thẻ</h1><p class="muted">Tách riêng QR xác minh cho thẻ thiết kế bên ngoài, thẻ thành viên chính thức và nghiệp vụ cấp phát sự kiện.</p></div></div>
   <section class="card issuance-panel"><div class="issuance-tabs issuance-nav-tabs" role="tablist" aria-label="Nhóm chức năng cấp phát">
@@ -7935,10 +7945,8 @@ async function renderIssuanceStudio(c){
     <button class="secondary" data-issuance-tab="qr" role="tab" aria-selected="false">Tạo QR xác minh</button>
     <button class="secondary" data-issuance-tab="members" role="tab" aria-selected="false">Thẻ thành viên</button>
     <button class="secondary" data-issuance-tab="history" role="tab" aria-selected="false">Lịch sử cấp phát</button>
-    <button class="secondary" data-issuance-tab="templates" role="tab" aria-selected="false">Mẫu thẻ & cấu hình</button>
   </div><div id="issuanceBody" aria-live="polite"><div class="empty">Đang tải dữ liệu…</div></div></section>`;
-  const body=$('#issuanceBody');let currentTypes=[];let designMounted=false;
-  try{currentTypes=(await api('/api/admin/card-designs')).items||[]}catch{}
+  const body=$('#issuanceBody');
   const statusLabel=v=>({active:'Đang hiệu lực',pending:'Chưa đến ngày cấp',expired:'Hết hiệu lực',revoked:'Đã thu hồi',used:'Đã sử dụng'}[v]||v||'—');
   const qrHref=x=>`/api/public/card-qr?size=600&code=${encodeURIComponent(x.verify_token||'')}`;
   async function downloadQrPng(tokenValue,fileName){
@@ -7967,48 +7975,85 @@ async function renderIssuanceStudio(c){
   };
   const showOverview=async()=>{
     body.innerHTML='<div class="empty">Đang tổng hợp số liệu thực tế…</div>';
-    try{const d=await api('/api/admin/issuance-overview');body.innerHTML=`<div class="grid issuance-kpi">${[['QR xác minh đã tạo',d.verification_qr.total],['QR đang hiệu lực',d.verification_qr.active],['QR chưa đến ngày cấp',d.verification_qr.pending],['QR hết hiệu lực',d.verification_qr.expired],['QR đã thu hồi',d.verification_qr.revoked],['Thẻ thành viên đang hiệu lực',d.member_cards.active],['Thẻ sắp hết hạn (30 ngày)',d.member_cards.expiring_30_days],['Thẻ sự kiện đã cấp',d.one_time.total],['Thẻ sự kiện đang hiệu lực',d.one_time.active]].map(([a,b])=>`<div class="card stat"><span>${esc(a)}</span><strong>${Number(b||0).toLocaleString('vi-VN')}</strong></div>`).join('')}</div><div class="card" style="margin-top:14px"><h2>Chọn nghiệp vụ</h2><div class="toolbar"><button class="primary" data-open-issuance="qr">Tạo QR cho thẻ bên ngoài</button><button class="secondary" data-open-issuance="members">Quản lý thẻ thành viên</button><button class="secondary" data-open-issuance="history">Xem lịch sử cấp phát</button><button class="secondary" data-open-issuance="templates">Thiết kế mẫu thẻ</button></div><p class="muted">QR độc lập không tạo thành viên. Thẻ thành viên chính thức lấy dữ liệu từ hồ sơ thành viên hiện có.</p></div>`;$$('[data-open-issuance]').forEach(b=>b.onclick=()=>showTab(b.dataset.openIssuance))}catch(e){body.innerHTML=`<div class="msg">Không tải được số liệu: ${esc(e.data?.message||e.data?.error||e.message)}</div>`}
+    try{const d=await api('/api/admin/issuance-overview');body.innerHTML=`<div class="grid issuance-kpi">${[['QR xác minh đã tạo',d.verification_qr.total],['QR đang hiệu lực',d.verification_qr.active],['QR chưa đến ngày cấp',d.verification_qr.pending],['QR hết hiệu lực',d.verification_qr.expired],['QR đã thu hồi',d.verification_qr.revoked],['Thẻ thành viên đang hiệu lực',d.member_cards.active],['Thẻ sắp hết hạn (30 ngày)',d.member_cards.expiring_30_days],['Thẻ sự kiện đã cấp',d.one_time.total],['Thẻ sự kiện đang hiệu lực',d.one_time.active]].map(([a,b])=>`<div class="card stat"><span>${esc(a)}</span><strong>${Number(b||0).toLocaleString('vi-VN')}</strong></div>`).join('')}</div><div class="card" style="margin-top:14px"><h2>Chọn nghiệp vụ</h2><div class="toolbar"><button class="primary" data-open-issuance="qr">Tạo QR cho thẻ bên ngoài</button><button class="secondary" data-open-issuance="members">Quản lý thẻ thành viên</button><button class="secondary" data-open-issuance="history">Xem lịch sử cấp phát</button></div><p class="muted">QR độc lập không tạo thành viên. Thẻ thành viên chính thức lấy dữ liệu từ hồ sơ thành viên hiện có.</p></div>`;$$('[data-open-issuance]').forEach(b=>b.onclick=()=>showTab(b.dataset.openIssuance))}catch(e){body.innerHTML=`<div class="msg">Không tải được số liệu: ${esc(e.data?.message||e.data?.error||e.message)}</div>`}
   };
   const showMemberCards=async()=>{
     body.innerHTML=`<div class="section-title"><div><h2>Thẻ thành viên chính thức</h2><p class="muted">Dữ liệu lấy từ hồ sơ thành viên hiện có. Không tạo thành viên mới tại mục này.</p></div><div class="toolbar"><input id="memberCardSearch" placeholder="Tìm tên, mã thành viên, số thẻ…"><button class="secondary" data-open-members-admin>Mở quản trị thành viên</button></div></div><div id="memberCardsRows"><div class="empty">Đang tải…</div></div>`;
     $$('[data-open-members-admin]').forEach(b=>b.onclick=()=>{const nav=$('[data-view-jump="admin-members"]'); if(nav)nav.click();else toast('Mở mục “Thành viên” trong menu quản trị để cấp thẻ cho hồ sơ đã chọn.','warn')});
     const search=$('#memberCardSearch');let timer;search.oninput=()=>{clearTimeout(timer);timer=setTimeout(fill,180)};await fill();
-    async function fill(){const host=$('#memberCardsRows');host.innerHTML='<div class="empty">Đang tải…</div>';try{const rows=await loadMemberCards(search.value.trim());host.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Thành viên</th><th>Đơn vị</th><th>Số thẻ</th><th>Loại thẻ</th><th>Hiệu lực</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.full_name)}</b><div class="meta">${esc(x.member_code||'—')}</div></td><td>${esc(x.org_name||'—')}</td><td>${esc(x.card_number)}</td><td>${esc(x.card_type_name||'—')}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td><span class="badge ${x.status==='active'?'ok':'off'}">${esc(statusLabel(x.status))}</span></td><td><button class="secondary" data-member-pdf="${esc(x.id)}" ${x.verify_token?'':'disabled'}>Tải PDF hai mặt</button><a class="secondary" href="/verify?code=${encodeURIComponent(x.verify_token||'')}" target="_blank" rel="noopener">Xác minh</a></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Không tìm thấy thẻ thành viên.</td></tr>'}</tbody></table></div>`;$$('[data-member-pdf]').forEach(b=>b.onclick=async()=>{const x=rows.find(y=>y.id===b.dataset.memberPdf);if(!x)return;const t=currentTypes.find(y=>y.id===x.card_type_id)||{template_json:x.card_template_json};b.disabled=true;try{await downloadCardPdf({...x,photo_url:x.avatar_url},templateFor(t))}catch(e){toast(e.message||'Không thể xuất PDF.','warn')}finally{b.disabled=false}})}catch(e){host.innerHTML=`<div class="msg">Không tải được thẻ thành viên: ${esc(e.data?.message||e.data?.error||e.message)}</div>`}}
+    async function fill(){const host=$('#memberCardsRows');host.innerHTML='<div class="empty">Đang tải…</div>';try{const rows=await loadMemberCards(search.value.trim());host.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Thành viên</th><th>Đơn vị</th><th>Số thẻ</th><th>Loại thẻ</th><th>Hiệu lực</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.full_name)}</b><div class="meta">${esc(x.member_code||'—')}</div></td><td>${esc(x.org_name||'—')}</td><td>${esc(x.card_number)}</td><td>${esc(x.card_type_name||'—')}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td><span class="badge ${x.status==='active'?'ok':'off'}">${esc(statusLabel(x.status))}</span></td><td><button class="secondary" data-member-pdf="${esc(x.id)}" ${x.verify_token?'':'disabled'}>Tải PDF hai mặt</button><a class="secondary" href="/verify?code=${encodeURIComponent(x.verify_token||'')}" target="_blank" rel="noopener">Xác minh</a></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Không tìm thấy thẻ thành viên.</td></tr>'}</tbody></table></div>`;$$('[data-member-pdf]').forEach(b=>b.onclick=async()=>{const x=rows.find(y=>y.id===b.dataset.memberPdf);if(!x)return;const t={name:x.card_type_name||'Thẻ thành viên',template_json:x.card_template_json||'{}'};b.disabled=true;try{await downloadCardPdf({...x,photo_url:safeImageUrl(x.avatar_url,'')},templateFor(t))}catch(e){toast(e.message||'Không thể xuất PDF.','warn')}finally{b.disabled=false}})}catch(e){host.innerHTML=`<div class="msg">Không tải được thẻ thành viên: ${esc(e.data?.message||e.data?.error||e.message)}</div>`}}
   };
   const showHistory=async()=>{
     body.innerHTML=`<div class="section-title"><div><h2>Lịch sử cấp phát</h2><p class="muted">Mỗi nhóm nghiệp vụ được hiển thị riêng; thu hồi một QR không làm thay đổi thẻ thành viên khác.</p></div><button class="primary" id="createEventCredential">Tạo thẻ sự kiện một lần</button></div><div id="eventCreateHost"></div><section class="card"><h3>A. Hồ sơ QR xác minh độc lập</h3><div id="historyQrRows" class="empty">Đang tải…</div></section><section class="card" style="margin-top:12px"><h3>B. Thẻ sự kiện / cấp phát một lần</h3><div id="historyEventRows" class="empty">Đang tải…</div></section><section class="card" style="margin-top:12px"><h3>C. Thẻ thành viên chính thức</h3><div id="historyMemberRows" class="empty">Đang tải…</div></section>`;
     $('#createEventCredential').onclick=()=>renderEventCreate($('#eventCreateHost'));
     try{const q=await loadQr();$('#historyQrRows').innerHTML=renderQrTable(q,true);await bindQrRevoke()}catch(e){$('#historyQrRows').textContent='Không tải được lịch sử QR: '+(e.data?.error||e.message)}
-    try{const rows=await loadOneTime();$('#historyEventRows').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Sự kiện</th><th>Số thẻ</th><th>Hiệu lực</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.full_name)}</td><td>${esc(x.event_name)}</td><td>${esc(x.card_number)}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td>${esc(statusLabel(x.status))}</td><td><button class="secondary" data-ot-pdf="${esc(x.id)}">Tải PDF hai mặt</button>${x.status==='active'?`<button class="danger" data-ot-revoke="${esc(x.id)}">Thu hồi</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có thẻ sự kiện.</td></tr>'}</tbody></table></div>`;$$('[data-ot-pdf]').forEach(b=>b.onclick=async()=>{const x=rows.find(v=>v.id===b.dataset.otPdf);if(!x)return;const type=currentTypes.find(v=>v.id===x.card_type_id)||{};b.disabled=true;try{await downloadCardPdf(x,templateFor(type))}catch(e){toast(e.message||'Không thể xuất PDF.','warn')}finally{b.disabled=false}});$$('[data-ot-revoke]').forEach(b=>b.onclick=async()=>{if(!confirm('Thu hồi thẻ sự kiện này?'))return;try{await api(`/api/admin/one-time-credentials/${encodeURIComponent(b.dataset.otRevoke)}/revoke`,{method:'POST',body:'{}'});toast('Đã thu hồi thẻ.');await showHistory()}catch(e){toast(e.data?.error||e.message,'warn')}})}catch(e){$('#historyEventRows').textContent='Không tải được lịch sử thẻ sự kiện: '+(e.data?.error||e.message)}
+    try{const rows=await loadOneTime();$('#historyEventRows').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Sự kiện</th><th>Số thẻ</th><th>Hiệu lực</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.full_name)}</td><td>${esc(x.event_name)}</td><td>${esc(x.card_number)}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td>${esc(statusLabel(x.status))}</td><td><button class="secondary" data-ot-pdf="${esc(x.id)}">Tải PDF hai mặt</button>${x.status==='active'?`<button class="danger" data-ot-revoke="${esc(x.id)}">Thu hồi</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có thẻ sự kiện.</td></tr>'}</tbody></table></div>`;$$('[data-ot-pdf]').forEach(b=>b.onclick=async()=>{const x=rows.find(v=>v.id===b.dataset.otPdf);if(!x)return;const type={name:x.card_type_name||'Thẻ sự kiện',template_json:x.card_template_json||'{}'};b.disabled=true;try{await downloadCardPdf(x,templateFor(type))}catch(e){toast(e.message||'Không thể xuất PDF.','warn')}finally{b.disabled=false}});$$('[data-ot-revoke]').forEach(b=>b.onclick=async()=>{if(!confirm('Thu hồi thẻ sự kiện này?'))return;try{await api(`/api/admin/one-time-credentials/${encodeURIComponent(b.dataset.otRevoke)}/revoke`,{method:'POST',body:'{}'});toast('Đã thu hồi thẻ.');await showHistory()}catch(e){toast(e.data?.error||e.message,'warn')}})}catch(e){$('#historyEventRows').textContent='Không tải được lịch sử thẻ sự kiện: '+(e.data?.error||e.message)}
     try{const rows=await loadMemberCards();$('#historyMemberRows').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Thành viên</th><th>Số thẻ</th><th>Ngày cấp</th><th>Trạng thái</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.full_name)} <span class="meta">${esc(x.member_code||'')}</span></td><td>${esc(x.card_number)}</td><td>${esc(x.issued_at||'—')}</td><td>${esc(statusLabel(x.status))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Chưa có thẻ thành viên.</td></tr>'}</tbody></table></div>`}catch(e){$('#historyMemberRows').textContent='Không tải được lịch sử thẻ thành viên: '+(e.data?.error||e.message)}
   };
   function renderEventCreate(host){
-    host.innerHTML=`<form id="oneTimeForm" class="card form-grid two" style="margin-bottom:12px"><h3 style="grid-column:1/-1">Tạo thẻ sự kiện một lần</h3><p class="muted" style="grid-column:1/-1">Đây vẫn là nghiệp vụ thẻ sự kiện riêng, không phải QR độc lập và không tạo tài khoản thành viên.</p><label>Họ và tên<input name="full_name" required maxlength="160"></label><label>Tên sự kiện / chương trình<input name="event_name" required maxlength="200"></label><label>Vai trò trên thẻ<input name="role_label" placeholder="Tình nguyện viên"></label><label>Số thẻ / mã cấp phát<input name="card_number" placeholder="Để trống để tự tạo"></label><label>Loại mẫu thẻ<select name="card_type_id">${currentTypes.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select></label><label>Ngày cấp<input name="issued_at" type="date" value="${vietnamDateInput()}"></label><label>Ngày hết hiệu lực<input name="expires_at" type="date"></label><label>Ảnh người nhận (URL, không bắt buộc)<input name="photo_url" placeholder="https://…"></label><label style="grid-column:1/-1">Ghi chú nội bộ<textarea name="notes" rows="2"></textarea></label><div class="toolbar" style="grid-column:1/-1"><button class="primary">Tạo thẻ sự kiện</button><button type="button" class="secondary" id="cancelEventCreate">Hủy</button></div><div id="oneTimeMsg" class="msg" style="grid-column:1/-1"></div></form>`;
+    host.innerHTML=`<form id="oneTimeForm" class="card form-grid two" style="margin-bottom:12px"><h3 style="grid-column:1/-1">Tạo thẻ sự kiện một lần</h3><p class="muted" style="grid-column:1/-1">Đây vẫn là nghiệp vụ thẻ sự kiện riêng, không phải QR độc lập và không tạo tài khoản thành viên.</p><label>Họ và tên<input name="full_name" required maxlength="160"></label><label>Tên sự kiện / chương trình<input name="event_name" required maxlength="200"></label><label>Vai trò trên thẻ<input name="role_label" placeholder="Tình nguyện viên"></label><label>Số thẻ / mã cấp phát<input name="card_number" placeholder="Để trống để tự tạo"></label><label>Ngày cấp<input name="issued_at" type="date" value="${vietnamDateInput()}"></label><label>Ngày hết hiệu lực<input name="expires_at" type="date"></label><label style="grid-column:1/-1">Ghi chú nội bộ<textarea name="notes" rows="2"></textarea></label><div class="toolbar" style="grid-column:1/-1"><button class="primary">Tạo thẻ sự kiện</button><button type="button" class="secondary" id="cancelEventCreate">Hủy</button></div><div id="oneTimeMsg" class="msg" style="grid-column:1/-1"></div></form>`;
     $('#cancelEventCreate').onclick=()=>{host.innerHTML=''};
     $('#oneTimeForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button.primary'),msg=$('#oneTimeMsg');b.disabled=true;msg.textContent='Đang lưu…';try{const payload=Object.fromEntries(new FormData(e.target));const d=await api('/api/admin/one-time-credentials',{method:'POST',body:JSON.stringify(payload)});msg.textContent='Đã tạo thẻ sự kiện '+d.card_number+'.';toast('Đã tạo thẻ sự kiện.');await showHistory();}catch(err){msg.textContent=err.data?.message||err.data?.error||err.message}finally{b.disabled=false}};
   }
-  const showTemplates=async()=>{body.innerHTML='<div id="issuanceDesignHost"><div class="empty">Đang tải mẫu thẻ…</div></div>';if(!designMounted){try{await mountCardDesignStudio($('#issuanceDesignHost'),item=>{if(!currentTypes.some(x=>x.id===item.id))currentTypes.push(item)});designMounted=true}catch(e){$('#issuanceDesignHost').innerHTML=`<div class="msg">Không mở được trình thiết kế: ${esc(e.data?.error||e.message)}</div>`}}};
-  async function showTab(tab){$$('[data-issuance-tab]').forEach(b=>{const active=b.dataset.issuanceTab===tab;b.className=active?'primary':'secondary';b.setAttribute('aria-selected',active?'true':'false')});try{if(tab==='overview')await showOverview();else if(tab==='qr')await showQr();else if(tab==='members')await showMemberCards();else if(tab==='history')await showHistory();else if(tab==='templates')await showTemplates();}catch(e){body.innerHTML=`<div class="msg">Không thể mở mục này: ${esc(e.data?.message||e.data?.error||e.message)}</div>`}}
+    async function showTab(tab){$$('[data-issuance-tab]').forEach(b=>{const active=b.dataset.issuanceTab===tab;b.className=active?'primary':'secondary';b.setAttribute('aria-selected',active?'true':'false')});try{if(tab==='overview')await showOverview();else if(tab==='qr')await showQr();else if(tab==='members')await showMemberCards();else if(tab==='history')await showHistory();}catch(e){body.innerHTML=`<div class="msg">Không thể mở mục này: ${esc(e.data?.message||e.data?.error||e.message)}</div>`}}
   $$('[data-issuance-tab]').forEach(b=>b.onclick=()=>showTab(b.dataset.issuanceTab));await showTab('overview');
 }
 
 async function renderPortalStudio(c){
-  c.innerHTML='<div class="section-title"><div><div class="eyebrow">SKY FIRST STUDIO</div><h1>Quản trị giao diện & số liệu</h1><p class="muted">Thay đổi và xuất bản nội dung trang đăng nhập mà không cần chỉnh mã nguồn.</p></div></div><div class="card">Đang tải cấu hình...</div>';
+  c.innerHTML='<div class="section-title"><div><h1>Cấu hình giao diện & thống kê</h1><p class="muted">Chỉnh sửa diện mạo, tên gọi, các liên kết và số liệu công khai ngay tại đây.</p></div></div><div class="card">Đang tải cấu hình...</div>';
   try{
     const [saved,published]=await Promise.all([api('/api/admin/portal-config'),api('/api/public/portal-config')]);
+    const settings=saved.settings||{},brand={siteName:'Trung Tâm Thành Viên Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,...(settings.brand||{})};
+    const links=Array.isArray(settings.links)&&settings.links.length===5?settings.links:PORTALS.map(([name,url,description])=>({name,url,description}));
     const fallbacks=[['members','Thành viên đang hoạt động'],['activities','Hoạt động đã tổ chức'],['units','Đơn vị trực thuộc'],['programs','Chương trình và dự án']];
-    const byKey=new Map((saved.settings?.stats||[]).map(x=>[x.key,x]));
-    c.innerHTML=`<div class="section-title"><div><div class="eyebrow">SKY FIRST STUDIO · SUPER ADMIN</div><h1>Cấu hình giao diện & thống kê</h1><p class="muted">Thống kê tự động dùng dữ liệu D1. Số liệu thủ công phải được kiểm chứng trước khi công bố.</p></div></div>
-    <form id="studioForm" class="card studio-form"><h2>Các chỉ số ở trang đăng nhập</h2><p class="muted">Thay đổi trực tiếp trong phần quản trị. Không cần deploy lại website.</p><div class="studio-grid">
-    ${fallbacks.map(([key,title])=>{const x=byKey.get(key)||{key,label:title,mode:key==='programs'?'manual':'auto',enabled:key!=='programs',value:null};return `<fieldset class="studio-stat" data-stat-key="${key}"><legend>${esc(title)}</legend><label>Tên hiển thị<input name="label" maxlength="75" value="${esc(x.label||title)}" required></label><label>Nguồn dữ liệu<select name="mode"><option value="auto" ${x.mode==='auto'?'selected':''} ${key==='programs'?'disabled':''}>Tự động từ D1</option><option value="manual" ${x.mode==='manual'?'selected':''}>Số liệu đã kiểm chứng (nhập tay)</option></select></label><label>Giá trị công bố<input name="value" type="number" min="0" max="1000000000" step="1" value="${x.value??''}" placeholder="Nhập số khi dùng thủ công"></label><label class="studio-check"><input type="checkbox" name="enabled" ${x.enabled!==false?'checked':''}> Hiển thị chỉ số</label></fieldset>`}).join('')}</div><label>Thông điệp bên dưới thống kê<textarea name="tagline" maxlength="190" rows="2">${esc(saved.settings?.tagline||published.tagline||'')}</textarea></label><div class="toolbar"><button class="primary" id="studioSave">Lưu và xuất bản</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div></form>`;
-    $('#studioForm').onsubmit=async e=>{e.preventDefault();const button=$('#studioSave'),msg=$('#studioMsg');button.disabled=true;msg.textContent='Đang lưu và xuất bản…';try{const form=e.target;const stats=[...form.querySelectorAll('[data-stat-key]')].map(el=>({key:el.dataset.statKey,label:el.querySelector('[name="label"]').value,mode:el.querySelector('[name="mode"]').value,value:el.querySelector('[name="value"]').value||null,enabled:el.querySelector('[name="enabled"]').checked}));await api('/api/admin/portal-config',{method:'PUT',body:JSON.stringify({stats,tagline:form.elements.tagline.value})});msg.textContent='Đã xuất bản cấu hình thành công.';toast('Đã cập nhật giao diện công khai.')}catch(err){msg.textContent='Không thể lưu: '+(err.data?.error||err.message)}finally{button.disabled=false}};
-    await mountCardDesignStudio(c);
-  }catch(err){c.innerHTML='<div class="card">Không thể tải cấu hình: '+esc(err.data?.error||err.message)+'</div>'}
+    const byKey=new Map((settings.stats||[]).map(x=>[x.key,x]));
+    c.innerHTML=`<div class="section-title"><div><h1>Cấu hình giao diện & thống kê</h1><p class="muted">Những thay đổi về nội dung và giao diện thông thường được áp dụng mà không cần sửa mã nguồn.</p></div></div>
+    <form id="studioForm" class="card studio-form">
+      <h2>Thương hiệu và giao diện</h2>
+      <div class="studio-grid">
+        <label>Tên hiển thị của nền tảng<input name="siteName" maxlength="100" value="${esc(brand.siteName)}" required></label>
+        <label>Kiểu chữ<select name="fontFamily"><option value="system" ${brand.fontFamily==='system'?'selected':''}>Kiểu chữ mặc định của thiết bị</option><option value="Arial" ${brand.fontFamily==='Arial'?'selected':''}>Arial</option><option value="Verdana" ${brand.fontFamily==='Verdana'?'selected':''}>Verdana</option><option value="Georgia" ${brand.fontFamily==='Georgia'?'selected':''}>Georgia</option><option value="Tahoma" ${brand.fontFamily==='Tahoma'?'selected':''}>Tahoma</option></select></label>
+        <label>Màu chính<input name="primaryColor" type="color" value="${/^#[0-9a-f]{6}$/i.test(brand.primaryColor)?brand.primaryColor:'#2563eb'}"></label>
+        <label>Màu nhấn<input name="accentColor" type="color" value="${/^#[0-9a-f]{6}$/i.test(brand.accentColor)?brand.accentColor:'#38bdf8'}"></label>
+        <label>Màu thanh điều hướng<input name="navColor" type="color" value="${/^#[0-9a-f]{6}$/i.test(brand.navColor)?brand.navColor:'#0b1220'}"></label>
+        <label>Cỡ chữ cơ bản<select name="baseFontSize">${[14,15,16,17,18,19,20].map(n=>`<option value="${n}" ${Number(brand.baseFontSize)===n?'selected':''}>${n} px</option>`).join('')}</select></label><label>Độ bo góc<select name="cornerRadius">${[8,12,16,18,20,24].map(n=>`<option value="${n}" ${Number(brand.cornerRadius)===n?'selected':''}>${n}</option>`).join('')}</select></label><label>Chiều rộng nội dung<select name="contentMaxWidth">${[1080,1200,1360,1500,1680].map(n=>`<option value="${n}" ${Number(brand.contentMaxWidth)===n?'selected':''}>${n}</option>`).join('')}</select></label>
+      </div>
+      <label>Logo đã tải lên hệ thống<input name="logoUrl" type="hidden" value="${esc(safeImageUrl(brand.logoUrl,'/sfn-logo.png'))}"></label>
+      <div class="toolbar"><input id="brandLogoFile" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Chọn tệp logo"><button type="button" class="secondary" id="uploadBrandLogo">Tải logo lên</button><span id="logoUploadMsg" class="muted">${brand.logoUrl==='/sfn-logo.png'?'Đang dùng logo mặc định.':'Đã có logo trong kho lưu trữ.'}</span></div>
+      <p class="muted">Chỉ chấp nhận ảnh JPG, PNG hoặc WebP tối đa 2 MB. Hệ thống lưu tệp và sử dụng đường dẫn nội bộ.</p>
+      <hr>
+      <h2>Liên kết hệ sinh thái Sky First</h2>
+      <p class="muted">Tên là phần hiển thị trên menu; địa chỉ chỉ dùng làm đích liên kết. Chỉ nhận website HTTPS thuộc tên miền Sky First.</p>
+      <div class="studio-grid">${links.map((x,i)=>`<fieldset class="studio-stat" data-portal-link="${i}"><legend>Nền tảng ${i+1}</legend><label>Tên thương hiệu<input name="name" maxlength="100" required value="${esc(x.name||'')}"></label><label>Địa chỉ website<input name="url" type="url" maxlength="300" required value="${esc(x.url||'')}"></label><label>Mô tả ngắn<input name="description" maxlength="140" value="${esc(x.description||'')}"></label></fieldset>`).join('')}</div>
+      <hr><h2>Thông điệp và số liệu ở trang đăng nhập</h2><div class="studio-grid">
+      ${fallbacks.map(([key,title])=>{const x=byKey.get(key)||{key,label:title,mode:key==='programs'?'manual':'auto',enabled:key!=='programs',value:null};return `<fieldset class="studio-stat" data-stat-key="${key}"><legend>${esc(title)}</legend><label>Tên hiển thị<input name="label" maxlength="75" value="${esc(x.label||title)}" required></label><label>Cách lấy số liệu<select name="mode"><option value="auto" ${x.mode==='auto'?'selected':''} ${key==='programs'?'disabled':''}>Tự động từ hệ thống</option><option value="manual" ${x.mode==='manual'?'selected':''}>Nhập số đã kiểm chứng</option></select></label><label>Giá trị công bố<input name="value" type="number" min="0" max="1000000000" step="1" value="${x.value??''}" placeholder="Chỉ dùng khi nhập thủ công"></label><label class="studio-check"><input type="checkbox" name="enabled" ${x.enabled!==false?'checked':''}> Hiển thị chỉ số</label></fieldset>`}).join('')}</div>
+      <label>Thông điệp bên dưới thống kê<textarea name="tagline" maxlength="190" rows="2">${esc(settings.tagline||published.tagline||'')}</textarea></label>
+      <div class="toolbar"><button class="primary" id="studioSave">Lưu thay đổi</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div>
+    </form>`;
+    const form=$('#studioForm');
+    $('#uploadBrandLogo').onclick=async()=>{
+      const file=$('#brandLogoFile').files?.[0],msg=$('#logoUploadMsg'),button=$('#uploadBrandLogo');
+      if(!file){msg.textContent='Hãy chọn tệp ảnh trước.';return}
+      if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){msg.textContent='Chỉ nhận JPG, PNG hoặc WebP tối đa 2 MB.';return}
+      button.disabled=true;msg.textContent='Đang tải ảnh lên…';
+      try{const response=await fetch('/api/admin/site-assets',{method:'POST',credentials:'same-origin',headers:{'content-type':file.type},body:file});const result=await response.json().catch(()=>({}));if(!response.ok||!result.url)throw new Error(result.message||result.error||'Chưa tải được ảnh lên.');form.elements.logoUrl.value=safeImageUrl(result.url,'/sfn-logo.png');msg.textContent='Đã tải ảnh lên kho lưu trữ. Bấm “Lưu thay đổi” để áp dụng.';toast('Đã tải logo lên hệ thống.')}catch(err){msg.textContent=err.message||'Không tải được logo.'}finally{button.disabled=false}
+    };
+    form.onsubmit=async e=>{
+      e.preventDefault();const button=$('#studioSave'),msg=$('#studioMsg');button.disabled=true;msg.textContent='Đang lưu thay đổi…';
+      try{
+        const stats=[...form.querySelectorAll('[data-stat-key]')].map(el=>({key:el.dataset.statKey,label:el.querySelector('[name="label"]').value,mode:el.querySelector('[name="mode"]').value,value:el.querySelector('[name="value"]').value||null,enabled:el.querySelector('[name="enabled"]').checked}));
+        const links=[...form.querySelectorAll('[data-portal-link]')].map(el=>({name:el.querySelector('[name="name"]').value,url:el.querySelector('[name="url"]').value,description:el.querySelector('[name="description"]').value}));
+        const brand={siteName:form.elements.siteName.value,logoUrl:form.elements.logoUrl.value,primaryColor:form.elements.primaryColor.value,accentColor:form.elements.accentColor.value,navColor:form.elements.navColor.value,fontFamily:form.elements.fontFamily.value,baseFontSize:Number(form.elements.baseFontSize.value),cornerRadius:Number(form.elements.cornerRadius.value),contentMaxWidth:Number(form.elements.contentMaxWidth.value)};
+        await api('/api/admin/portal-config',{method:'PUT',body:JSON.stringify({stats,tagline:form.elements.tagline.value,brand,links})});
+        const refreshed=await api('/api/public/portal-config');applyPortalConfig(refreshed);msg.textContent='Đã lưu và áp dụng cấu hình.';toast('Đã cập nhật giao diện và các liên kết.');
+      }catch(err){msg.textContent='Không thể lưu thay đổi: '+(err.data?.message||err.data?.error||err.message)}finally{button.disabled=false}
+    };
+  }catch(err){c.innerHTML='<div class="card">Không thể tải cấu hình: '+esc(err.data?.message||err.data?.error||err.message)+'</div>'}
 }
 
 async function renderSuperAdmin(c){
-  c.innerHTML=`<h1>SUPER_ADMIN Center</h1><div id="superBox" class="card">Đang tải...</div>`;
-  try{const d=await api('/api/admin/super/overview');const s=d.stats;c.innerHTML=`<div class="section-title"><h1>SUPER_ADMIN Center</h1></div><div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">${[['Thành viên',s.people],['Tài khoản',s.accounts],['Đơn vị',s.orgs],['Yêu cầu chờ',s.pending_requests],['Thẻ hiệu lực',s.active_cards],['GCN xác minh',s.verified_certificates]].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div><div class="card" style="margin-top:14px"><h2>Kiểm tra quyền tài khoản</h2><select id="inspectAccount"><option value="">Chọn tài khoản</option>${d.accounts.map(a=>`<option value="${a.id}">${esc(a.username)} · ${esc(a.full_name||a.member_code||'')}</option>`).join('')}</select><button id="inspectBtn" class="secondary">Kiểm tra quyền</button><div id="inspectResult" style="margin-top:12px"></div></div><div class="card" style="margin-top:14px"><h2>Tài khoản gần đây</h2><div class="table-wrap"><table><thead><tr><th>Tài khoản</th><th>Thành viên</th><th>Đăng nhập cuối</th><th>Trạng thái</th></tr></thead><tbody>${d.accounts.map(a=>`<tr><td>${esc(a.username)}</td><td>${esc(a.full_name||'—')}</td><td>${esc(a.last_login_at||'—')}</td><td>${a.is_locked?'Đang khóa':'Hoạt động'}</td></tr>`).join('')}</tbody></table></div></div>`;$('#inspectBtn').onclick=async()=>{const id=$('#inspectAccount').value;if(!id)return;const x=await api('/api/admin/super/inspect-account/'+encodeURIComponent(id));$('#inspectResult').innerHTML=`<b>ROLE + SCOPE</b>${x.scopes.map(v=>`<div>${esc(v.role_name)} · ${esc(v.org_name||'Toàn hệ thống')} · ${v.active?'Hiệu lực':'Ngừng'}</div>`).join('')||'<div>Không có scope.</div>'}<br><b>PERMISSION</b>${x.permissions.map(v=>`<div>${esc(v.code)} ← ${esc(v.role_code)}</div>`).join('')||'<div>Không có permission.</div>'}`};}catch(e){$('#superBox')&&($('#superBox').textContent='Không thể tải SUPER_ADMIN Center: '+(e.data?.error||e.message));}
+  c.innerHTML=`<h1>Quản trị cấp cao</h1><div id="superBox" class="card">Đang tải...</div>`;
+  try{const d=await api('/api/admin/super/overview');const s=d.stats;c.innerHTML=`<div class="section-title"><h1>Quản trị cấp cao</h1></div><div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">${[['Thành viên',s.people],['Tài khoản',s.accounts],['Đơn vị',s.orgs],['Yêu cầu chờ',s.pending_requests],['Thẻ hiệu lực',s.active_cards],['GCN xác minh',s.verified_certificates]].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div><div class="card" style="margin-top:14px"><h2>Kiểm tra quyền tài khoản</h2><select id="inspectAccount"><option value="">Chọn tài khoản</option>${d.accounts.map(a=>`<option value="${a.id}">${esc(a.username)} · ${esc(a.full_name||a.member_code||'')}</option>`).join('')}</select><button id="inspectBtn" class="secondary">Kiểm tra quyền</button><div id="inspectResult" style="margin-top:12px"></div></div><div class="card" style="margin-top:14px"><h2>Tài khoản gần đây</h2><div class="table-wrap"><table><thead><tr><th>Tài khoản</th><th>Thành viên</th><th>Đăng nhập cuối</th><th>Trạng thái</th></tr></thead><tbody>${d.accounts.map(a=>`<tr><td>${esc(a.username)}</td><td>${esc(a.full_name||'—')}</td><td>${esc(a.last_login_at||'—')}</td><td>${a.is_locked?'Đang khóa':'Hoạt động'}</td></tr>`).join('')}</tbody></table></div></div>`;$('#inspectBtn').onclick=async()=>{const id=$('#inspectAccount').value;if(!id)return;const x=await api('/api/admin/super/inspect-account/'+encodeURIComponent(id));$('#inspectResult').innerHTML=`<b>Vai trò và phạm vi</b>${x.scopes.map(v=>`<div>${esc(v.role_name)} · ${esc(v.org_name||'Toàn hệ thống')} · ${v.active?'Hiệu lực':'Ngừng'}</div>`).join('')||'<div>Không có scope.</div>'}<br><b>Quyền thao tác</b>${x.permissions.map(v=>`<div>${esc(v.code)} ← ${esc(v.role_code)}</div>`).join('')||'<div>Không có permission.</div>'}`};}catch(e){$('#superBox')&&($('#superBox').textContent='Không thể tải Quản trị cấp cao: '+(e.data?.error||e.message));}
 }
 
 async function renderAdminOrg(c){
@@ -8580,7 +8625,7 @@ async function renderAdminReports(c){
 }
 
 async function renderAdminSystem(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">SUPER_ADMIN</div><h1>Cấu hình hệ thống</h1><p class="muted">Các thiết lập vận hành, bộ lọc đã lưu và tình trạng dịch vụ.</p></div></div><div class="section-grid"><div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu bộ lọc quản trị để không phải chọn lại mỗi lần.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div><div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div></div>`;
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ CẤP CAO</div><h1>Cấu hình hệ thống</h1><p class="muted">Các thiết lập vận hành, bộ lọc đã lưu và tình trạng dịch vụ.</p></div></div><div class="section-grid"><div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu bộ lọc quản trị để không phải chọn lại mỗi lần.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div><div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div></div>`;
   const refresh=async()=>{const [f,h]=await Promise.all([api('/api/admin/saved-filters'),api('/api/admin/system-health')]);$('#savedFilters').innerHTML=(f.items||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div class="meta">${esc(x.view)} · ${esc(x.query||'Không có điều kiện')}</div></div><button class="danger" data-filter-del="${esc(x.id)}">Xóa</button></div>`).join('')||'<div class="empty">Chưa có bộ lọc đã lưu.</div>';$('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b>${h.database==='ok'?'Hoạt động':'Có lỗi'}</b></div><div class="list-row"><span>Phiên bản lược đồ</span><b>${esc(h.schema_version||'—')}</b></div><div class="list-row"><span>Kho tệp</span><b>${h.r2_binding?'Đã khai báo':'Chưa kiểm tra kết nối'}</b></div><div class="list-row"><span>Email</span><b>${h.email_binding?'Đã khai báo':'Chưa kiểm tra kết nối'}</b></div><div class="meta" style="margin-top:10px">Không đánh dấu PASS cho dịch vụ chưa thực sự được kiểm chứng.</div>`;$$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()})};
   $('#savedFilterForm').onsubmit=async e=>{e.preventDefault();const x=Object.fromEntries(new FormData(e.target));await api('/api/admin/saved-filters',{method:'POST',body:JSON.stringify(x)});e.target.reset();toast('Đã lưu bộ lọc.');await refresh()}; await refresh();
 }

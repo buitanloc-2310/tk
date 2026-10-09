@@ -430,6 +430,51 @@ function verifyCode(prefix='SFN'){
     .slice(0,12)
     .toUpperCase()}`;
 }
+function withSecurityHeaders(response){
+  const headers=new Headers(response.headers);
+  headers.set('x-content-type-options','nosniff');
+  headers.set('x-frame-options','DENY');
+  headers.set('referrer-policy','strict-origin-when-cross-origin');
+  headers.set('permissions-policy','camera=(), microphone=(), geolocation=()');
+  headers.set('content-security-policy',"default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:");
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+const DEFAULT_PORTAL_LINKS=[
+  {name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức của Sky First'},
+  {name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin, chương trình và tiện ích số'},
+  {name:'Trung Tâm Tình Nguyện Viên Sky First',url:'https://tnv.skyfirst.io.vn/',description:'Hoạt động tình nguyện và cộng đồng'},
+  {name:'Trung Tâm Học Tập Số Sky First',url:'https://slc.skyfirst.io.vn/',description:'Học tập và lớp học trực tuyến'},
+  {name:'Trung Tâm Thư Điện Tử Sky First',url:'https://mail.skyfirst.io.vn/',description:'Dịch vụ thư điện tử'}
+];
+const DEFAULT_PORTAL_BRAND={siteName:'Trung Tâm Thành Viên Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,cornerRadius:18,contentMaxWidth:1500};
+function safeSkyFirstUrl(value){try{const u=new URL(String(value||''));return u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='skyfirst.io.vn'||u.hostname.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}}
+function portalLinksFromSettings(candidates){
+  if(!Array.isArray(candidates)||candidates.length!==DEFAULT_PORTAL_LINKS.length)return DEFAULT_PORTAL_LINKS.map(x=>({...x}));
+  const oldNames=new Set(['cổng chính sky first network','cổng thông tin','cổng sfn','cổng sfec','lớp học trực tuyến','cổng tình nguyện viên','cổng thư điện tử']);
+  return DEFAULT_PORTAL_LINKS.map(fallback=>{
+    const item=candidates.find(x=>{const u=safeSkyFirstUrl(x?.url);if(!u)return false;try{return new URL(u).hostname===new URL(fallback.url).hostname}catch{return false}});
+    if(!item)return {...fallback};
+    const rawName=clean(item.name,100),name=rawName&&!oldNames.has(rawName.toLocaleLowerCase('vi-VN'))?rawName:fallback.name;
+    return {name,url:safeSkyFirstUrl(item.url)||fallback.url,description:clean(item.description,140)||fallback.description};
+  });
+}
+function localImagePath(value,fallback='/sfn-logo.png'){const p=clean(value,1200);if(p==='/sfn-logo.png')return p;if(/^\/files\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp)$/i.test(p)&&!p.includes('..')&&!p.includes('\\')&&!p.includes('//'))return p;return fallback}
+function localBrandImagePath(value,fallback='/sfn-logo.png'){const p=clean(value,1200);if(p==='/sfn-logo.png')return p;return /^\/files\/site-assets\/[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\.(?:png|jpg|webp)$/i.test(p)?p:fallback}
+
+function validUploadedImage(bytes,contentType){
+  if(contentType==='image/png'){
+    if(bytes.length<33||![137,80,78,71,13,10,26,10].every((n,i)=>bytes[i]===n))return false;
+    if(String.fromCharCode(...bytes.slice(12,16))!=='IHDR')return false;
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    const width=view.getUint32(16),height=view.getUint32(20);
+    return width>0&&height>0&&width<=8192&&height<=8192&&width*height<=32000000;
+  }
+  if(contentType==='image/jpeg')return bytes.length>=20&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255&&bytes[bytes.length-2]===255&&bytes[bytes.length-1]===217;
+  if(contentType==='image/webp')return bytes.length>=30&&String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP'&&['VP8 ','VP8L','VP8X'].includes(String.fromCharCode(...bytes.slice(12,16)))&&new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint32(4,true)<=bytes.length-8;
+  return false;
+}
+
+
 
 async function api(req,env,url){
 
@@ -455,12 +500,24 @@ async function api(req,env,url){
     for(const row of stats){
       let value=null;
       if(row.mode==='manual')value=Number.isSafeInteger(row.value)&&row.value>=0?row.value:null;
-      else if(countQueries[row.key]){
-        try{value=Number((await env.DB.prepare(countQueries[row.key]).first())?.n||0)}catch{value=null}
-      }
+      else if(countQueries[row.key]){try{value=Number((await env.DB.prepare(countQueries[row.key]).first())?.n||0)}catch{value=null}}
       if(value!==null)results.push({key:row.key,label:clean(row.label,75),value,mode:row.mode==='manual'?'manual':'auto'});
     }
-    return json({stats:results,tagline:clean(settings.tagline||'Mỗi thành viên là một hành trình. Mỗi đóng góp tạo nên một Sky First lớn mạnh hơn.',190),updated_at:cfg?.updated_at||null});
+    const savedBrand=settings.brand&&typeof settings.brand==='object'?settings.brand:{};
+    const brand={
+      ...DEFAULT_PORTAL_BRAND,
+      siteName:clean(savedBrand.siteName||settings.siteName||DEFAULT_PORTAL_BRAND.siteName,100)||DEFAULT_PORTAL_BRAND.siteName,
+      logoUrl:localBrandImagePath(savedBrand.logoUrl||settings.logoUrl||DEFAULT_PORTAL_BRAND.logoUrl),
+      primaryColor:/^#[a-f0-9]{6}$/i.test(savedBrand.primaryColor||'')?savedBrand.primaryColor:DEFAULT_PORTAL_BRAND.primaryColor,
+      accentColor:/^#[a-f0-9]{6}$/i.test(savedBrand.accentColor||'')?savedBrand.accentColor:DEFAULT_PORTAL_BRAND.accentColor,
+      navColor:/^#[a-f0-9]{6}$/i.test(savedBrand.navColor||'')?savedBrand.navColor:DEFAULT_PORTAL_BRAND.navColor,
+      fontFamily:['Arial','Verdana','Georgia','Tahoma','system'].includes(savedBrand.fontFamily)?savedBrand.fontFamily:DEFAULT_PORTAL_BRAND.fontFamily,
+      baseFontSize:Number.isInteger(Number(savedBrand.baseFontSize))&&Number(savedBrand.baseFontSize)>=14&&Number(savedBrand.baseFontSize)<=20?Number(savedBrand.baseFontSize):16,
+      cornerRadius:Number.isInteger(Number(savedBrand.cornerRadius))&&Number(savedBrand.cornerRadius)>=8&&Number(savedBrand.cornerRadius)<=24?Number(savedBrand.cornerRadius):18,
+      contentMaxWidth:Number.isInteger(Number(savedBrand.contentMaxWidth))&&Number(savedBrand.contentMaxWidth)>=1080&&Number(savedBrand.contentMaxWidth)<=1680?Number(savedBrand.contentMaxWidth):1500
+    };
+    const links=portalLinksFromSettings(settings.links);
+    return json({stats:results,tagline:clean(settings.tagline||'Mỗi thành viên là một hành trình. Mỗi đóng góp tạo nên một Sky First lớn mạnh hơn.',190),brand,links,updated_at:cfg?.updated_at||null});
   }
 
   if(url.pathname==='/api/setup/status'&&req.method==='GET'){
@@ -767,7 +824,7 @@ async function api(req,env,url){
           card.status==='active'&&
           (!card.expires_at||
             card.expires_at>=dateInVietnam()),
-        record:card
+        record:{...card,avatar_url:localImagePath(card.avatar_url)}
       });
     }
 
@@ -780,7 +837,6 @@ async function api(req,env,url){
         o.event_name,
         o.full_name,
         o.role_label,
-        o.photo_url,
         t.name card_type_name
       FROM one_time_credentials o
       LEFT JOIN card_types t ON t.id=o.card_type_id
@@ -1355,7 +1411,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(url.pathname==='/api/admin/one-time-credentials'&&['GET','POST'].includes(req.method)){
     if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
     if(req.method==='GET'){
-      const r=await env.DB.prepare(`SELECT o.*,t.name card_type_name FROM one_time_credentials o LEFT JOIN card_types t ON t.id=o.card_type_id ORDER BY o.created_at DESC LIMIT 250`).all();
+      const r=await env.DB.prepare(`SELECT o.id,o.credential_type,o.event_name,o.full_name,o.role_label,o.card_number,o.issued_at,o.expires_at,o.status,o.verify_token,o.card_type_id,o.notes,o.created_by_account_id,o.created_at,o.updated_at,t.name card_type_name,t.template_json card_template_json FROM one_time_credentials o LEFT JOIN card_types t ON t.id=o.card_type_id ORDER BY o.created_at DESC LIMIT 250`).all();
       return json({items:r.results||[]});
     }
     const b=await bodyJson(req);
@@ -1376,7 +1432,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     }
     const status=['active','used','expired','revoked'].includes(b.status)?b.status:'active';
     try{
-      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,clean(b.photo_url,500)||null,cardNumber,clean(b.issued_at,20)||dateInVietnam(),clean(b.expires_at,20)||null,status,verify,clean(b.card_type_id,80)||null,clean(b.notes,1000)||null,s.account_id).run();
+      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,null,cardNumber,clean(b.issued_at,20)||dateInVietnam(),clean(b.expires_at,20)||null,status,verify,null,clean(b.notes,1000)||null,s.account_id).run();
     }catch(e){return json({error:String(e).includes('UNIQUE')?'CARD_NUMBER_ALREADY_USED':'CREATE_FAILED'},400)}
     await safeAudit(env,s.account_id,'one_time_credential_issued','one_time_credential',id,null,{event_name:eventName,card_number:cardNumber});
     return json({ok:true,id,verify_token:verify,card_number:cardNumber});
@@ -1394,112 +1450,84 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     return json({ok:true,status:next});
   }
 
-  if(url.pathname==='/api/admin/card-designs'&&['GET','POST'].includes(req.method)){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
-    if(req.method==='GET'){
-      const r=await env.DB.prepare('SELECT id,code,name,template_json,active FROM card_types ORDER BY name').all();
-      return json({items:r.results||[]});
-    }
-    const b=await bodyJson(req),name=clean(b.name,100);
-    if(!name)return json({error:'TEMPLATE_NAME_REQUIRED',message:'Hãy nhập tên mẫu thẻ.'},400);
-    const duplicate=await env.DB.prepare('SELECT id FROM card_types WHERE lower(name)=lower(?) LIMIT 1').bind(name).first();
-    if(duplicate)return json({error:'TEMPLATE_NAME_ALREADY_USED',message:'Tên mẫu thẻ đã tồn tại.'},409);
-    let code='';
-    for(let attempt=0;attempt<12;attempt++){
-      const bytes=new Uint8Array(4);crypto.getRandomValues(bytes);
-      const candidate='SFN-CUSTOM-'+hex(bytes).toUpperCase();
-      const exists=await env.DB.prepare('SELECT 1 FROM card_types WHERE code=? LIMIT 1').bind(candidate).first();
-      if(!exists){code=candidate;break}
-    }
-    if(!code)return json({error:'TEMPLATE_CODE_GENERATION_FAILED',message:'Chưa tạo được mã mẫu duy nhất. Vui lòng thử lại.'},503);
-    const id=uid('card_type');
-    const template={version:3,accent:'#1677d2',subtitle:'',size:{width_mm:86,height_mm:54},backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG',front:{elements:[
-      {id:'title',kind:'text',text:'THẺ THÀNH VIÊN',x:5,y:12,w:61,h:10,color:'#ffffff',size:17,bold:true,align:'left',font:'Arial'},
-      {id:'name',kind:'text',text:'{{full_name}}',x:5,y:27,w:61,h:9,color:'#ffffff',size:13,bold:true,align:'left',font:'Arial'},
-      {id:'role',kind:'text',text:'{{title_on_card}}',x:5,y:38,w:61,h:7,color:'#dceeff',size:9,bold:false,align:'left',font:'Arial'},
-      {id:'number',kind:'text',text:'{{card_number}}',x:5,y:47,w:61,h:5,color:'#ffffff',size:6,bold:false,align:'left',font:'Arial'},
-      {id:'qr',kind:'qr',text:'',x:72,y:20,w:21,h:27,color:'#ffffff',size:8,bold:false,align:'center',font:'Arial'}
-    ]},back:{elements:lockedCardBackElements('landscape')}};
-    try{
-      await env.DB.prepare('INSERT INTO card_types(id,code,name,description,template_json,active) VALUES(?,?,?,?,?,1)').bind(id,code,name,'Mẫu thẻ được tạo trong Card Studio',JSON.stringify(template)).run();
-    }catch(e){const msg=String(e?.message||e);return json({error:msg.includes('UNIQUE')?'TEMPLATE_ALREADY_EXISTS':'TEMPLATE_CREATE_FAILED',message:msg.includes('UNIQUE')?'Tên hoặc mã mẫu đã tồn tại.':'Không lưu được mẫu thẻ. Vui lòng thử lại.'},msg.includes('UNIQUE')?409:500)}
-    await safeAudit(env,s.account_id,'card_template_created','card_type',id,null,{code,name});
-    return json({ok:true,item:{id,code,name,description:'Mẫu thẻ được tạo trong Card Studio',template_json:JSON.stringify(template),active:1}},201);
+  if(url.pathname==='/api/admin/card-designs'||url.pathname.startsWith('/api/admin/card-designs/')){
+    return json({error:'FEATURE_REMOVED',message:'Chức năng thiết kế và quản lý mẫu thẻ đã được gỡ bỏ. Nghiệp vụ cấp phát, tải tài liệu và xác minh vẫn được giữ.'},410);
   }
-  const designer=url.pathname.match(/^\/api\/admin\/card-designs\/([^/]+)(?:\/(logo))?$/);
-  if(designer){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
-    const id=decodeURIComponent(designer[1]);
-    const row=await env.DB.prepare('SELECT id,template_json FROM card_types WHERE id=?').bind(id).first();
-    if(!row)return json({error:'CARD_TYPE_NOT_FOUND'},404);
-    let previous={};try{previous=JSON.parse(row.template_json||'{}')}catch{}
-    if(designer[2]==='logo')return json({error:'LOGO_UPLOAD_REMOVED',message:'Tải logo cho mẫu thẻ đã được loại bỏ theo cấu hình hiện tại.'},410);
-    if(req.method==='PUT'){
-      const input=await bodyJson(req),accent=clean(input.accent,7),subtitle=clean(input.subtitle,90);
-      if(!/^#[a-f0-9]{6}$/i.test(accent))return json({error:'INVALID_ACCENT'},400);
-      const sanitizeElements=(arr,side='front')=>{
-        if(!Array.isArray(arr))return [];
-        return arr.filter(x=>x?.kind!=='logo').slice(0,40).map((x,i)=>{
-          const kind=['text','photo','qr','shape'].includes(x.kind)?x.kind:'text';
-          const w=Number.isFinite(Number(x.w))?Math.max(4,Math.min(100,Number(x.w))):30;
-          const h=Number.isFinite(Number(x.h))?Math.max(4,Math.min(100,Number(x.h))):10;
-          const rawX=Number.isFinite(Number(x.x))?Number(x.x):5;
-          const rawY=Number.isFinite(Number(x.y))?Number(x.y):5;
-          return {
-            id:String(x.id||('el_'+i)).slice(0,60),
-            kind:side==='back'&&kind==='qr'?'text':kind,
-            text:side==='back'&&kind==='qr'?'QR xác minh ở mặt trước':clean(x.text,240),
-            x:Math.max(0,Math.min(100-w,rawX)),
-            y:Math.max(0,Math.min(100-h,rawY)),
-            w,h,
-            color:/^#[a-f0-9]{6}$/i.test(x.color||'')?x.color:'#ffffff',
-            size:Number.isFinite(Number(x.size))?Math.max(8,Math.min(72,Number(x.size))):14,
-            bold:!!x.bold,
-            align:['left','center','right'].includes(x.align)?x.align:'left',
-            font:['Arial','Verdana','Georgia','Tahoma'].includes(x.font)?x.font:'Arial',
-            radius:Number.isFinite(Number(x.radius))?Math.max(0,Math.min(32,Number(x.radius))):8,
-            opacity:Number.isFinite(Number(x.opacity))?Math.max(0,Math.min(1,Number(x.opacity))):1
-          };
-        });
-      };
-      const frontElements=sanitizeElements(input.front?.elements||previous.front?.elements,'front');
-      if(!frontElements.some(x=>x.kind==='qr')){
-        frontElements.push({id:'qr',kind:'qr',text:'',x:72,y:18,w:21,h:28,color:'#ffffff',size:8,bold:false,align:'center',radius:6,opacity:1});
-      }
-      const requestedW=Number(input.size?.width_mm),requestedH=Number(input.size?.height_mm);
-      const requestedOrientation=(requestedW===54&&requestedH===86)?'portrait':'landscape';
-      const size=requestedOrientation==='portrait'?{width_mm:54,height_mm:86}:{width_mm:86,height_mm:54};
-      const submittedBack=sanitizeElements(input.back?.elements||previous.back?.elements,'back').filter(x=>!LOCKED_CARD_BACK_IDS.has(x.id)&&x.id!=='qr'&&x.kind!=='qr').slice(0,30);
-      const lockedBack=lockedCardBackElements(requestedOrientation);
-      const template={...previous,version:3,accent,subtitle,size,front:{...(previous.front||{}),elements:frontElements},back:{...(previous.back||{}),elements:[...submittedBack,...lockedBack]},backTitle:'HIỆU LỰC & HƯỚNG DẪN SỬ DỤNG'};
-      delete template.logo_url;
-      await env.DB.prepare('UPDATE card_types SET template_json=? WHERE id=?').bind(JSON.stringify(template),id).run();
-      await safeAudit(env,s.account_id,'card_design_updated','card_type',id,null,{accent});
-      return json({ok:true,template});
-    }
+
+  if(url.pathname==='/api/admin/site-assets'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const ct=(req.headers.get('content-type')||'').toLowerCase().split(';')[0].trim();
+    if(!['image/jpeg','image/png','image/webp'].includes(ct))return json({error:'IMAGE_TYPE_NOT_ALLOWED',message:'Chỉ nhận ảnh JPG, PNG hoặc WebP.'},415);
+    const bytes=new Uint8Array(await req.arrayBuffer());
+    if(!bytes.length||bytes.length>2*1024*1024)return json({error:'IMAGE_TOO_LARGE',message:'Ảnh phải nhỏ hơn hoặc bằng 2 MB.'},413);
+    const valid=validUploadedImage(bytes,ct);
+    if(!valid)return json({error:'INVALID_IMAGE_FILE',message:'Nội dung tệp không khớp với định dạng ảnh đã chọn.'},400);
+    if(!env.FILES)return json({error:'FILE_STORAGE_UNAVAILABLE',message:'Kho lưu trữ tệp chưa được cấu hình.'},503);
+    const ext=ct==='image/png'?'png':ct==='image/webp'?'webp':'jpg';
+    const key=`site-assets/${crypto.randomUUID()}.${ext}`;
+    await env.FILES.put(key,bytes,{httpMetadata:{contentType:ct,cacheControl:'public, max-age=31536000, immutable'}});
+    await audit(env,s.account_id,'site_asset_uploaded','site_asset',key,null,{content_type:ct,size:bytes.length});
+    return json({ok:true,url:`/files/${key}`,message:'Đã tải ảnh lên kho lưu trữ.'},201);
   }
+
   if(url.pathname==='/api/admin/portal-config'&&['GET','PUT'].includes(req.method)){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     if(req.method==='GET'){
       const r=await env.DB.prepare("SELECT value_json,updated_at FROM system_settings WHERE key='member_portal_v4'").first();
       let data={};try{data=JSON.parse(r?.value_json||'{}')}catch{}
-      return json({settings:data,updated_at:r?.updated_at||null});
+      const savedBrand=data.brand&&typeof data.brand==='object'?data.brand:{};
+      const brand={...DEFAULT_PORTAL_BRAND,siteName:clean(savedBrand.siteName||data.siteName||DEFAULT_PORTAL_BRAND.siteName,100)||DEFAULT_PORTAL_BRAND.siteName,logoUrl:localBrandImagePath(savedBrand.logoUrl||data.logoUrl||DEFAULT_PORTAL_BRAND.logoUrl),primaryColor:/^#[a-f0-9]{6}$/i.test(savedBrand.primaryColor||'')?savedBrand.primaryColor:DEFAULT_PORTAL_BRAND.primaryColor,accentColor:/^#[a-f0-9]{6}$/i.test(savedBrand.accentColor||'')?savedBrand.accentColor:DEFAULT_PORTAL_BRAND.accentColor,navColor:/^#[a-f0-9]{6}$/i.test(savedBrand.navColor||'')?savedBrand.navColor:DEFAULT_PORTAL_BRAND.navColor,fontFamily:['Arial','Verdana','Georgia','Tahoma','system'].includes(savedBrand.fontFamily)?savedBrand.fontFamily:DEFAULT_PORTAL_BRAND.fontFamily,baseFontSize:Number.isInteger(Number(savedBrand.baseFontSize))&&Number(savedBrand.baseFontSize)>=14&&Number(savedBrand.baseFontSize)<=20?Number(savedBrand.baseFontSize):16,cornerRadius:Number.isInteger(Number(savedBrand.cornerRadius))&&Number(savedBrand.cornerRadius)>=8&&Number(savedBrand.cornerRadius)<=24?Number(savedBrand.cornerRadius):18,contentMaxWidth:Number.isInteger(Number(savedBrand.contentMaxWidth))&&Number(savedBrand.contentMaxWidth)>=1080&&Number(savedBrand.contentMaxWidth)<=1680?Number(savedBrand.contentMaxWidth):1500};
+      const links=portalLinksFromSettings(data.links);
+      return json({settings:{...data,brand,links},updated_at:r?.updated_at||null});
     }
-    const b=await bodyJson(req), valid=new Set(['members','activities','units','programs']);
-    if(!Array.isArray(b.stats)||b.stats.length>8)return json({error:'INVALID_STATS'},400);
-    const seen=new Set(), stats=[];
-    for(const x of b.stats){
-      if(!x||!valid.has(x.key)||seen.has(x.key))return json({error:'INVALID_STAT_KEY'},400);
-      seen.add(x.key);
-      const mode=x.mode==='manual'?'manual':'auto';
-      if(x.key==='programs'&&mode==='auto')return json({error:'PROGRAM_COUNT_REQUIRES_MANUAL_VALUE'},400);
-      const value=x.value===null||x.value===''?null:Number(x.value);
-      if(mode==='manual'&&value!==null&&(!Number.isSafeInteger(value)||value<0||value>1000000000))return json({error:'INVALID_STAT_VALUE'},400);
-      stats.push({key:x.key,label:clean(x.label,75)||x.key,mode,value:mode==='manual'?value:null,enabled:x.enabled!==false});
+    const b=await bodyJson(req),valid=new Set(['members','activities','units','programs']);
+    const stored=await env.DB.prepare("SELECT value_json FROM system_settings WHERE key='member_portal_v4'").first();let previous={};try{previous=JSON.parse(stored?.value_json||'{}')}catch{}
+    let stats=Array.isArray(previous.stats)?previous.stats:[];
+    if(b.stats!==undefined){
+      if(!Array.isArray(b.stats)||b.stats.length>8)return json({error:'INVALID_STATS',message:'Danh sách thống kê không hợp lệ.'},400);
+      const seen=new Set();stats=[];
+      for(const x of b.stats){
+        if(!x||!valid.has(x.key)||seen.has(x.key))return json({error:'INVALID_STAT_KEY',message:'Có chỉ số thống kê không hợp lệ hoặc bị trùng.'},400);
+        seen.add(x.key);const mode=x.mode==='manual'?'manual':'auto';
+        if(x.key==='programs'&&mode==='auto')return json({error:'PROGRAM_COUNT_REQUIRES_MANUAL_VALUE',message:'Số chương trình phải được nhập sau khi kiểm chứng.'},400);
+        const value=x.value===null||x.value===''?null:Number(x.value);
+        if(mode==='manual'&&value!==null&&(!Number.isSafeInteger(value)||value<0||value>1000000000))return json({error:'INVALID_STAT_VALUE',message:'Giá trị thống kê không hợp lệ.'},400);
+        stats.push({key:x.key,label:clean(x.label,75)||x.key,mode,value:mode==='manual'?value:null,enabled:x.enabled!==false});
+      }
     }
-    const settings={stats,tagline:clean(b.tagline,190)};
+    const oldBrand=previous.brand&&typeof previous.brand==='object'?previous.brand:{};
+    const rawBrand=b.brand&&typeof b.brand==='object'?b.brand:{};
+    const brand={
+      siteName:clean(rawBrand.siteName??oldBrand.siteName??previous.siteName??DEFAULT_PORTAL_BRAND.siteName,100)||DEFAULT_PORTAL_BRAND.siteName,
+      logoUrl:localBrandImagePath(rawBrand.logoUrl??oldBrand.logoUrl??previous.logoUrl??DEFAULT_PORTAL_BRAND.logoUrl),
+      primaryColor:clean(rawBrand.primaryColor??oldBrand.primaryColor??DEFAULT_PORTAL_BRAND.primaryColor,7),
+      accentColor:clean(rawBrand.accentColor??oldBrand.accentColor??DEFAULT_PORTAL_BRAND.accentColor,7),
+      navColor:clean(rawBrand.navColor??oldBrand.navColor??DEFAULT_PORTAL_BRAND.navColor,7),
+      fontFamily:clean(rawBrand.fontFamily??oldBrand.fontFamily??DEFAULT_PORTAL_BRAND.fontFamily,20),
+      baseFontSize:Number(rawBrand.baseFontSize??oldBrand.baseFontSize??DEFAULT_PORTAL_BRAND.baseFontSize),
+      cornerRadius:Number(rawBrand.cornerRadius??oldBrand.cornerRadius??DEFAULT_PORTAL_BRAND.cornerRadius??18),
+      contentMaxWidth:Number(rawBrand.contentMaxWidth??oldBrand.contentMaxWidth??DEFAULT_PORTAL_BRAND.contentMaxWidth??1500)
+    };
+    for(const k of ['primaryColor','accentColor','navColor'])if(!/^#[a-f0-9]{6}$/i.test(brand[k]))return json({error:'INVALID_BRAND_COLOR',message:'Màu sắc phải có dạng mã màu hợp lệ.'},400);
+    if(!['Arial','Verdana','Georgia','Tahoma','system'].includes(brand.fontFamily))return json({error:'INVALID_FONT',message:'Kiểu chữ chưa được hỗ trợ.'},400);
+    if(!Number.isInteger(brand.baseFontSize)||brand.baseFontSize<14||brand.baseFontSize>20)return json({error:'INVALID_FONT_SIZE',message:'Cỡ chữ phải từ 14 đến 20.'},400);
+    if(!Number.isInteger(brand.cornerRadius)||brand.cornerRadius<8||brand.cornerRadius>24)return json({error:'INVALID_CORNER_RADIUS',message:'Độ bo góc phải từ 8 đến 24.'},400);
+    if(!Number.isInteger(brand.contentMaxWidth)||brand.contentMaxWidth<1080||brand.contentMaxWidth>1680)return json({error:'INVALID_CONTENT_WIDTH',message:'Chiều rộng nội dung phải từ 1080 đến 1680.'},400);
+    if(rawBrand.logoUrl!==undefined&&String(rawBrand.logoUrl)!=='/sfn-logo.png'&&!/^\/files\/site-assets\/[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\.(?:png|jpg|webp)$/i.test(String(rawBrand.logoUrl)))return json({error:'INVALID_LOGO_PATH',message:'Logo phải là ảnh đã tải lên hệ thống.'},400);
+    let links=Array.isArray(previous.links)?previous.links:DEFAULT_PORTAL_LINKS;
+    if(b.links!==undefined){
+      if(!Array.isArray(b.links)||b.links.length!==5)return json({error:'INVALID_PORTAL_LINKS',message:'Cần khai báo đủ 5 nền tảng Sky First.'},400);
+      links=[];
+      for(const [i,x] of b.links.entries()){
+        const u=safeSkyFirstUrl(x?.url),name=clean(x?.name,100),description=clean(x?.description,140);
+        let samePortal=false;try{samePortal=!!u&&new URL(u).hostname===new URL(DEFAULT_PORTAL_LINKS[i].url).hostname}catch{}
+        if(!u||!name||!samePortal)return json({error:'INVALID_PORTAL_LINK',message:`Nền tảng thứ ${i+1} cần có tên và địa chỉ đúng website đã quy định.`},400);
+        links.push({name,url:u,description});
+      }
+    }
+    const settings={...previous,stats,tagline:clean(b.tagline??previous.tagline??'Mỗi thành viên là một hành trình. Mỗi đóng góp tạo nên một Sky First lớn mạnh hơn.',190),brand,links};
     await env.DB.prepare("INSERT INTO system_settings(key,value_json,updated_at) VALUES('member_portal_v4',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP").bind(JSON.stringify(settings)).run();
-    await audit(env,s.account_id,'portal_config_updated','system_settings','member_portal_v4',null,{keys:stats.map(x=>x.key)});
+    await audit(env,s.account_id,'portal_config_updated','system_settings','member_portal_v4',null,{keys:stats.map(x=>x.key),brand_updated:true,links_updated:true});
     return json({ok:true,settings});
   }
   const restrictionRoute=url.pathname.match(/^\/api\/admin\/members\/([^/]+)\/restriction$/);
@@ -5048,28 +5076,28 @@ export default{
     const url=new URL(request.url);
 
     if(url.pathname.startsWith('/files/')){
-      let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return new Response('Bad request',{status:400})}
-      if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')) return new Response('Bad request',{status:400});
+      let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return withSecurityHeaders(new Response('Bad request',{status:400}))}
+      if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')) return withSecurityHeaders(new Response('Bad request',{status:400}));
       const isPrivate=/^(members|documents|certificates)\//.test(key);
       if(isPrivate){
         const fs=await getSession(request,env);
-        if(!fs)return new Response('Unauthorized',{status:401});
+        if(!fs)return withSecurityHeaders(new Response('Unauthorized',{status:401}));
         const ownerMatch=key.match(/^certificates\/(?:external\/)?([^/]+)\//);
         if(ownerMatch&&ownerMatch[1]!==fs.person_id){
           const elevated=await isNetworkAdmin(env,fs.account_id);
-          if(!elevated)return new Response('Forbidden',{status:403});
+          if(!elevated)return withSecurityHeaders(new Response('Forbidden',{status:403}));
         }else if(!ownerMatch&&/^(members|documents)\//.test(key)){
           const ownerKey=key.match(/^(?:members|documents)\/([^/]+)\//)?.[1]||'';
-          if(ownerKey!==fs.person_id&&!await isNetworkAdmin(env,fs.account_id))return new Response('Forbidden',{status:403});
+          if(ownerKey!==fs.person_id&&!await isNetworkAdmin(env,fs.account_id))return withSecurityHeaders(new Response('Forbidden',{status:403}));
         }
       }
       const o=await env.FILES.get(key);
 
       if(!o){
-        return new Response(
+        return withSecurityHeaders(new Response(
           'Not found',
           {status:404}
-        );
+        ));
       }
 
       const h=new Headers();
@@ -5086,26 +5114,26 @@ export default{
         'nosniff'
       );
 
-      return new Response(
+      return withSecurityHeaders(new Response(
         o.body,
         {headers:h}
-      );
+      ));
     }
 
     if(url.pathname.startsWith('/api/')){
-      return api(
+      return withSecurityHeaders(await api(
         request,
         env,
         url
-      );
+      ));
     }
 
     if(url.pathname==='/setup'){
       if(await setupDone(env)){
-        return Response.redirect(
+        return withSecurityHeaders(Response.redirect(
           new URL('/',url),
           302
-        );
+        ));
       }
 
       const u=
@@ -5113,7 +5141,7 @@ export default{
 
       u.pathname='/setup.html';
 
-      return env.ASSETS.fetch(
+      return withSecurityHeaders(await env.ASSETS.fetch(
         new Request(
           u.toString(),
           {
@@ -5121,7 +5149,7 @@ export default{
             headers:request.headers
           }
         )
-      );
+      ));
     }
 
     if(url.pathname==='/verify'){
@@ -5130,7 +5158,7 @@ export default{
 
       u.pathname='/verify.html';
 
-      return env.ASSETS.fetch(
+      return withSecurityHeaders(await env.ASSETS.fetch(
         new Request(
           u.toString(),
           {
@@ -5138,17 +5166,17 @@ export default{
             headers:request.headers
           }
         )
-      );
+      ));
     }
 
     if(!(await setupDone(env))){
-      return Response.redirect(
+      return withSecurityHeaders(Response.redirect(
         new URL('/setup',url),
         302
-      );
+      ));
     }
 
-    return env.ASSETS.fetch(request);
+    return withSecurityHeaders(await env.ASSETS.fetch(request));
   }
 };
 
