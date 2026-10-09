@@ -7,7 +7,7 @@ errors=[]
 def ok(name): print('[OK]',name)
 def fail(name,msg): errors.append(f'{name}: {msg}'); print('[FAIL]',name,msg)
 
-required=['public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql']
+required=['public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql']
 for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
@@ -125,6 +125,16 @@ else: fail('PDF rasterization','legacy canvas data URL remains')
 if 'data-nav-toggle' in front and 'savedNavScroll' in front and 'nav-section-toggle' in (ROOT/'public/styles.css').read_text(): ok('collapsible navigation and scroll preservation')
 else: fail('navigation usability','accordion or scroll preservation missing')
 verify=(ROOT/'public/verify.html').read_text()
+inline_verify_scripts=re.findall(r'<script\b[^>]*>(.*?)</script>',verify,re.I|re.S)
+for i,script in enumerate(x for x in inline_verify_scripts if x.strip()):
+    temp_path=ROOT/'scripts'/f'.verify-inline-{i}.tmp.js'
+    try:
+        temp_path.write_text(script)
+        result=subprocess.run(['node','--check',str(temp_path)],capture_output=True,text=True)
+        if result.returncode==0: ok('inline verify page JavaScript syntax')
+        else: fail('inline verify page JavaScript syntax',result.stderr.strip())
+    finally:
+        temp_path.unlink(missing_ok=True)
 for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning'),('x.status===\'pending\'','future-date pending verify warning')]:
     if marker in verify: ok(name)
     else: fail(name,'missing')
@@ -210,6 +220,22 @@ for page in ['contact.html','privacy.html','terms.html','support.html','verify.h
     if 'brand.js?v=20261009-brand-v1' in txt and 'styles.css?v=20261009-member-v8-audit-fix' in txt:
         ok('shared brand/theme cache '+page)
     else: fail('shared brand/theme cache '+page,'brand or style cache version missing')
+
+
+# Regression contracts for the 2026-10-09 audit fix.
+for marker,name in [
+    ('effectiveIssueStatus','date-based credential validity'),
+    ("url.pathname==='/api/public/request-avatar'",'registration avatar upload route'),
+    ("requests/avatars/",'private pending registration avatars'),
+    ('request-status-lookup:','rate-limited request status lookups'),
+    ('approved_org_ids:requestedOrgIds','multi-organization approval result'),
+    ('people_work_profiles','persistent member school/work profile'),
+    ("date(c.issued_at)<>c.issued_at",'invalid legacy issue dates fail closed'),
+    ("no-referrer",'strict referrer policy')]:
+    if marker in back: ok(name)
+    else: fail(name,'hardening marker missing')
+if "ext.guardian_id_number,guardian_id_number" in back: fail('guardian identifier minimization','unmasked identifier may reach browser')
+else: ok('guardian identifier masked server-side')
 
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')

@@ -13,7 +13,7 @@ Ngày đóng gói: 03/09/2026.
 
 ## Giữ nguyên hạ tầng
 
-- Worker: `sfn-member-portal`
+- Worker name configured in `wrangler.jsonc`: `tk`; verify the production domain binding before deploying. The npm package name is not the Worker name.
 - D1: `tk` / binding `DB` / database id `ff630699-cc44-471d-9507-aa94c84468fb`
 - R2: `tksfn` / binding `FILES`
 - Domain: `member.skyfirst.io.vn`

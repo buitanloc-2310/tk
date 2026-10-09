@@ -3,7 +3,7 @@
 Bản này được rà lại theo mục tiêu vận hành ổn định lâu dài trên hạ tầng Cloudflare hiện có.
 
 ## Hạ tầng giữ nguyên
-- Worker: `sfn-member-portal`
+- Worker name in the checked-in `wrangler.jsonc`: `tk` (this is the deployment name Wrangler will use; verify it is the production Worker bound to the member domain before deploying)
 - Domain: `https://member.skyfirst.io.vn`
 - D1 binding: `DB`
 - D1 database: `tk`
@@ -32,7 +32,7 @@ Không tạo D1/R2/domain mới và không cần xóa dữ liệu đang có.
 Không chạy lại `0001_initial.sql` bằng D1 Console trên database production.
 
 ## Triển khai
-Tại thư mục dự án:
+Tại thư mục dự án. Lưu ý: `wrangler.jsonc` là cấu hình quyết định tên Worker khi deploy (`tk` trong ZIP này); tên package npm `sfn-member-portal` không quyết định tên Worker. Chỉ tiếp tục khi đã xác nhận `tk` chính là Worker đang gắn `member.skyfirst.io.vn` trong tài khoản Cloudflare đích.
 
 ```bash
 npm install
@@ -67,6 +67,8 @@ python scripts/verify_release.py
 - Chạy `scripts/verify_release.py` trước mỗi lần deploy thay đổi source.
 
 ## Security configuration (2026 final hardening)
+
+Audit follow-up: request-uploaded avatars are private and non-cacheable until an authorized reviewer processes the request; successful approval copies an image that passes file-signature validation into the member-avatar namespace. Status lookup should use POST so request codes and email addresses are not placed in the URL. Event cards are not valid before their issue date. Unit-scoped administrators cannot browse cards outside their effective organization scope; unscoped verification QR/event-card records remain network-admin-only until the data model supports unit scope.
 Before first-time setup, configure Cloudflare secret `SETUP_TOKEN` (for example with `wrangler secret put SETUP_TOKEN`). Keep `RESEND_API_KEY` as a secret as well. `/api/setup` requires `X-Setup-Token` and locks itself after the first account exists. Login, password reset and public avatar upload are rate-limited. The member Security Center supports session review/revocation and security-event history.
 
 ## Bản 4.1 — 05/10/2026

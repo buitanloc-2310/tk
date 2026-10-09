@@ -1,3 +1,5 @@
+> **Trạng thái chức năng hiện tại (09/10/2026):** Các ghi chú cũ nhắc đến Card Studio chỉ phản ánh lịch sử phát triển. Trình thiết kế thẻ đã được gỡ khỏi sản phẩm hiện tại; API trả `410 FEATURE_REMOVED`. Các ghi chú này không mô tả chức năng đang hoạt động.
+
 # Release 2.0.0 — Long-term Final
 
 Ngày đóng gói: 2026-09-03.

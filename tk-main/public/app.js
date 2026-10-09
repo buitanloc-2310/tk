@@ -254,8 +254,8 @@ function renderForcedPasswordChange(){
 function renderRegistrationStatus(){
   $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung Tâm Thành Viên Số Sky First</span></a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">HỒ SƠ THÀNH VIÊN SKY FIRST</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
   wirePublicLinks();
-  const qs=new URLSearchParams(location.search);if(qs.has('request'))$('#statusForm').elements.code.value=qs.get('request');if(qs.has('email'))$('#statusForm').elements.email.value=qs.get('email');
-  $('#statusForm').onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target),out=$('#statusResult');out.textContent='Đang kiểm tra hồ sơ...';try{const d=await api('/api/public/account-request/status?code='+encodeURIComponent(dta.get('code'))+'&email='+encodeURIComponent(dta.get('email')));out.innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <strong>${esc(statusVi(d.request.status))}</strong>${d.request.admin_note?`<p>Phản hồi: ${esc(d.request.admin_note)}</p>`:''}</div>`}catch{out.textContent='Không tìm thấy hồ sơ phù hợp. Vui lòng kiểm tra lại mã và email.'}};
+  const qs=new URLSearchParams(location.search);if(qs.has('request'))$('#statusForm').elements.code.value=qs.get('request');if(qs.has('email'))$('#statusForm').elements.email.value=qs.get('email');if(qs.has('request')||qs.has('email'))history.replaceState({},'',location.pathname);
+  $('#statusForm').onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target),out=$('#statusResult');out.textContent='Đang kiểm tra hồ sơ...';try{const d=await api('/api/public/account-request/status',{method:'POST',body:JSON.stringify({code:dta.get('code'),email:dta.get('email')})});out.innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <strong>${esc(statusVi(d.request.status))}</strong>${d.request.admin_note?`<p>Phản hồi: ${esc(d.request.admin_note)}</p>`:''}</div>`}catch(err){out.textContent=err.status===429?'Bạn đã tra cứu quá nhiều lần. Vui lòng thử lại sau.':'Không tìm thấy hồ sơ phù hợp. Vui lòng kiểm tra lại mã và email.'}};
 }
 function wirePublicLinks(){document.querySelectorAll('[data-public-path]').forEach(a=>a.onclick=e=>{e.preventDefault();routePublic(a.dataset.publicPath)})}
 function showRegistrationPage(title,html){
@@ -361,7 +361,7 @@ function renderLogin(){
   $('#togglePassword').onclick=()=>{const i=$('#loginForm').elements.password;i.type=i.type==='password'?'text':'password'};
   $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':code==='ACCOUNT_BANNED'?'Tài khoản bị giới hạn truy cập. Vui lòng liên hệ support@skyfirst.io.vn.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
   const resetToken=new URLSearchParams(location.search).get('reset_token');
-  if(resetToken){modal('Tạo mật khẩu mới',`<form id="resetForm" class="form-grid"><label>Mật khẩu mới (ít nhất 10 ký tự)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label><button class="primary">Cập nhật mật khẩu</button><div id="resetMsg" class="msg"></div></form>`);$('#resetForm').onsubmit=async e=>{e.preventDefault();const password=new FormData(e.target).get('password');try{await api('/api/public/password/reset',{method:'POST',body:JSON.stringify({token:resetToken,password})});history.replaceState({},'',location.pathname);$('#resetMsg').textContent='Đã đổi mật khẩu. Bạn có thể đăng nhập ngay.'}catch{$('#resetMsg').textContent='Liên kết không hợp lệ hoặc đã hết hạn.'}}}
+  if(resetToken){history.replaceState({},'',location.pathname);modal('Tạo mật khẩu mới',`<form id="resetForm" class="form-grid"><label>Mật khẩu mới (ít nhất 10 ký tự)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label><button class="primary">Cập nhật mật khẩu</button><div id="resetMsg" class="msg"></div></form>`);$('#resetForm').onsubmit=async e=>{e.preventDefault();const password=new FormData(e.target).get('password');try{await api('/api/public/password/reset',{method:'POST',body:JSON.stringify({token:resetToken,password})});history.replaceState({},'',location.pathname);$('#resetMsg').textContent='Đã đổi mật khẩu. Bạn có thể đăng nhập ngay.'}catch{$('#resetMsg').textContent='Liên kết không hợp lệ hoặc đã hết hạn.'}}}
 }
 
 /* =========================================================
@@ -2238,8 +2238,8 @@ async function renderNotifications(c){
 
 async function renderProfile(c){
 
-  const p=
-    state.me?.person;
+  const p=state.me?.person;
+  const work=state.me?.work_profile||{};
 
   if(!p){
     c.innerHTML=`
@@ -2330,7 +2330,12 @@ async function renderProfile(c){
           [
             'Tình trạng học tập / công tác',
             p.education_status
-          ]
+          ],
+          ['Tên trường học',work.school_name],
+          ['Tình trạng công việc',work.employment_status],
+          ['Nơi làm việc',work.workplace_name],
+          ['Bộ phận công tác',work.work_department],
+          ['Chức vụ / vị trí',work.job_title]
         ]
         .map(
           x=>`
@@ -2358,6 +2363,12 @@ async function renderProfile(c){
       >
 
         ${fieldsForm(p)}
+        <div class="form-section-title"><h3>Thông tin học tập / công tác bổ sung</h3><p class="muted">Thông tin này giúp hoàn thiện hồ sơ thành viên và có thể cập nhật sau.</p></div>
+        <label>Tên trường học<input name="school_name" maxlength="240" value="${esc(work.school_name||p.school_or_workplace||'')}"></label>
+        <label>Tình trạng công việc<input name="employment_status" maxlength="80" value="${esc(work.employment_status||p.education_status||'')}"></label>
+        <label>Nơi làm việc<input name="workplace_name" maxlength="240" value="${esc(work.workplace_name||p.school_or_workplace||'')}"></label>
+        <label>Bộ phận công tác<input name="work_department" maxlength="180" value="${esc(work.work_department||'')}"></label>
+        <label>Chức vụ / vị trí<input name="job_title" maxlength="180" value="${esc(work.job_title||p.class_or_major||'')}"></label>
 
         <label>
           Ảnh đại diện
@@ -3887,7 +3898,7 @@ async function renderAdminRequests(c){
       esc(r.request_code),
       `
       <div class="card">
-
+        ${r.avatar_url?`<div class="request-avatar-review" style="display:flex;gap:14px;align-items:center;margin-bottom:16px"><img src="${esc(safeImageUrl(r.avatar_url,'/sfn-logo.png'))}" alt="Ảnh hồ sơ" style="width:96px;height:96px;object-fit:cover;border-radius:14px;border:1px solid var(--line,#dbe7f2)" loading="lazy" onerror="this.onerror=null;this.src='/sfn-logo.png'"><span class="muted">Ảnh đính kèm hồ sơ đăng ký</span></div>`:''}
         ${
           [
             ['Họ và tên',r.full_name],
@@ -3966,11 +3977,14 @@ async function renderAdminRequests(c){
               'Tình trạng học tập / công tác',
               r.education_status
             ],
-
-            [
-              'Đơn vị đăng ký',
-              r.org_name
-            ],
+            ['Trường học',r.school_name],
+            ['Tình trạng công việc',r.employment_status],
+            ['Nơi làm việc',r.workplace_name],
+            ['Bộ phận công tác',r.work_department],
+            ['Chức vụ / vị trí',r.job_title],
+            ['Đơn vị chính đăng ký',r.org_name],
+            ['Các đơn vị đã chọn',r.requested_org_names],
+            ['Số đơn vị đăng ký',r.requested_org_count],
 
             [
               'Người giám hộ',
@@ -3991,6 +4005,8 @@ async function renderAdminRequests(c){
               'Email người giám hộ',
               r.guardian_email
             ],
+            ['Ngày sinh người giám hộ',r.guardian_date_of_birth],
+            ['Số định danh người giám hộ',r.guardian_id_number],
 
             [
               'Địa chỉ người giám hộ',

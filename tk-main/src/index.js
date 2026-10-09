@@ -168,6 +168,11 @@ async function ensureAccountRequestExtended(env){
     org_node_id TEXT NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
     is_primary INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(request_id,org_node_id)
   )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS people_work_profiles(
+    person_id TEXT PRIMARY KEY REFERENCES people(id) ON DELETE CASCADE,
+    school_name TEXT,employment_status TEXT,workplace_name TEXT,work_department TEXT,job_title TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`).run();
 }
 
 async function ensureEvaluations(env){
@@ -434,7 +439,7 @@ function withSecurityHeaders(response){
   const headers=new Headers(response.headers);
   headers.set('x-content-type-options','nosniff');
   headers.set('x-frame-options','DENY');
-  headers.set('referrer-policy','strict-origin-when-cross-origin');
+  headers.set('referrer-policy','no-referrer');
   headers.set('permissions-policy','camera=(), microphone=(), geolocation=()');
   headers.set('content-security-policy',"default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:");
   return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
@@ -461,19 +466,105 @@ function portalLinksFromSettings(candidates){
 function localImagePath(value,fallback='/sfn-logo.png'){const p=clean(value,1200);if(p==='/sfn-logo.png')return p;if(/^\/files\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp)$/i.test(p)&&!p.includes('..')&&!p.includes('\\')&&!p.includes('//'))return p;return fallback}
 function localBrandImagePath(value,fallback='/sfn-logo.png'){const p=clean(value,1200);if(p==='/sfn-logo.png')return p;return /^\/files\/site-assets\/[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\.(?:png|jpg|webp)$/i.test(p)?p:fallback}
 
-function validUploadedImage(bytes,contentType){
+function crc32(bytes){
+  let crc=0xffffffff;
+  for(const byte of bytes){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc&1)?(0xedb88320^(crc>>>1)):(crc>>>1)}
+  return (crc^0xffffffff)>>>0;
+}
+function validDateOnly(value){
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+  const t=Date.parse(value+'T00:00:00Z');
+  return Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===value;
+}
+function effectiveIssueStatus(status,issuedAt,expiresAt,today=dateInVietnam()){
+  if(status!=='active')return status;
+  const issued=String(issuedAt||'').slice(0,10),expires=String(expiresAt||'').slice(0,10);
+  // Invalid legacy dates must never make a credential appear valid.
+  if(!validDateOnly(issued))return 'pending';
+  if(issued>today)return 'pending';
+  if(expires&& !validDateOnly(expires))return 'pending';
+  if(expires&&expires<today)return 'expired';
+  return 'active';
+}
+function validUploadedImage(input,contentType){
+  const bytes=input instanceof Uint8Array?input:new Uint8Array(input||[]);
+  if(!bytes.length)return false;
   if(contentType==='image/png'){
-    if(bytes.length<33||![137,80,78,71,13,10,26,10].every((n,i)=>bytes[i]===n))return false;
-    if(String.fromCharCode(...bytes.slice(12,16))!=='IHDR')return false;
-    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-    const width=view.getUint32(16),height=view.getUint32(20);
-    return width>0&&height>0&&width<=8192&&height<=8192&&width*height<=32000000;
+    const signature=[137,80,78,71,13,10,26,10];
+    if(bytes.length<45||!signature.every((n,i)=>bytes[i]===n))return false;
+    let offset=8,seenHeader=false,seenData=false,seenEnd=false,width=0,height=0;
+    while(offset+12<=bytes.length){
+      const view=new DataView(bytes.buffer,bytes.byteOffset+offset,bytes.byteLength-offset);
+      const len=view.getUint32(0,false),type=String.fromCharCode(...bytes.slice(offset+4,offset+8));
+      const end=offset+12+len;
+      if(end>bytes.length)return false;
+      const chunkTypeAndData=bytes.slice(offset+4,offset+8+len);
+      const expected=new DataView(bytes.buffer,bytes.byteOffset+offset+8+len,4).getUint32(0,false);
+      if(crc32(chunkTypeAndData)!==expected)return false;
+      if(!seenHeader){
+        if(type!=='IHDR'||len!==13)return false;
+        const dim=new DataView(bytes.buffer,bytes.byteOffset+offset+8,13);width=dim.getUint32(0,false);height=dim.getUint32(4,false);seenHeader=true;
+        if(!width||!height||width>8192||height>8192||width*height>32000000)return false;
+      }else if(type==='IHDR')return false;
+      if(type==='IDAT')seenData=true;
+      if(type==='IEND'){
+        if(len!==0||!seenData||end!==bytes.length)return false;
+        seenEnd=true;break;
+      }
+      offset=end;
+    }
+    return seenHeader&&seenData&&seenEnd;
   }
-  if(contentType==='image/jpeg')return bytes.length>=20&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255&&bytes[bytes.length-2]===255&&bytes[bytes.length-1]===217;
-  if(contentType==='image/webp')return bytes.length>=30&&String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP'&&['VP8 ','VP8L','VP8X'].includes(String.fromCharCode(...bytes.slice(12,16)))&&new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint32(4,true)<=bytes.length-8;
+  if(contentType==='image/jpeg'){
+    if(bytes.length<20||bytes[0]!==0xff||bytes[1]!==0xd8||bytes[2]!==0xff||bytes[bytes.length-2]!==0xff||bytes[bytes.length-1]!==0xd9)return false;
+    // Require a plausible marker/segment sequence before the scan instead of trusting MIME and SOI/EOI alone.
+    let i=2,segments=0,hasScan=false;
+    while(i<bytes.length-2&&segments<4096){
+      if(bytes[i]!==0xff){if(hasScan){i++;continue}return false}
+      while(i<bytes.length&&bytes[i]===0xff)i++;
+      if(i>=bytes.length)return false;
+      const marker=bytes[i++];
+      if(marker===0xd9)break;
+      if(marker===0xd8||marker===0x01||(marker>=0xd0&&marker<=0xd7)){segments++;continue}
+      if(i+2>bytes.length)return false;
+      const length=(bytes[i]<<8)|bytes[i+1];if(length<2||i+length>bytes.length)return false;
+      if(marker===0xda){hasScan=true;break}
+      i+=length;segments++;
+    }
+    return hasScan;
+  }
+  if(contentType==='image/webp'){
+    if(bytes.length<30||String.fromCharCode(...bytes.slice(0,4))!=='RIFF'||String.fromCharCode(...bytes.slice(8,12))!=='WEBP')return false;
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),riffSize=view.getUint32(4,true);
+    const chunk=String.fromCharCode(...bytes.slice(12,16)),chunkSize=view.getUint32(16,true);
+    if(riffSize!==bytes.length-8||!['VP8 ','VP8L','VP8X'].includes(chunk)||chunkSize<1||20+chunkSize>bytes.length)return false;
+    if(chunk==='VP8X'&&chunkSize<10)return false;
+    return true;
+  }
   return false;
 }
-
+async function prepareRequestAvatarPromotion(env,avatarUrl,personId){
+  const match=String(avatarUrl||'').match(/^\/files\/(requests\/avatars\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp))$/i);
+  if(!match||!env.FILES)return {url:null,oldKey:null,newKey:null};
+  const oldKey=match[1];
+  if(oldKey.includes('..')||oldKey.includes('\\'))return {url:null,oldKey:null,newKey:null};
+  let source;
+  try{source=await env.FILES.get(oldKey)}catch{return {url:null,oldKey:null,newKey:null}}
+  if(!source)return {url:null,oldKey:null,newKey:null};
+  const metadata=source.httpMetadata||{},contentType=String(metadata.contentType||'').toLowerCase().split(';')[0].trim();
+  if(!['image/jpeg','image/png','image/webp'].includes(contentType))return {url:null,oldKey,newKey:null};
+  let bytes;
+  try{bytes=new Uint8Array(await source.arrayBuffer())}catch{return {url:null,oldKey,newKey:null}}
+  if(!bytes.length||bytes.byteLength>900000||!validUploadedImage(bytes,contentType))return {url:null,oldKey,newKey:null};
+  const ext=contentType==='image/png'?'png':contentType==='image/webp'?'webp':'jpg';
+  const newKey=`avatars/${personId}/${crypto.randomUUID()}.${ext}`;
+  try{await env.FILES.put(newKey,bytes,{httpMetadata:{contentType,cacheControl:'public, max-age=31536000, immutable'}})}catch{return {url:null,oldKey,newKey:null}}
+  return {url:`/files/${newKey}`,oldKey,newKey};
+}
+async function deletePendingRequestAvatar(env,avatarUrl){
+  const m=String(avatarUrl||'').match(/^\/files\/(requests\/avatars\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp))$/i);
+  if(m&&env.FILES?.delete){try{await env.FILES.delete(m[1])}catch(err){console.error('PENDING_AVATAR_DELETE_FAILED',String(err?.message||err))}}
+}
 
 
 async function api(req,env,url){
@@ -818,13 +909,11 @@ async function api(req,env,url){
     `).bind(code).first();
 
     if(card){
+      const effectiveStatus=effectiveIssueStatus(card.status,card.issued_at,card.expires_at);
       return json({
         type:'card',
-        valid:
-          card.status==='active'&&
-          (!card.expires_at||
-            card.expires_at>=dateInVietnam()),
-        record:{...card,avatar_url:localImagePath(card.avatar_url)}
+        valid:effectiveStatus==='active',
+        record:{...card,status:effectiveStatus,avatar_url:localImagePath(card.avatar_url)}
       });
     }
 
@@ -844,11 +933,11 @@ async function api(req,env,url){
       LIMIT 1
     `).bind(code).first();
     if(oneTime){
-      const today=dateInVietnam();
+      const effectiveStatus=effectiveIssueStatus(oneTime.status,oneTime.issued_at,oneTime.expires_at);
       return json({
         type:'one_time',
-        valid:oneTime.status==='active' && (!oneTime.expires_at || oneTime.expires_at>=today),
-        record:oneTime
+        valid:effectiveStatus==='active',
+        record:{...oneTime,status:effectiveStatus}
       });
     }
 
@@ -859,8 +948,7 @@ async function api(req,env,url){
       LIMIT 1
     `).bind(code).first();
     if(independentQr){
-      const today=dateInVietnam();
-      const effectiveStatus=independentQr.status==='active'&&independentQr.issued_at&&independentQr.issued_at>today?'pending':independentQr.status==='active'&&independentQr.expires_at&&independentQr.expires_at<today?'expired':independentQr.status;
+      const effectiveStatus=effectiveIssueStatus(independentQr.status,independentQr.issued_at,independentQr.expires_at);
       return json({
         type:'verification_qr',
         valid:effectiveStatus==='active',
@@ -901,46 +989,16 @@ async function api(req,env,url){
 
   if(url.pathname==='/api/public/request-avatar'&&req.method==='POST'){
     const uploadKey=`avatar-upload:${await sha256(clientHint(req))}`;const uploadRate=await safeRateState(env,uploadKey,12,60);if(uploadRate.blocked)return json({error:'UPLOAD_RATE_LIMITED'},429,{'retry-after':'3600'});await safeRateFail(env,uploadKey,12,60);
-    const ct=(req.headers.get('content-type')||'').toLowerCase();
-
-    if(!['image/jpeg','image/png','image/webp'].includes(ct)){
-      return json({error:'IMAGE_TYPE_NOT_ALLOWED'},415);
-    }
-
-    const data=await req.arrayBuffer();
-
-    if(!data.byteLength||data.byteLength>900000){
-      return json({error:'IMAGE_TOO_LARGE'},413);
-    }
-
-    const ext=
-      ct==='image/png'
-        ?'png'
-        :ct==='image/webp'
-          ?'webp'
-          :'jpg';
-
-    const key=
-      `requests/avatars/`+
-      `${new Date().toISOString().slice(0,10)}/`+
-      `${crypto.randomUUID()}.${ext}`;
-
-    await env.FILES.put(
-      key,
-      data,
-      {
-        httpMetadata:{
-          contentType:ct,
-          cacheControl:
-            'public, max-age=31536000, immutable'
-        }
-      }
-    );
-
-    return json({
-      ok:true,
-      url:`/files/${key}`
-    });
+    const ct=(req.headers.get('content-type')||'').toLowerCase().split(';')[0].trim();
+    if(!['image/jpeg','image/png','image/webp'].includes(ct))return json({error:'IMAGE_TYPE_NOT_ALLOWED'},415);
+    if(!env.FILES)return json({error:'FILE_STORAGE_UNAVAILABLE'},503);
+    const data=new Uint8Array(await req.arrayBuffer());
+    if(!data.byteLength||data.byteLength>900000)return json({error:'IMAGE_TOO_LARGE'},413);
+    if(!validUploadedImage(data,ct))return json({error:'INVALID_IMAGE_FILE',message:'Nội dung tệp không khớp định dạng ảnh được chọn.'},400);
+    const ext=ct==='image/png'?'png':ct==='image/webp'?'webp':'jpg';
+    const key=`requests/avatars/${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}.${ext}`;
+    await env.FILES.put(key,data,{httpMetadata:{contentType:ct,cacheControl:'private, no-store, max-age=0'}});
+    return json({ok:true,url:`/files/${key}`},201,{'cache-control':'no-store'});
   }
 
   if(url.pathname==='/api/public/org-options'&&req.method==='GET'){
@@ -1000,6 +1058,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   const email=clean(b.email,200).toLowerCase();
   const idno=clean(b.id_number,20);
+  const requestedAvatarUrl=clean(b.avatar_url,1200);
+  if(!/^\/files\/requests\/avatars\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp)$/i.test(requestedAvatarUrl)||requestedAvatarUrl.includes('..')||requestedAvatarUrl.includes('\\'))return json({error:'INVALID_AVATAR_URL',message:'Ảnh hồ sơ phải được tải lên trực tiếp qua biểu mẫu đăng ký.'},400);
 
   if(!/^\S+@\S+\.\S+$/.test(email)){
     return json({error:'EMAIL_INVALID'},400);
@@ -1200,7 +1260,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       id,code,clean(b.full_name,160),clean(b.display_name,160),clean(b.date_of_birth,20),
       clean(b.gender,50),clean(b.nationality,80),idno,clean(b.id_issue_date,20),
       clean(b.id_issue_place,200),email,clean(b.phone,50),clean(b.permanent_address,500),
-      clean(b.temporary_address,500),clean(b.avatar_url,1200),clean(b.target_org_node_id,100),
+      clean(b.temporary_address,500),requestedAvatarUrl,clean(b.target_org_node_id,100),
       age<18?clean(b.guardian_full_name,160):null,
       age<18?clean(b.guardian_relationship,80):null,
       age<18?clean(b.guardian_phone,50):null,
@@ -1221,7 +1281,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   ).run();
   await env.DB.batch(requestedOrgIds.map(oid=>env.DB.prepare(`INSERT OR IGNORE INTO account_request_orgs(request_id,org_node_id,is_primary) VALUES(?,?,?)`).bind(id,oid,oid===primaryOrgId?1:0)));
 
-  const trackingUrl=`${env.APP_URL||'https://member.skyfirst.io.vn'}/registration-status?request=${encodeURIComponent(code)}&email=${encodeURIComponent(email)}`;
+  const trackingUrl=`${env.APP_URL||'https://member.skyfirst.io.vn'}/`;
   const mail=await sendMemberEmail(env,{to:email,subject:`[Sky First Network] Đã tiếp nhận yêu cầu đăng ký thành viên – ${code}`,html:memberEmailHtml({title:'Đã tiếp nhận yêu cầu đăng ký thành viên',name:clean(b.full_name,160),intro:'Yêu cầu đăng ký của bạn đã được Trung Tâm Thành Viên Số Sky First tiếp nhận.',code,status:'Đã tiếp nhận',body:'Vui lòng lưu mã yêu cầu để tra cứu. Sky First Network sẽ gửi email tiếp theo khi hồ sơ được cập nhật trạng thái.',ctaUrl:trackingUrl,ctaLabel:'Tra cứu trạng thái hồ sơ'})});
 
   return json({
@@ -1237,42 +1297,23 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   });
 }
 
-  if(
-    url.pathname==='/api/public/account-request/status'&&
-    req.method==='GET'
-  ){
-    const code=
-      clean(url.searchParams.get('code'),100);
-
-    const email=
-      clean(
-        url.searchParams.get('email'),
-        200
-      ).toLowerCase();
-
-    if(!code||!email){
-      return json({
-        error:'CODE_AND_EMAIL_REQUIRED'
-      },400);
-    }
-
+  if(url.pathname==='/api/public/account-request/status'&&req.method==='GET')return json({error:'METHOD_NOT_ALLOWED',message:'Hãy tra cứu từ biểu mẫu bảo mật của Cổng Thành viên.'},405,{'cache-control':'no-store'});
+  if(url.pathname==='/api/public/account-request/status'&&req.method==='POST'){
+    const b=await bodyJson(req),code=clean(b.code,100),email=clean(b.email,200).toLowerCase();
+    const ipKey=`request-status-ip:${await sha256(clientHint(req))}`;
+    const ipRate=await safeRateState(env,ipKey,12,15);
+    if(ipRate.blocked)return json({error:'TOO_MANY_STATUS_CHECKS',message:'Bạn đã tra cứu quá nhiều lần. Vui lòng thử lại sau 15 phút.'},429,{'retry-after':'900','cache-control':'no-store'});
+    await safeRateFail(env,ipKey,12,15);
+    if(!code||!email)return json({error:'CODE_AND_EMAIL_REQUIRED'},400,{'cache-control':'no-store'});
+    const lookupKey=`request-status-lookup:${await sha256(code.toUpperCase()+'|'+email)}`;
+    const lookupRate=await safeRateState(env,lookupKey,8,15);
+    if(lookupRate.blocked)return json({error:'TOO_MANY_STATUS_CHECKS',message:'Thông tin tra cứu này đã được thử quá nhiều lần. Vui lòng thử lại sau.'},429,{'retry-after':'900','cache-control':'no-store'});
+    await safeRateFail(env,lookupKey,8,15);
     const r=await env.DB.prepare(`
-      SELECT
-        request_code,
-        full_name,
-        status,
-        admin_note,
-        reviewed_at,
-        created_at
-      FROM account_requests
-      WHERE request_code=?
-        AND lower(email)=?
-      LIMIT 1
+      SELECT request_code,full_name,status,admin_note,reviewed_at,created_at
+      FROM account_requests WHERE request_code=? AND lower(email)=? LIMIT 1
     `).bind(code,email).first();
-
-    return r
-      ?json({request:r})
-      :json({error:'NOT_FOUND'},404);
+    return r?json({request:r},200,{'cache-control':'no-store'}):json({error:'NOT_FOUND'},404,{'cache-control':'no-store'});
   }
 
   if(url.pathname==='/api/public/password/forgot'&&req.method==='POST'){
@@ -1307,49 +1348,53 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   // Independent QR issuance for externally designed cards. It is deliberately
   // separate from member_cards and one_time_credentials.
   if(url.pathname==='/api/admin/issuance-overview'&&req.method==='GET'){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(!(await isNetworkAdmin(env,s.account_id))||!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN',message:'Thống kê phát hành gồm QR và thẻ sự kiện toàn Mạng lưới; cần quyền quản trị Mạng lưới.'},403);
     const today=dateInVietnam();
     const future=new Date(Date.now()+30*86400000);
     const dateParts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(future).map(x=>[x.type,x.value]));
     const expiryLimit=`${dateParts.year}-${dateParts.month}-${dateParts.day}`;
     const [qr,totalOt,activeOt,memberTotal,memberActive,expiring]=await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='active' AND issued_at<=? AND (expires_at IS NULL OR expires_at>=?) THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='revoked' THEN 1 ELSE 0 END) revoked,SUM(CASE WHEN status='active' AND expires_at IS NOT NULL AND expires_at<? THEN 1 ELSE 0 END) expired,SUM(CASE WHEN status='active' AND issued_at>? THEN 1 ELSE 0 END) pending FROM verification_qr_records`).bind(today,today,today,today).first(),
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='active' AND date(issued_at)=issued_at AND issued_at<=? AND (expires_at IS NULL OR (date(expires_at)=expires_at AND expires_at>=?)) THEN 1 ELSE 0 END) active,SUM(CASE WHEN status='revoked' THEN 1 ELSE 0 END) revoked,SUM(CASE WHEN status='active' AND expires_at IS NOT NULL AND date(expires_at)=expires_at AND expires_at<? THEN 1 ELSE 0 END) expired,SUM(CASE WHEN status='active' AND (date(issued_at) IS NULL OR date(issued_at)<>issued_at OR issued_at>?) OR status='active' AND expires_at IS NOT NULL AND (date(expires_at) IS NULL OR date(expires_at)<>expires_at) THEN 1 ELSE 0 END) pending FROM verification_qr_records`).bind(today,today,today,today).first(),
       env.DB.prepare('SELECT COUNT(*) n FROM one_time_credentials').first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM one_time_credentials WHERE status='active' AND (expires_at IS NULL OR expires_at>=?)`).bind(today).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM one_time_credentials WHERE status='active' AND date(issued_at)=issued_at AND issued_at<=? AND (expires_at IS NULL OR (date(expires_at)=expires_at AND expires_at>=?))`).bind(today,today).first(),
       env.DB.prepare('SELECT COUNT(*) n FROM member_cards').first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND (expires_at IS NULL OR expires_at>=?)`).bind(today).first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at>=? AND expires_at<=?`).bind(today,expiryLimit).first()
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND date(issued_at)=issued_at AND issued_at<=? AND (expires_at IS NULL OR (date(expires_at)=expires_at AND expires_at>=?))`).bind(today,today).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND date(issued_at)=issued_at AND issued_at<=? AND expires_at IS NOT NULL AND date(expires_at)=expires_at AND expires_at>=? AND expires_at<=?`).bind(today,today,expiryLimit).first()
     ]);
     return json({today,verification_qr:{total:Number(qr?.total||0),active:Number(qr?.active||0),expired:Number(qr?.expired||0),revoked:Number(qr?.revoked||0),pending:Number(qr?.pending||0)},one_time:{total:Number(totalOt?.n||0),active:Number(activeOt?.n||0)},member_cards:{total:Number(memberTotal?.n||0),active:Number(memberActive?.n||0),expiring_30_days:Number(expiring?.n||0)}});
   }
 
   if(url.pathname==='/api/admin/member-cards'&&req.method==='GET'){
     if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
-    const q=clean(url.searchParams.get('q'),100);
-    const status=clean(url.searchParams.get('status'),20);
-    const limit=Math.min(250,Math.max(10,Number(url.searchParams.get('limit')||100)));
-    const today=dateInVietnam();
+    const q=clean(url.searchParams.get('q'),100),status=clean(url.searchParams.get('status'),20);
+    const limit=Math.min(250,Math.max(10,Number(url.searchParams.get('limit')||100))),today=dateInVietnam();
+    const networkWide=await isNetworkAdmin(env,s.account_id);
+    const scopeIds=networkWide?null:(await visibleOrgs(env,s.account_id)).map(x=>x.id);
+    if(scopeIds!==null&&!scopeIds.length)return json({items:[],today});
+    const scopeSql=scopeIds===null?'':` AND c.org_node_id IN (${scopeIds.map(()=>'?').join(',')})`;
+    const bind=[today,today,q,`%${q}%`,`%${q}%`,`%${q}%`,status,today,today,status,...(scopeIds||[]),limit];
+    const effectiveCardStatus=`CASE WHEN c.status='active' AND (date(c.issued_at) IS NULL OR date(c.issued_at)<>c.issued_at OR c.issued_at>?) THEN 'pending' WHEN c.status='active' AND c.expires_at IS NOT NULL AND (date(c.expires_at) IS NULL OR date(c.expires_at)<>c.expires_at) THEN 'pending' WHEN c.status='active' AND c.expires_at IS NOT NULL AND c.expires_at<? THEN 'expired' ELSE c.status END`;
     const r=await env.DB.prepare(`
       SELECT c.id,c.person_id,c.card_type_id,c.org_node_id,c.card_number,c.title_on_card,c.issued_at,c.expires_at,
-        CASE WHEN c.status='active' AND c.expires_at IS NOT NULL AND c.expires_at<? THEN 'expired' ELSE c.status END status,
+        ${effectiveCardStatus} status,
         c.verify_token,p.full_name,p.member_code,p.avatar_url,t.name card_type_name,t.template_json card_template_json,o.name org_name
       FROM member_cards c JOIN people p ON p.id=c.person_id
       LEFT JOIN card_types t ON t.id=c.card_type_id LEFT JOIN org_nodes o ON o.id=c.org_node_id
       WHERE (?='' OR p.full_name LIKE ? OR p.member_code LIKE ? OR c.card_number LIKE ?)
-        AND (?='' OR c.status=?)
+        AND (?='' OR (${effectiveCardStatus})=?) ${scopeSql}
       ORDER BY c.created_at DESC LIMIT ?
-    `).bind(today,q,`%${q}%`,`%${q}%`,`%${q}%`,status,status,limit).all();
+    `).bind(...bind).all();
     return json({items:r.results||[],today});
   }
 
   if(url.pathname==='/api/admin/verification-qr'&&['GET','POST'].includes(req.method)){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(!(await isNetworkAdmin(env,s.account_id))||!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN',message:'QR độc lập là dữ liệu cấp Mạng lưới; cần quyền quản trị Mạng lưới.'},403);
     if(req.method==='GET'){
       const today=dateInVietnam();
       const q=clean(url.searchParams.get('q'),100);
       const r=await env.DB.prepare(`
         SELECT id,credential_title,full_name,role_label,organization_label,reference_number,issued_at,expires_at,
-          CASE WHEN status='active' AND issued_at>? THEN 'pending' WHEN status='active' AND expires_at IS NOT NULL AND expires_at<? THEN 'expired' ELSE status END effective_status,
+          CASE WHEN status='active' AND (date(issued_at) IS NULL OR date(issued_at)<>issued_at OR issued_at>?) THEN 'pending' WHEN status='active' AND expires_at IS NOT NULL AND (date(expires_at) IS NULL OR date(expires_at)<>expires_at) THEN 'pending' WHEN status='active' AND expires_at IS NOT NULL AND expires_at<? THEN 'expired' ELSE status END effective_status,
           verify_token,public_note,created_at,updated_at
         FROM verification_qr_records
         WHERE (?='' OR full_name LIKE ? OR credential_title LIKE ? OR reference_number LIKE ? OR organization_label LIKE ?)
@@ -1366,9 +1411,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const expiresAt=clean(b.expires_at,10)||null;
     const publicNote=clean(b.public_note,500)||null;
     const privateNotes=clean(b.private_notes,1000)||null;
-    const validDate=v=>!v||(/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v);
     if(!credentialTitle||!fullName)return json({error:'CREDENTIAL_TITLE_AND_NAME_REQUIRED',message:'Cần nhập tên thẻ/giấy xác nhận và họ tên.'},400);
-    if(!validDate(issuedAt)||!validDate(expiresAt))return json({error:'INVALID_DATE',message:'Ngày cấp hoặc ngày hết hiệu lực không hợp lệ.'},400);
+    if(!validDateOnly(issuedAt)||(expiresAt&&!validDateOnly(expiresAt)))return json({error:'INVALID_DATE',message:'Ngày cấp hoặc ngày hết hiệu lực không hợp lệ.'},400);
     if(expiresAt&&expiresAt<issuedAt)return json({error:'EXPIRY_BEFORE_ISSUE',message:'Ngày hết hiệu lực không được trước ngày cấp.'},400);
     const id=uid('vqr');
     let referenceNumber=clean(b.reference_number,80);
@@ -1397,7 +1441,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   }
   const verificationQrAction=url.pathname.match(/^\/api\/admin\/verification-qr\/([^/]+)\/(revoke)$/);
   if(verificationQrAction&&req.method==='POST'){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(!(await isNetworkAdmin(env,s.account_id))||!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN',message:'QR độc lập là dữ liệu cấp Mạng lưới; cần quyền quản trị Mạng lưới.'},403);
     const id=decodeURIComponent(verificationQrAction[1]);
     const row=await env.DB.prepare('SELECT id,status,reference_number FROM verification_qr_records WHERE id=?').bind(id).first();
     if(!row)return json({error:'NOT_FOUND'},404);
@@ -1409,15 +1453,20 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   }
 
   if(url.pathname==='/api/admin/one-time-credentials'&&['GET','POST'].includes(req.method)){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(!(await isNetworkAdmin(env,s.account_id))||!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN',message:'Thẻ sự kiện hiện chưa gắn phạm vi đơn vị; cần quyền quản trị Mạng lưới.'},403);
     if(req.method==='GET'){
-      const r=await env.DB.prepare(`SELECT o.id,o.credential_type,o.event_name,o.full_name,o.role_label,o.card_number,o.issued_at,o.expires_at,o.status,o.verify_token,o.card_type_id,o.notes,o.created_by_account_id,o.created_at,o.updated_at,t.name card_type_name,t.template_json card_template_json FROM one_time_credentials o LEFT JOIN card_types t ON t.id=o.card_type_id ORDER BY o.created_at DESC LIMIT 250`).all();
+      const today=dateInVietnam();
+      const r=await env.DB.prepare(`SELECT o.id,o.credential_type,o.event_name,o.full_name,o.role_label,o.card_number,o.issued_at,o.expires_at,o.status,CASE WHEN o.status='active' AND (date(o.issued_at) IS NULL OR date(o.issued_at)<>o.issued_at OR o.issued_at>?) THEN 'pending' WHEN o.status='active' AND o.expires_at IS NOT NULL AND (date(o.expires_at) IS NULL OR date(o.expires_at)<>o.expires_at) THEN 'pending' WHEN o.status='active' AND o.expires_at IS NOT NULL AND o.expires_at<? THEN 'expired' ELSE o.status END effective_status,o.verify_token,o.card_type_id,o.notes,o.created_by_account_id,o.created_at,o.updated_at,t.name card_type_name,t.template_json card_template_json FROM one_time_credentials o LEFT JOIN card_types t ON t.id=o.card_type_id ORDER BY o.created_at DESC LIMIT 250`).bind(today,today).all();
       return json({items:r.results||[]});
     }
     const b=await bodyJson(req);
     const fullName=clean(b.full_name,160);
     const eventName=clean(b.event_name,200);
+    const issuedAt=clean(b.issued_at,20)||dateInVietnam();
+    const expiresAt=clean(b.expires_at,20)||null;
     if(!fullName||!eventName)return json({error:'FULL_NAME_AND_EVENT_REQUIRED'},400);
+    if(!validDateOnly(issuedAt)||(expiresAt&&!validDateOnly(expiresAt)))return json({error:'INVALID_DATE',message:'Ngày cấp hoặc ngày hết hiệu lực không hợp lệ.'},400);
+    if(expiresAt&&expiresAt<issuedAt)return json({error:'EXPIRY_BEFORE_ISSUE',message:'Ngày hết hiệu lực không được trước ngày cấp.'},400);
     const id=uid('otc');
     const verify=verifyCode('EVT');
     let cardNumber=clean(b.card_number,120);
@@ -1432,14 +1481,14 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     }
     const status=['active','used','expired','revoked'].includes(b.status)?b.status:'active';
     try{
-      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,null,cardNumber,clean(b.issued_at,20)||dateInVietnam(),clean(b.expires_at,20)||null,status,verify,null,clean(b.notes,1000)||null,s.account_id).run();
+      await env.DB.prepare(`INSERT INTO one_time_credentials(id,credential_type,event_name,full_name,role_label,photo_url,card_number,issued_at,expires_at,status,verify_token,card_type_id,notes,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'event_card',eventName,fullName,clean(b.role_label,160)||null,null,cardNumber,issuedAt,expiresAt,status,verify,null,clean(b.notes,1000)||null,s.account_id).run();
     }catch(e){return json({error:String(e).includes('UNIQUE')?'CARD_NUMBER_ALREADY_USED':'CREATE_FAILED'},400)}
     await safeAudit(env,s.account_id,'one_time_credential_issued','one_time_credential',id,null,{event_name:eventName,card_number:cardNumber});
     return json({ok:true,id,verify_token:verify,card_number:cardNumber});
   }
   const oneTimeAction=url.pathname.match(/^\/api\/admin\/one-time-credentials\/([^/]+)\/(revoke|use)$/);
   if(oneTimeAction&&req.method==='POST'){
-    if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
+    if(!(await isNetworkAdmin(env,s.account_id))||!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN',message:'Thẻ sự kiện hiện chưa gắn phạm vi đơn vị; cần quyền quản trị Mạng lưới.'},403);
     const id=decodeURIComponent(oneTimeAction[1]);
     const action=oneTimeAction[2];
     const row=await env.DB.prepare('SELECT id,status FROM one_time_credentials WHERE id=?').bind(id).first();
@@ -1613,6 +1662,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const person=await env.DB.prepare(
       'SELECT * FROM people WHERE id=?'
     ).bind(s.person_id).first();
+    await ensureAccountRequestExtended(env);
+    const workProfile=await env.DB.prepare(`SELECT school_name,employment_status,workplace_name,work_department,job_title FROM people_work_profiles WHERE person_id=?`).bind(s.person_id).first();
 
     const memberships=await env.DB.prepare(`
       SELECT
@@ -1681,6 +1732,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
     return json({
       person,
+      work_profile:workProfile||{school_name:person?.school_or_workplace||'',employment_status:person?.education_status||'',workplace_name:person?.school_or_workplace||'',work_department:'',job_title:person?.class_or_major||''},
       memberships:memberships.results||[],
       cards:cards.results||[],
       permissions:
@@ -1698,6 +1750,10 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const b=await bodyJson(req);
     const current=await env.DB.prepare('SELECT * FROM people WHERE id=?').bind(s.person_id).first();
     if(!current)return json({error:'PROFILE_NOT_FOUND'},404);
+    await ensureAccountRequestExtended(env);
+    const currentWork=await env.DB.prepare('SELECT * FROM people_work_profiles WHERE person_id=?').bind(s.person_id).first()||{};
+    const takeWork=(key,max,fallback='')=>Object.prototype.hasOwnProperty.call(b,key)?clean(b[key],max):(currentWork[key]||fallback||'');
+    const nextWork={school_name:takeWork('school_name',240,current.school_or_workplace),employment_status:takeWork('employment_status',80,current.education_status),workplace_name:takeWork('workplace_name',240,current.school_or_workplace),work_department:takeWork('work_department',180),job_title:takeWork('job_title',180,current.class_or_major)};
 
     const take=(key,max,lower=false)=>{
       if(!Object.prototype.hasOwnProperty.call(b,key))return current[key]??'';
@@ -1754,10 +1810,11 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
           next.temporary_address||null,next.education_or_work_type||null,next.school_or_workplace||null,next.class_or_major||null,
           next.education_status||null,next.avatar_url||null,s.person_id
         ),
-        env.DB.prepare(`UPDATE accounts SET email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next.email||null,s.account_id)
+        env.DB.prepare(`UPDATE accounts SET email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next.email||null,s.account_id),
+        env.DB.prepare(`INSERT INTO people_work_profiles(person_id,school_name,employment_status,workplace_name,work_department,job_title,updated_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(person_id) DO UPDATE SET school_name=excluded.school_name,employment_status=excluded.employment_status,workplace_name=excluded.workplace_name,work_department=excluded.work_department,job_title=excluded.job_title,updated_at=CURRENT_TIMESTAMP`).bind(s.person_id,nextWork.school_name||null,nextWork.employment_status||null,nextWork.workplace_name||null,nextWork.work_department||null,nextWork.job_title||null)
       ]);
       await audit(env,s.account_id,'profile_updated','person',s.person_id,null,{fields:Object.keys(b||{})});
-      return json({ok:true,person:next});
+      return json({ok:true,person:next,work_profile:nextWork});
     }catch(err){
       const msg=String(err?.message||err);
       if(/unique/i.test(msg)&&/email/i.test(msg))return json({error:'EMAIL_ALREADY_USED',message:'Email này đã được sử dụng.'},409);
@@ -1844,9 +1901,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   // =========================================================
 
   if(url.pathname==='/api/me/avatar'&&req.method==='POST'){
-    const ct=
-      (req.headers.get('content-type')||'')
-        .toLowerCase();
+    const ct=(req.headers.get('content-type')||'').toLowerCase().split(';')[0].trim();
 
     if(![
       'image/jpeg',
@@ -1858,7 +1913,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       },415);
     }
 
-    const data=await req.arrayBuffer();
+    const data=new Uint8Array(await req.arrayBuffer());
 
     if(
       !data.byteLength||
@@ -1868,6 +1923,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         error:'IMAGE_TOO_LARGE'
       },413);
     }
+    if(!validUploadedImage(data,ct))return json({error:'INVALID_IMAGE_FILE',message:'Nội dung tệp không khớp định dạng ảnh được chọn.'},400);
 
     const ext=
       ct==='image/png'
@@ -2800,6 +2856,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(!(await hasPerm(env,s.account_id,'card.manage')))return json({error:'FORBIDDEN'},403);
       const cardType=clean(b.card_type_id,100)||'card_member';
       const org=clean(b.org_node_id,100)||'org_sfn';
+      const issuedAt=dateInVietnam(),expiresAt=clean(b.expires_at,10)||null;
+      if(expiresAt&&!validDateOnly(expiresAt))return json({error:'INVALID_DATE',message:'Ngày hết hiệu lực không hợp lệ.'},400);
+      if(expiresAt&&expiresAt<issuedAt)return json({error:'EXPIRY_BEFORE_ISSUE',message:'Ngày hết hiệu lực không được trước ngày cấp.'},400);
       if(!(await canAccessOrg(env,s.account_id,org)))return json({error:'SCOPE_FORBIDDEN'},403);
       for(const m of members){
         const existing=await env.DB.prepare("SELECT id FROM member_cards WHERE person_id=? AND status='active' LIMIT 1").bind(m.id).first();
@@ -2812,8 +2871,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         }
         if(!unique){results.push({id:m.id,ok:false,error:'CARD_NUMBER_GENERATION_FAILED'});continue;}
         const cardId=uid('card'),verify=verifyCode('CARD');
-        await env.DB.prepare(`INSERT INTO member_cards(id,person_id,card_type_id,org_node_id,card_number,title_on_card,issued_at,expires_at,status,verify_token) VALUES(?,?,?,?,?,?,?,?, 'active',?)`).bind(cardId,m.id,cardType,org,cardNumber,clean(b.title_on_card,180)||null,dateInVietnam(),clean(b.expires_at,20)||null,verify).run();
-        await audit(env,s.account_id,'card_issued_bulk','member_card',cardId,org,{person_id:m.id,batch:true,verify_token:verify});
+        await env.DB.prepare(`INSERT INTO member_cards(id,person_id,card_type_id,org_node_id,card_number,title_on_card,issued_at,expires_at,status,verify_token) VALUES(?,?,?,?,?,?,?,?, 'active',?)`).bind(cardId,m.id,cardType,org,cardNumber,clean(b.title_on_card,180)||null,issuedAt,expiresAt,verify).run();
+        await audit(env,s.account_id,'card_issued_bulk','member_card',cardId,org,{person_id:m.id,batch:true});
         results.push({id:m.id,ok:true,card_id:cardId,card_number:cardNumber});
       }
     } else {
@@ -4329,6 +4388,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         },403);
       }
 
+      const issuedAt=clean(b.issued_at,20)||dateInVietnam(),expiresAt=clean(b.expires_at,20)||null;
+      if(!validDateOnly(issuedAt)||(expiresAt&&!validDateOnly(expiresAt)))return json({error:'INVALID_DATE',message:'Ngày cấp hoặc ngày hết hiệu lực không hợp lệ.'},400);
+      if(expiresAt&&expiresAt<issuedAt)return json({error:'EXPIRY_BEFORE_ISSUE',message:'Ngày hết hiệu lực không được trước ngày cấp.'},400);
       const id=uid('card');
 
       const verify=
@@ -4363,11 +4425,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         b.org_node_id||'org_sfn',
         number,
         clean(b.title_on_card,180)||null,
-        clean(b.issued_at,20)||
-          new Date()
-            .toISOString()
-            .slice(0,10),
-        clean(b.expires_at,20)||null,
+        issuedAt,
+        expiresAt,
         clean(b.status,30)||'active',
         verify
       ).run();
@@ -4706,9 +4765,11 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       }else if(kind==='achievement'){
         await env.DB.prepare(`UPDATE achievements SET org_node_id=?,title=?,achievement_type=?,issuer=?,achieved_at=?,verification_status=?,source_type=?,description=? WHERE id=? AND person_id=?`).bind(changedOrg,clean(b.title,240)||row.title,clean(b.achievement_type,100)||null,clean(b.issuer,240)||null,clean(b.achieved_at,20)||null,clean(b.verification_status,30)||row.verification_status,clean(b.source_type,30)||row.source_type,clean(b.description,2000)||null,id,pid).run();
       }else if(kind==='card'){
-        const status=clean(b.status,30)||row.status;
+        const status=clean(b.status,30)||row.status,issuedAt=clean(b.issued_at,20)||row.issued_at,expiresAt=clean(b.expires_at,20)||null;
         if(!['active','expired','revoked'].includes(status))return json({error:'INVALID_DATA'},400);
-        await env.DB.prepare(`UPDATE member_cards SET org_node_id=?,card_number=?,title_on_card=?,issued_at=?,expires_at=?,status=? WHERE id=? AND person_id=?`).bind(changedOrg,clean(b.card_number,160)||row.card_number,clean(b.title_on_card,180)||null,clean(b.issued_at,20)||row.issued_at,clean(b.expires_at,20)||null,status,id,pid).run();
+        if(!validDateOnly(issuedAt)||(expiresAt&&!validDateOnly(expiresAt)))return json({error:'INVALID_DATE'},400);
+        if(expiresAt&&expiresAt<issuedAt)return json({error:'EXPIRY_BEFORE_ISSUE'},400);
+        await env.DB.prepare(`UPDATE member_cards SET org_node_id=?,card_number=?,title_on_card=?,issued_at=?,expires_at=?,status=? WHERE id=? AND person_id=?`).bind(changedOrg,clean(b.card_number,160)||row.card_number,clean(b.title_on_card,180)||null,issuedAt,expiresAt,status,id,pid).run();
       }else if(kind==='document'){
         await env.DB.prepare(`UPDATE member_documents SET org_node_id=?,document_type=?,title=?,file_url=?,issued_at=?,visibility=? WHERE id=? AND person_id=?`).bind(changedOrg,clean(b.document_type,100)||row.document_type,clean(b.title,240)||row.title,clean(b.file_url,1200)||null,clean(b.issued_at,20)||null,clean(b.visibility,30)||row.visibility,id,pid).run();
       }else return json({error:'METHOD_NOT_ALLOWED'},405);
@@ -4782,10 +4843,28 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(url.pathname==='/api/admin/account-requests'&&req.method==='GET'){
     if(!(await hasPerm(env,s.account_id,'request.manage')))return json({error:'FORBIDDEN'},403);
     await ensureAccountRequestProfiles(env);
+    await ensureAccountRequestExtended(env);
     const status=clean(url.searchParams.get('status'),30)||'pending',params=[],where=[];
     if(status!=='all'){where.push('ar.status=?');params.push(status)}
     if(!(await isNetworkAdmin(env,s.account_id))){where.push(`ar.target_org_node_id IN (WITH RECURSIVE allowed(id) AS (SELECT sc.org_node_id FROM account_scopes sc JOIN roles rr ON rr.id=sc.role_id WHERE sc.account_id=? AND sc.active=1 AND rr.code IN ('SCOPE_ADMIN','UNIT_ADMIN','DEPARTMENT_ADMIN') AND sc.org_node_id IS NOT NULL UNION SELECT o.id FROM org_nodes o JOIN allowed a ON o.parent_id=a.id) SELECT id FROM allowed)`);params.push(s.account_id)}
-    const r=await env.DB.prepare(`SELECT ar.*,arp.education_or_work_type,arp.school_or_workplace,arp.class_or_major,arp.education_status,o.name org_name,a.username reviewer_username,CAST((julianday('now')-julianday(ar.date_of_birth))/365.2425 AS INTEGER) age FROM account_requests ar LEFT JOIN account_request_profiles arp ON arp.request_id=ar.id LEFT JOIN org_nodes o ON o.id=ar.target_org_node_id LEFT JOIN accounts a ON a.id=ar.reviewed_by_account_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY ar.created_at DESC LIMIT 500`).bind(...params).all();return json({items:r.results||[]});
+    const r=await env.DB.prepare(`
+      SELECT ar.*,arp.education_or_work_type,arp.school_or_workplace,arp.class_or_major,arp.education_status,
+        ext.school_name,ext.employment_status,ext.workplace_name,ext.work_department,ext.job_title,
+        ext.guardian_date_of_birth,CASE WHEN ext.guardian_id_number IS NULL OR trim(ext.guardian_id_number)='' THEN NULL WHEN length(ext.guardian_id_number)>4 THEN '••••••••'||substr(ext.guardian_id_number,-4) ELSE '••••' END guardian_id_number,
+        o.name org_name,a.username reviewer_username,
+        COALESCE(reqorg.requested_org_ids,ar.target_org_node_id) requested_org_ids,
+        COALESCE(reqorg.requested_org_names,o.name) requested_org_names,
+        COALESCE(reqorg.requested_org_count,1) requested_org_count,
+        CAST((julianday('now')-julianday(ar.date_of_birth))/365.2425 AS INTEGER) age
+      FROM account_requests ar
+      LEFT JOIN account_request_profiles arp ON arp.request_id=ar.id
+      LEFT JOIN account_request_extended ext ON ext.request_id=ar.id
+      LEFT JOIN (SELECT aro.request_id,GROUP_CONCAT(aro.org_node_id, ',') requested_org_ids,GROUP_CONCAT(onode.name, ' · ') requested_org_names,COUNT(*) requested_org_count FROM account_request_orgs aro JOIN org_nodes onode ON onode.id=aro.org_node_id GROUP BY aro.request_id) reqorg ON reqorg.request_id=ar.id
+      LEFT JOIN org_nodes o ON o.id=ar.target_org_node_id
+      LEFT JOIN accounts a ON a.id=ar.reviewed_by_account_id
+      ${where.length?'WHERE '+where.join(' AND '):''}
+      ORDER BY ar.created_at DESC LIMIT 500
+    `).bind(...params).all();return json({items:r.results||[]});
   }
   const approvalResend=url.pathname.match(/^\/api\/admin\/account-requests\/([^/]+)\/send-approval$/);
   if(approvalResend&&req.method==='POST'){
@@ -4802,12 +4881,32 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(reqReview&&req.method==='POST'){
     if(!(await hasPerm(env,s.account_id,'request.manage')))return json({error:'FORBIDDEN'},403);
     await ensureAccountRequestProfiles(env);
-    const rid=decodeURIComponent(reqReview[1]),op=reqReview[2],b=await bodyJson(req),r=await env.DB.prepare(`SELECT ar.*,arp.education_or_work_type,arp.school_or_workplace,arp.class_or_major,arp.education_status FROM account_requests ar LEFT JOIN account_request_profiles arp ON arp.request_id=ar.id WHERE ar.id=? AND ar.status IN ('pending','supplement')`).bind(rid).first();
-    if(!r)return json({error:'REQUEST_NOT_PENDING'},409);if(!(await canAccessOrg(env,s.account_id,r.target_org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);
-    if(op==='reject'||op==='supplement'){const note=clean(b.admin_note,1000);if(!note)return json({error:'ADMIN_NOTE_REQUIRED'},400);const next=op==='reject'?'rejected':'supplement';await env.DB.prepare(`UPDATE account_requests SET status=?,admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next,note,s.account_id,rid).run();await audit(env,s.account_id,op==='reject'?'account_request_rejected':'account_request_supplement_requested','account_request',rid,r.target_org_node_id,{note});const label=op==='reject'?'Chưa được phê duyệt':'Cần bổ sung hồ sơ';await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] ${label} – ${r.request_code}`,html:memberEmailHtml({title:label,name:r.full_name,intro:op==='reject'?'Sky First Network đã hoàn tất xem xét yêu cầu đăng ký của bạn.':'Hồ sơ đăng ký của bạn cần bổ sung thêm thông tin trước khi tiếp tục xử lý.',code:r.request_code,status:label,processing:'',body:note,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Mở Trung Tâm Thành Viên Số Sky First'})});return json({ok:true,status:next})}
+    await ensureAccountRequestExtended(env);
+    const rid=decodeURIComponent(reqReview[1]),op=reqReview[2],b=await bodyJson(req),r=await env.DB.prepare(`SELECT ar.*,arp.education_or_work_type,arp.school_or_workplace,arp.class_or_major,arp.education_status,ext.school_name,ext.employment_status,ext.workplace_name,ext.work_department,ext.job_title,ext.guardian_date_of_birth,ext.guardian_id_number FROM account_requests ar LEFT JOIN account_request_profiles arp ON arp.request_id=ar.id LEFT JOIN account_request_extended ext ON ext.request_id=ar.id WHERE ar.id=? AND ar.status IN ('pending','supplement')`).bind(rid).first();
+    if(!r)return json({error:'REQUEST_NOT_PENDING'},409);
+    if(!(await canAccessOrg(env,s.account_id,r.target_org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);
+    if(op==='reject'||op==='supplement'){
+      const note=clean(b.admin_note,1000);if(!note)return json({error:'ADMIN_NOTE_REQUIRED'},400);
+      const next=op==='reject'?'rejected':'supplement';
+      await env.DB.prepare(`UPDATE account_requests SET status=?,admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,avatar_url=CASE WHEN ?='rejected' THEN '' ELSE avatar_url END WHERE id=?`).bind(next,note,s.account_id,next,rid).run();
+      if(op==='reject')await deletePendingRequestAvatar(env,r.avatar_url);
+      await audit(env,s.account_id,op==='reject'?'account_request_rejected':'account_request_supplement_requested','account_request',rid,r.target_org_node_id,{note});
+      const label=op==='reject'?'Chưa được phê duyệt':'Cần bổ sung hồ sơ';
+      await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] ${label} – ${r.request_code}`,html:memberEmailHtml({title:label,name:r.full_name,intro:op==='reject'?'Sky First Network đã hoàn tất xem xét yêu cầu đăng ký của bạn.':'Hồ sơ đăng ký của bạn cần bổ sung thêm thông tin trước khi tiếp tục xử lý.',code:r.request_code,status:label,processing:'',body:note,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Mở Trung Tâm Thành Viên Số Sky First'})});
+      return json({ok:true,status:next});
+    }
+    const requestedRows=await env.DB.prepare(`SELECT aro.org_node_id,aro.is_primary,o.status,o.deleted_at FROM account_request_orgs aro JOIN org_nodes o ON o.id=aro.org_node_id WHERE aro.request_id=? ORDER BY aro.is_primary DESC`).bind(rid).all();
+    const requestedOrgIds=[...new Set((requestedRows.results||[]).map(x=>x.org_node_id).filter(Boolean))];
+    if(!requestedOrgIds.length)requestedOrgIds.push(r.target_org_node_id);
+    if(!requestedOrgIds.includes(r.target_org_node_id))requestedOrgIds.unshift(r.target_org_node_id);
+    if(requestedRows.results?.some(x=>x.status!=='active'||x.deleted_at))return json({error:'REQUESTED_ORG_UNAVAILABLE',message:'Một trong các đơn vị đã chọn không còn hoạt động.'},409);
+    for(const orgId of requestedOrgIds){if(!(await canAccessOrg(env,s.account_id,orgId)))return json({error:'SCOPE_FORBIDDEN',message:'Hồ sơ có nhiều đơn vị đăng ký. Chỉ quản trị viên có quyền với tất cả đơn vị đã chọn mới được phê duyệt; vui lòng chuyển cho quản trị Mạng lưới.'},403)}
     if(await env.DB.prepare(`SELECT 1 FROM accounts WHERE lower(email)=? LIMIT 1`).bind(r.email).first())return json({error:'ACCOUNT_ALREADY_EXISTS'},409);
     const code=await memberCode(env),pid=uid('person'),aid=uid('account'),username=code.toLowerCase(),temporaryPassword=`SFN-${crypto.randomUUID().replaceAll('-','').slice(0,14)}`,salt=token(),it=100000,hash=await pbkdf2(temporaryPassword,salt,it);
-    await env.DB.batch([
+    const avatarPromotion=await prepareRequestAvatarPromotion(env,r.avatar_url,pid);
+    const approvedAvatarUrl=avatarPromotion.url||(String(r.avatar_url||'').startsWith('/files/requests/avatars/')?null:(clean(r.avatar_url,1200)||null));
+    try{
+      await env.DB.batch([
 env.DB.prepare(`
   INSERT INTO people(
     id,
@@ -4856,13 +4955,21 @@ env.DB.prepare(`
   r.school_or_workplace||null,
   r.class_or_major||null,
   r.education_status||null,
-  r.avatar_url
+  approvedAvatarUrl
 ),
       env.DB.prepare(`INSERT INTO accounts(id,person_id,username,email,password_hash,password_salt,password_iterations,force_password_change) VALUES(?,?,?,?,?,?,?,1)`).bind(aid,pid,username,r.email,hash,salt,it),
       env.DB.prepare(`INSERT INTO account_scopes(id,account_id,role_id,org_node_id,active) VALUES(?,?,?,?,1)`).bind(uid('scope'),aid,'role_member',null),
-      env.DB.prepare(`INSERT INTO org_memberships(id,person_id,org_node_id,role_label,started_at,status,is_primary) VALUES(?,?,?,?,DATE('now'),'active',1)`).bind(uid('membership'),pid,r.target_org_node_id,'Thành viên'),
-      env.DB.prepare(`UPDATE account_requests SET status='approved',admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,approved_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(clean(b.admin_note,1000)||'Đã phê duyệt',s.account_id,pid,rid)
-    ]);await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code});const mail=b.send_email!==false?await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Tài khoản thành viên đã được phê duyệt – ${code}`,html:memberEmailHtml({title:'Tài khoản thành viên đã được phê duyệt',name:r.full_name,intro:'Hồ sơ của bạn đã được phê duyệt và tài khoản tại Trung Tâm Thành Viên Số Sky First đã được tạo.',code:r.request_code,status:'Đã phê duyệt',processing:'',body:`Mã thành viên: ${code}. Tên đăng nhập: ${username}. Vui lòng liên hệ bộ phận quản trị qua kênh hỗ trợ chính thức để nhận hướng dẫn kích hoạt tài khoản và thiết lập mật khẩu an toàn.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đăng nhập Trung Tâm Thành Viên Số Sky First'})}):{sent:false,reason:'NOT_REQUESTED'};await safeAudit(env,s.account_id,'approval_email_status','account_request',rid,r.target_org_node_id,{requested:b.send_email!==false,sent:mail.sent===true});return json({ok:true,email_sent:mail.sent===true,member_code:code,username,temporary_password:temporaryPassword,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
+      ...requestedOrgIds.map(orgId=>env.DB.prepare(`INSERT INTO org_memberships(id,person_id,org_node_id,role_label,started_at,status,is_primary) VALUES(?,?,?, ?,DATE('now'),'active',?)`).bind(uid('membership'),pid,orgId,'Thành viên',orgId===r.target_org_node_id?1:0)),
+      env.DB.prepare(`INSERT INTO people_work_profiles(person_id,school_name,employment_status,workplace_name,work_department,job_title) VALUES(?,?,?,?,?,?)`).bind(pid,r.school_name||null,r.employment_status||null,r.workplace_name||null,r.work_department||null,r.job_title||null),
+      env.DB.prepare(`UPDATE account_requests SET status='approved',avatar_url=?,admin_note=?,reviewed_by_account_id=?,reviewed_at=CURRENT_TIMESTAMP,approved_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(approvedAvatarUrl||'',clean(b.admin_note,1000)||'Đã phê duyệt',s.account_id,pid,rid),
+      env.DB.prepare(`UPDATE account_request_extended SET guardian_date_of_birth=NULL,guardian_id_number=NULL WHERE request_id=?`).bind(rid)
+      ]);
+    }catch(err){
+      if(avatarPromotion.newKey&&env.FILES?.delete){try{await env.FILES.delete(avatarPromotion.newKey)}catch(deleteErr){console.error('ORPHAN_AVATAR_CLEANUP_FAILED',String(deleteErr?.message||deleteErr))}}
+      throw err;
+    }
+    if(avatarPromotion.oldKey&&env.FILES?.delete){try{await env.FILES.delete(avatarPromotion.oldKey)}catch(err){console.error('OLD_REQUEST_AVATAR_DELETE_FAILED',String(err?.message||err))}}
+    await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code,org_node_ids:requestedOrgIds});const mail=b.send_email!==false?await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Tài khoản thành viên đã được phê duyệt – ${code}`,html:memberEmailHtml({title:'Tài khoản thành viên đã được phê duyệt',name:r.full_name,intro:'Hồ sơ của bạn đã được phê duyệt và tài khoản tại Trung Tâm Thành Viên Số Sky First đã được tạo.',code:r.request_code,status:'Đã phê duyệt',processing:'',body:`Mã thành viên: ${code}. Tên đăng nhập: ${username}. Vui lòng liên hệ bộ phận quản trị qua kênh hỗ trợ chính thức để nhận hướng dẫn kích hoạt tài khoản và thiết lập mật khẩu an toàn.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đăng nhập Trung Tâm Thành Viên Số Sky First'})}):{sent:false,reason:'NOT_REQUESTED'};await safeAudit(env,s.account_id,'approval_email_status','account_request',rid,r.target_org_node_id,{requested:b.send_email!==false,sent:mail.sent===true});return json({ok:true,email_sent:mail.sent===true,member_code:code,username,temporary_password:temporaryPassword,approved_org_ids:requestedOrgIds,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
   }
 
   // =========================================================
@@ -5078,12 +5185,16 @@ export default{
     if(url.pathname.startsWith('/files/')){
       let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return withSecurityHeaders(new Response('Bad request',{status:400}))}
       if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')) return withSecurityHeaders(new Response('Bad request',{status:400}));
-      const isPrivate=/^(members|documents|certificates)\//.test(key);
+      const isPrivate=/^(members|documents|certificates|requests\/avatars)\//.test(key);
       if(isPrivate){
         const fs=await getSession(request,env);
         if(!fs)return withSecurityHeaders(new Response('Unauthorized',{status:401}));
         const ownerMatch=key.match(/^certificates\/(?:external\/)?([^/]+)\//);
-        if(ownerMatch&&ownerMatch[1]!==fs.person_id){
+        if(key.startsWith('requests/avatars/')){
+          const requestRow=await env.DB.prepare(`SELECT target_org_node_id FROM account_requests WHERE avatar_url=? LIMIT 1`).bind(`/files/${key}`).first();
+          if(!requestRow)return withSecurityHeaders(new Response('Not found',{status:404}));
+          if(!(await isNetworkAdmin(env,fs.account_id))&&!(await canAccessOrg(env,fs.account_id,requestRow.target_org_node_id)))return withSecurityHeaders(new Response('Forbidden',{status:403}));
+        }else if(ownerMatch&&ownerMatch[1]!==fs.person_id){
           const elevated=await isNetworkAdmin(env,fs.account_id);
           if(!elevated)return withSecurityHeaders(new Response('Forbidden',{status:403}));
         }else if(!ownerMatch&&/^(members|documents)\//.test(key)){
@@ -5103,16 +5214,9 @@ export default{
       const h=new Headers();
 
       o.writeHttpMetadata(h);
-
-      h.set(
-        'etag',
-        o.httpEtag
-      );
-
-      h.set(
-        'x-content-type-options',
-        'nosniff'
-      );
+      if(key.startsWith('requests/avatars/'))h.set('cache-control','private, no-store, max-age=0');
+      h.set('etag',o.httpEtag);
+      h.set('x-content-type-options','nosniff');
 
       return withSecurityHeaders(new Response(
         o.body,

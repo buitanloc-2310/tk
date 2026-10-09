@@ -1,3 +1,5 @@
+> **Cập nhật hậu kiểm 09/10/2026:** Nội dung cũ bên dưới có phần mô tả Card Studio còn hoạt động nhưng đã bị phiên bản source hiện tại thay thế. API `/api/admin/card-designs` hiện chủ động trả `410 FEATURE_REMOVED`; không sử dụng các mô tả thiết kế/lưu mẫu trong báo cáo cũ làm danh mục chức năng hiện hành. Worker deploy theo `wrangler.jsonc` là `tk`; cần xác nhận binding tên miền trên Cloudflare trước khi deploy.
+
 # Báo cáo triển khai — Trung Tâm Thành Viên Số Sky First
 
 Ngày cập nhật: 09/10/2026  
