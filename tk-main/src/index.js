@@ -679,9 +679,15 @@ async function api(req,env,url){
     await safeRateFail(env,qrRateKey,120,15);
     const code=clean(url.searchParams.get('code'),120);
     if(!code)return json({error:'CODE_REQUIRED'},400);
+    if(!/^[A-Za-z0-9_-]{3,120}$/.test(code))return json({error:'INVALID_CODE'},400);
     if(code!=='PREVIEW'){
-      const exists=await env.DB.prepare(`SELECT 1 AS ok FROM member_cards WHERE verify_token=? UNION ALL SELECT 1 AS ok FROM one_time_credentials WHERE verify_token=? LIMIT 1`).bind(code,code).first();
-      if(!exists)return json({error:'NOT_FOUND'},404);
+      // A stale production D1 schema may not have one_time_credentials yet.
+      // Keep the legacy existence check when possible, but don't let a missing
+      // table turn PDF/QR export into an HTTP 500. The verify endpoint remains authoritative.
+      try{
+        const exists=await env.DB.prepare(`SELECT 1 AS ok FROM member_cards WHERE verify_token=? UNION ALL SELECT 1 AS ok FROM one_time_credentials WHERE verify_token=? LIMIT 1`).bind(code,code).first();
+        if(!exists)return json({error:'NOT_FOUND'},404);
+      }catch(err){console.error('CARD_QR_EXISTENCE_CHECK_SKIPPED',String(err?.message||err))}
     }
     const requestedSize=Number(url.searchParams.get('size'));
     const size=[120,170,180,600].includes(requestedSize)?requestedSize:180;
@@ -689,13 +695,16 @@ async function api(req,env,url){
     const qrUrl=new URL('https://quickchart.io/qr');
     qrUrl.searchParams.set('size',String(size));qrUrl.searchParams.set('margin','2');qrUrl.searchParams.set('ecLevel','H');qrUrl.searchParams.set('format','png');qrUrl.searchParams.set('text',verificationUrl.toString());
     try{
-      const remote=await fetch(qrUrl.toString(),{headers:{accept:'image/png'}});
+      const remote=await fetch(qrUrl.toString(),{headers:{accept:'image/png'},signal:AbortSignal.timeout(8000)});
       const contentType=clean(remote.headers.get('content-type'),100).toLowerCase();
-      if(!remote.ok||!contentType.startsWith('image/png'))return json({error:'QR_GENERATION_FAILED'},502);
+      if(!remote.ok||!contentType.startsWith('image/png')){
+        console.error('CARD_QR_UPSTREAM_BAD_RESPONSE',remote.status,contentType);
+        return json({error:'QR_GENERATION_FAILED',detail:'Dịch vụ tạo QR không trả về ảnh hợp lệ.'},502);
+      }
       const image=await remote.arrayBuffer();
       if(!image.byteLength||image.byteLength>512*1024)return json({error:'QR_IMAGE_INVALID'},502);
       return new Response(image,{status:200,headers:{'content-type':'image/png','cache-control':'public, max-age=86400','x-content-type-options':'nosniff'}});
-    }catch(err){console.error('CARD_QR_UPSTREAM_ERROR',err);return json({error:'QR_GENERATION_FAILED'},502)}
+    }catch(err){console.error('CARD_QR_UPSTREAM_ERROR',String(err?.message||err));return json({error:'QR_GENERATION_FAILED',detail:'Không kết nối được dịch vụ tạo QR.'},502)}
   }
 
   // =========================================================

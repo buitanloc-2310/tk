@@ -7808,15 +7808,33 @@ function cardSvg(x,t,side='front',qr=''){
   }
   parts.push('</svg>');return parts.join('');
 }
-async function fetchAsDataUrl(url){
+async function fetchAsDataUrl(url, label='tài nguyên'){
   if(!url)return '';
-  const r=await fetch(url,{credentials:'same-origin'});if(!r.ok)throw new Error(`Không thể tải tài nguyên thẻ (${r.status}).`);
-  const blob=await r.blob();return await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result));fr.onerror=()=>reject(new Error('Không thể đọc tài nguyên thẻ.'));fr.readAsDataURL(blob)});
+  const r=await fetch(url,{credentials:'same-origin',cache:'no-store'});
+  if(!r.ok)throw new Error(`Không thể tải ${label} (${r.status}).`);
+  const blob=await r.blob();
+  if(!blob.size)throw new Error(`${label} tải về rỗng.`);
+  return await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result));fr.onerror=()=>reject(new Error(`Không thể đọc ${label}.`));fr.readAsDataURL(blob)});
+}
+async function fetchCardAssetOrFallback(url, fallback='/sfn-logo.png', label='tài nguyên'){
+  // Old card templates may point to deleted/private uploads. A broken optional image must
+  // never abort the entire PDF export; replace it with the first-party transparent logo.
+  try{return await fetchAsDataUrl(url,label)}catch(firstError){
+    if(url!==fallback){
+      try{return await fetchAsDataUrl(fallback,'logo thay thế')}catch{}
+    }
+    console.warn(`Card asset unavailable (${label}); using safe local fallback.`,firstError);
+    return '';
+  }
 }
 async function exportCardAssets(x,t){
-  const out={...x};out._qrData=await fetchAsDataUrl(cardQrSrc(x,600));
-  try{out.photo_url=await fetchAsDataUrl(x.photo_url||'/sfn-logo.png')}catch{out.photo_url=await fetchAsDataUrl('/sfn-logo.png');if(x.photo_url)toast('Ảnh ngoài website không cho phép nhúng vào PDF; tạm dùng logo thay thế.','warn')}
-  if(t.logo_url){try{t={...t,logo_url:await fetchAsDataUrl(t.logo_url)}}catch{t={...t,logo_url:await fetchAsDataUrl('/sfn-logo.png')};toast('Logo mẫu không thể nhúng vào PDF; đang dùng logo Sky First.','warn')}}
+  const out={...x};
+  // QR is mandatory and is loaded independently so a QR endpoint failure is reported clearly.
+  out._qrData=await fetchAsDataUrl(cardQrSrc(x,600),'mã QR xác minh');
+  out.photo_url=await fetchCardAssetOrFallback(x.photo_url||'/sfn-logo.png','/sfn-logo.png','ảnh đại diện');
+  const logoSource=t.logo_url||'/sfn-logo.png';
+  const logoData=await fetchCardAssetOrFallback(logoSource,'/sfn-logo.png','logo mẫu');
+  t={...t,logo_url:logoData||'/sfn-logo.png'};
   return {x:out,t};
 }
 async function rasterizeCard(x,t,side,preparedAssets=null){
