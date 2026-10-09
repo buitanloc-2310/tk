@@ -35,7 +35,7 @@ assert.equal((await call('/api/admin/one-time-credentials','POST',{full_name:'Sc
 assert.equal((await call('/api/admin/issuance-overview')).status,403);checks++;
 assert.equal((await call('/api/admin/work-center')).status,200);checks++;
 r=await call('/api/admin/reports');assert.equal(r.status,200);assert('summary' in r);checks++;
-db.exec("UPDATE account_scopes SET role_id='role_super_admin',org_node_id='org_sfn' WHERE account_id='a';");r=await call('/api/admin/system-health');assert.equal(r.status,200);assert.equal(r.database,'ok');checks++;
+db.exec("UPDATE account_scopes SET role_id='role_super_admin',org_node_id='org_sfn' WHERE account_id='a';");r=await call('/api/admin/system-health');assert.equal(r.status,200);assert.equal(r.database,'ok');assert.equal(r.required_schema_version,16);assert.equal(r.schema_status,'current');assert.deepEqual(r.missing_tables,[]);assert.equal(r.email_delivery_tested,false);checks++;
 db.prepare("INSERT OR REPLACE INTO system_settings(key,value_json,updated_at) VALUES('member_portal_v4',?,CURRENT_TIMESTAMP)").run(JSON.stringify({brand:{logoUrl:'https://outside.invalid/logo.png'},links:[{name:'Liên kết sai',url:'https://outside.invalid/'}]}));
 const legacyConfig=await call('/api/public/portal-config');assert.equal(legacyConfig.links.length,5);assert.equal(legacyConfig.brand.logoUrl,'/sfn-logo.png');assert.equal(legacyConfig.links[0].name,'Trang Thông Tin Điện Tử Sky First');checks++;
 const securityResponse=await Worker.fetch(new Request('https://member.skyfirst.io.vn/api/public/portal-config'),{DB});assert.equal(securityResponse.status,200);assert.equal(securityResponse.headers.get('x-content-type-options'),'nosniff');assert.equal(securityResponse.headers.get('x-frame-options'),'DENY');assert.equal(securityResponse.headers.get('referrer-policy'),'no-referrer');assert((securityResponse.headers.get('content-security-policy')||'').includes("frame-ancestors 'none'"));checks++;
@@ -119,5 +119,39 @@ r=await call('/api/admin/account-requests/request-multi/approve','POST',{send_em
 db.prepare("UPDATE accounts SET force_password_change=1 WHERE id='a'").run();
 r=await call('/api/dashboard');assert.equal(r.status,403);assert.equal(r.error,'PASSWORD_CHANGE_REQUIRED');checks++;
 r=await call('/api/me/password','POST',{current_password:'',new_password:'StrongPassword2026!'});assert.equal(r.status,200);assert.equal(db.prepare("SELECT force_password_change FROM accounts WHERE id='a'").get().force_password_change,0);checks++;
+
+
+// Regression: a missing migrated table returns actionable JSON, never a generic non-JSON 500.
+{
+  db.exec('DROP TABLE verification_qr_records');
+  const failed=await call('/api/admin/verification-qr');
+  assert.equal(failed.status,503);assert.equal(failed.error,'SCHEMA_MIGRATION_REQUIRED');assert.equal(failed.schema_required_version,16);assert(failed.reference);
+  const missingTableHealth=await call('/api/admin/system-health');
+  assert.equal(missingTableHealth.schema_status,'outdated');assert(missingTableHealth.missing_tables.includes('verification_qr_records'));
+  db.exec(readFileSync('migrations/0014_independent_verification_qr.sql','utf8'));
+  db.exec('INSERT OR IGNORE INTO schema_version(version) VALUES(16)');
+  checks++;
+}
+// Regression: health check catches missing columns even if schema_version looks current.
+{
+  db.exec('ALTER TABLE one_time_credentials RENAME COLUMN event_name TO event_name__audit_missing');
+  const missingColumnHealth=await call('/api/admin/system-health');
+  assert.equal(missingColumnHealth.schema_status,'outdated');assert(missingColumnHealth.missing_columns.includes('one_time_credentials.event_name'));
+  db.exec('ALTER TABLE one_time_credentials RENAME COLUMN event_name__audit_missing TO event_name');
+  checks++;
+}
+// Health status distinguishes binding presence from real read test and never claims email delivery was tested.
+{
+  const r2Probe={async list(){return {objects:[]}}};
+  const health=await call('/api/admin/system-health','GET',undefined,{DB,FILES:r2Probe,RESEND_API_KEY:'configured-but-not-tested'});
+  assert.equal(health.r2_read_status,'read_ok');assert.equal(health.r2_write_status,'not_tested');assert.equal(health.email_status,'configured_delivery_not_tested');assert.equal(health.email_delivery_tested,false);checks++;
+}
+// PDF export surfaces the actual JSON reason when the QR endpoint fails instead of only saying HTTP 503.
+{
+  const a=front.indexOf('async function fetchAsDataUrl'),b=front.indexOf('async function fetchOptionalCardPhoto',a);
+  const ctx={fetch:async()=>new Response(JSON.stringify({error:'SCHEMA_MIGRATION_REQUIRED',message:'D1 cần cập nhật migration.'}),{status:503,headers:{'content-type':'application/json'}}),Response,URL,Promise,Error,String};
+  vm.createContext(ctx);vm.runInContext(front.slice(a,b)+'\nglobalThis.testFetchAsset=fetchAsDataUrl;',ctx);
+  await assert.rejects(ctx.testFetchAsset('/api/public/card-qr','mã QR xác minh'),/D1 cần cập nhật migration/);checks++;
+}
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

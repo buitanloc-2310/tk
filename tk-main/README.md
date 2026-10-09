@@ -75,3 +75,13 @@ Before first-time setup, configure Cloudflare secret `SETUP_TOKEN` (for example 
 Tên cổng: **Trung tâm thành viên số SKY FIRST**. Chức năng tạo trung tâm nằm tại Quản trị → Cơ cấu tổ chức, chỉ dùng trong phạm vi quyền được cấp. Xem `UPGRADE-2026-10-05.md` để biết các sửa lỗi, cách sử dụng và phạm vi kiểm thử.
 
 Cloudflare build command: `npm run build`. Kiểm thử đầy đủ: `npm test` (Node ≥22.13, Python 3). Thiết lập D1/migration và secret theo hướng dẫn sẵn có trước khi triển khai.
+
+## Khắc phục lỗi dữ liệu/API — V10 (09/10/2026)
+
+Bản V10 bổ sung ranh giới lỗi JSON cho Worker, chẩn đoán bảng/cột schema, phân biệt kiểm tra đọc R2 với upload/delete chưa thử, không đánh dấu email đã gửi khi chưa thử, mở rộng bố cục responsive và làm mới cache CSS/JS. Xem `REMEDIATION_REPORT_2026-10-09_V10.md` trước khi phát hành.
+
+Nếu trang đang hiển thị schema version thấp hơn 16, **sao lưu D1 và kiểm tra danh sách migration từ xa trước**. Chạy `npx wrangler d1 migrations list tk --remote`; chỉ chạy `npm run db:migrate:remote` sau khi lịch sử/pending migration khớp và đã xác nhận không có khoảng trống bất thường. Sau khi migration xác nhận thành công mới chạy `npm run deploy`. Không xóa database, không chạy script thiết lập lại dữ liệu để né lỗi schema.
+
+## V11 — Sửa chuỗi lỗi production được phản ánh qua ảnh chụp (09/10/2026)
+
+Xem `REMEDIATION_REPORT_2026-10-09_V11.md`. V11 bổ sung chẩn đoán schema chi tiết và JSON error boundary, cải thiện QR/PDF, chống toast lặp, bố cục responsive và cache-busting. Kết quả kiểm thử cục bộ: 84/84 kiểm thử tích hợp/API đạt. Đây chưa phải nghiệm thu production. Trước triển khai, backup D1, kiểm tra `npx wrangler d1 migrations list tk --remote`, xử lý mọi mismatch migration, xác nhận schema đủ bảng/cột, rồi mới `npm run db:migrate:remote` và `npm run deploy` theo hướng dẫn trong báo cáo.

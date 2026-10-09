@@ -307,3 +307,71 @@ sf-card-face{position:relative;width:100%;height:100%;overflow:hidden;border-rad
 .ecosystem-dropdown[open] nav{max-width:420px}
 
 .ecosystem-dropdown nav a{grid-template-columns:28px minmax(0,1fr) 16px;align-items:center;gap:9px}.ecosystem-dropdown .portal-mark{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:rgba(56,189,248,.14);color:var(--blue);font-size:16px;font-weight:900}.ecosystem-dropdown .portal-copy{display:grid;gap:3px;min-width:0}.ecosystem-dropdown .portal-copy>span{font-weight:800;line-height:1.4}.ecosystem-dropdown .portal-copy small{line-height:1.4}.ecosystem-dropdown .portal-open{font-size:12px;opacity:.6;align-self:start;padding-top:2px}
+
+
+/* 2026-10-09 UI hardening: prevent sticky tabs and controls from overlapping content. */
+.issuance-nav-tabs{position:relative!important;top:auto!important;z-index:2;display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;padding:8px 0 16px;margin:0 0 22px;background:transparent;border-bottom:1px solid #e4edf6;backdrop-filter:none}
+.issuance-nav-tabs button{flex:1 1 180px;min-width:0;min-height:52px;padding:12px 16px;line-height:1.35;white-space:normal;overflow-wrap:anywhere;border-radius:16px}
+.issuance-panel{overflow:visible;min-width:0}.issuance-panel #issuanceBody{min-width:0;overflow-wrap:anywhere}.issuance-panel .section-title{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin:0 0 18px}.issuance-panel .section-title h2,.issuance-panel h2,.issuance-panel h3{line-height:1.35;margin:0 0 8px;overflow-wrap:anywhere}.issuance-panel .section-title p{margin:0;line-height:1.6}.issuance-panel .card{min-width:0;padding:clamp(14px,2vw,22px);margin-top:16px}.issuance-panel .toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0}.issuance-panel .toolbar>*{max-width:100%;min-width:0}.issuance-panel table{min-width:900px}.issuance-panel th,.issuance-panel td{padding:13px 14px;line-height:1.5;overflow-wrap:anywhere}.issuance-panel td .toolbar{align-items:flex-start}.issuance-panel td .toolbar button,.issuance-panel td .toolbar a{display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.35;min-height:38px;white-space:normal;text-decoration:none;max-width:100%}.issuance-panel .msg,.service-warning{padding:12px 14px;border:1px solid #f2c9c9;border-radius:12px;background:#fff7f7;color:#a33b3b;font-size:13px;line-height:1.6;overflow-wrap:anywhere;margin:12px 0}.status-ok{color:#167348}.status-bad{color:#a33b3b}.issuance-panel .empty{white-space:normal;line-height:1.6}.toast-host{gap:8px;max-width:min(360px,calc(100vw - 32px));pointer-events:none}.toast{line-height:1.5;overflow-wrap:anywhere;box-shadow:0 10px 28px rgba(15,23,42,.14)}
+@media(max-width:900px){.issuance-nav-tabs{position:relative!important;top:auto!important}.issuance-nav-tabs button{flex:1 1 210px}}
+@media(max-width:600px){.issuance-nav-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.issuance-nav-tabs button{width:100%;min-height:48px;padding:10px;font-size:13px}.issuance-panel .card{padding:12px}.issuance-panel .section-title{gap:10px}.issuance-panel .section-title input{width:100%;max-width:100%!important}.issuance-panel .toolbar>*{flex:0 1 auto}}
+
+
+/* Global UI resilience: prevent controls, status messages, and text from colliding. */
+:where(.card,.section-title,.toolbar,.form-grid,.list-row,.list-item,.notice,.msg,.service-warning){min-width:0;overflow-wrap:anywhere}
+button,a,input,select,textarea{min-width:0}
+button{line-height:1.35;white-space:normal}
+.toolbar{gap:10px 12px;align-items:center}
+.toolbar>*{max-width:100%;min-width:0}
+.section-title{align-items:flex-start;gap:14px;margin-bottom:16px}
+.section-title>div{min-width:0}
+.table-wrap{max-width:100%;overscroll-behavior-x:contain}
+.msg,.service-warning{display:block;padding:11px 13px;border-radius:12px;line-height:1.55;white-space:normal;overflow-wrap:anywhere}
+.msg{color:#a8323a;background:#fff5f5;border:1px solid #f3d1d3}
+.service-warning{margin:12px 0;color:#8c343b;background:#fff6f6;border:1px solid #f0d4d6}
+.health-table-list{margin-top:7px;font-size:12px;line-height:1.8;font-weight:600;overflow-wrap:anywhere}
+.health-footnote{margin-top:14px;line-height:1.65;white-space:normal}
+.status-ok,.status-bad{display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.issuance-panel{overflow:visible;min-width:0}
+.issuance-tabs{flex-wrap:wrap;align-items:stretch;gap:9px 10px;padding:10px 0 16px;margin:0 0 18px}
+.issuance-nav-tabs button{flex:1 1 155px;min-width:0;min-height:42px;white-space:normal;line-height:1.4;text-align:center;padding:11px 13px;border-radius:12px}
+#issuanceBody{min-width:0;display:grid;gap:16px;line-height:1.55}
+#issuanceBody>.section-title{margin:2px 0 8px}
+#issuanceBody>.card,#issuanceBody>section.card{min-width:0;margin-top:0!important}
+#issuanceBody .section-title{align-items:flex-start;flex-wrap:wrap;gap:12px;margin:8px 0 16px}
+#issuanceBody .section-title input{max-width:100%;width:min(100%,320px)}
+#issuanceBody .toolbar{margin:12px 0 8px;gap:9px 10px}
+#issuanceBody .toolbar button,#issuanceBody .toolbar a{display:inline-flex;align-items:center;justify-content:center;max-width:100%;min-height:38px;text-align:center;line-height:1.35;white-space:normal;text-decoration:none}
+#issuanceBody .form-grid{gap:17px;margin-top:14px}
+#issuanceBody .form-grid label{min-width:0;line-height:1.5}
+#issuanceBody .form-grid input,#issuanceBody .form-grid textarea{min-width:0;max-width:100%}
+#issuanceBody .grid.issuance-kpi{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:12px}
+#issuanceBody .table-wrap{margin-top:10px}
+#issuanceBody .empty{white-space:normal;line-height:1.65}
+.toast-host{gap:10px;max-height:min(55vh,420px);overflow:auto;align-content:end}
+.toast{line-height:1.5;overflow-wrap:anywhere;white-space:normal}
+.toast-repeat{outline:1px solid rgba(255,255,255,.25)}
+@media(max-width:760px){
+  .main{min-width:0}
+  .form-grid.two{grid-template-columns:minmax(0,1fr)}
+  .issuance-panel{padding:14px}
+  .issuance-nav-tabs button{flex:1 1 calc(50% - 10px)}
+  #issuanceBody .section-title>.toolbar{width:100%}
+  #issuanceBody .section-title>.toolbar>*{flex:1 1 170px}
+  #issuanceBody .toolbar>*{max-width:100%}
+  #issuanceBody .card{padding:14px}
+}
+@media(max-width:420px){
+  .issuance-nav-tabs button{flex-basis:100%}
+  #issuanceBody .grid.issuance-kpi{grid-template-columns:minmax(0,1fr)}
+  #issuanceBody .toolbar button,#issuanceBody .toolbar a{flex:1 1 100%}
+}
+
+/* Service status rows are used across admin panels: keep labels and values separated. */
+.list-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:13px 0;border-bottom:1px solid #edf1f5;line-height:1.55}
+.list-row:last-child{border-bottom:0}
+.list-row>span{flex:1 1 46%;min-width:0;color:#52677a;font-size:13px}
+.list-row>b{flex:1 1 54%;min-width:0;text-align:right;font-size:13px;color:#173b57;white-space:normal;overflow-wrap:anywhere}
+.status-ok{color:#256d50!important;background:#effaf4;border:1px solid #cfefdb;padding:5px 9px;border-radius:9px}
+.status-bad{color:#a83b42!important;background:#fff5f5;border:1px solid #f1d0d2;padding:5px 9px;border-radius:9px}
+@media(max-width:560px){.list-row{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:12px 0}.list-row>b{text-align:left}.health-footnote{font-size:12px}}

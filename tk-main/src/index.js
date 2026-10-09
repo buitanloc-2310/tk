@@ -568,6 +568,7 @@ async function deletePendingRequestAvatar(env,avatarUrl){
 
 
 async function api(req,env,url){
+  try {
 
   // =========================================================
   // SETUP
@@ -5019,8 +5020,75 @@ env.DB.prepare(`
 
   if(url.pathname==='/api/admin/system-health'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
-    let database='error',schema_version=null;try{await env.DB.prepare('SELECT 1 n').first();database='ok';schema_version=(await env.DB.prepare('SELECT MAX(version) v FROM schema_version').first())?.v||null}catch{}
-    return json({database,schema_version,r2_binding:!!env.FILES,email_binding:!!env.RESEND_API_KEY});
+    const requiredSchemaVersion=16;
+    const requiredColumns={
+      schema_version:['version'],
+      system_settings:['key','value_json'],
+      people:['id','member_code','full_name','status','avatar_url'],
+      accounts:['id','person_id','username','password_hash','password_salt','password_iterations','force_password_change','is_locked'],
+      sessions:['id','account_id','token_hash','expires_at'],
+      org_nodes:['id','parent_id','code','name','node_type','status','deleted_at'],
+      org_memberships:['person_id','org_node_id','status','is_primary'],
+      roles:['id','code'],permissions:['id','code'],role_permissions:['role_id','permission_id'],
+      account_scopes:['account_id','role_id','org_node_id','active'],
+      card_types:['id','name','template_json','active'],
+      member_cards:['id','person_id','card_type_id','org_node_id','card_number','issued_at','expires_at','status','verify_token','created_at'],
+      account_requests:['id','request_code','full_name','email','avatar_url','target_org_node_id','status'],
+      account_request_profiles:['request_id','education_or_work_type','school_or_workplace','class_or_major','education_status'],
+      account_request_extended:['request_id','school_name','class_or_major','employment_status','workplace_name','work_department','job_title','guardian_date_of_birth','guardian_id_number'],
+      account_request_orgs:['request_id','org_node_id','is_primary'],
+      one_time_credentials:['id','credential_type','event_name','full_name','card_number','issued_at','expires_at','status','verify_token','created_at','updated_at'],
+      verification_qr_records:['id','credential_title','full_name','reference_number','issued_at','expires_at','status','verify_token','created_at','updated_at'],
+      people_work_profiles:['person_id','school_name','employment_status','workplace_name','work_department','job_title'],
+      audit_log:['action','entity_type','entity_id','created_at'],
+      auth_rate_limits:['rate_key','attempts','window_start'],
+      password_reset_tokens:['account_id','token_hash','expires_at'],
+      security_events:['account_id','event_type','created_at'],
+      member_evaluations:['person_id','evaluator_account_id','status','visibility'],
+      calendar_events:['title','starts_at','status'],
+      activities:['id','name','status'],activity_participants:['activity_id','person_id'],
+      certificates:['person_id','title','verification_status'],achievements:['person_id','title'],
+      member_documents:['person_id','document_type','title'],notifications:['title','body'],
+      goals:['person_id','title','status'],tasks:['person_id','title','status'],
+      cv_exports:['person_id','export_code'],support_tickets:['ticket_code','subject','status'],
+      account_restrictions:['account_id','restriction_type','reason']
+    };
+    const requiredTables=Object.keys(requiredColumns);
+    let database='error',schema_version=null,missing_tables=[...requiredTables],missing_columns=[],schema_status='unknown';
+    try{
+      await env.DB.prepare('SELECT 1 n').first();
+      database='ok';
+      try{schema_version=Number((await env.DB.prepare('SELECT MAX(version) v FROM schema_version').first())?.v||0)||null}catch{}
+      const found=[];
+      for(const table of requiredTables){
+        const row=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
+        if(row?.name)found.push(table);
+      }
+      missing_tables=requiredTables.filter(table=>!found.includes(table));
+      for(const table of requiredTables){
+        if(!found.includes(table))continue;
+        const info=await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+        const columns=new Set((info.results||[]).map(column=>column.name));
+        for(const column of requiredColumns[table])if(!columns.has(column))missing_columns.push(`${table}.${column}`);
+      }
+      schema_status=missing_tables.length||missing_columns.length||!schema_version||schema_version<requiredSchemaVersion?'outdated':'current';
+    }catch(err){
+      console.error('SYSTEM_HEALTH_DATABASE_CHECK_FAILED',String(err?.message||err));
+      schema_status='unknown';
+    }
+    let r2_read_status='not_configured';
+    if(env.FILES){
+      if(typeof env.FILES.list==='function'){
+        try{await env.FILES.list({limit:1});r2_read_status='read_ok'}catch(err){r2_read_status='read_failed';console.error('SYSTEM_HEALTH_R2_READ_FAILED',String(err?.message||err))}
+      }else r2_read_status='binding_present_test_unavailable';
+    }
+    // Do not send a test email from a health-check endpoint. A configured provider key is not delivery verification.
+    const email_status=env.RESEND_API_KEY?'configured_delivery_not_tested':'not_configured';
+    return json({
+      database,schema_version,required_schema_version:requiredSchemaVersion,schema_status,missing_tables,missing_columns,
+      r2_binding:!!env.FILES,r2_read_status,r2_write_status:'not_tested',
+      email_binding:!!env.RESEND_API_KEY,email_status,email_delivery_tested:false
+    },200,{'cache-control':'no-store'});
   }
 
   if(url.pathname==='/api/admin/saved-filters'&&req.method==='GET'){
@@ -5172,6 +5240,26 @@ env.DB.prepare(`
   return json({
     error:'NOT_FOUND'
   },404);
+  } catch (err) {
+    const message=String(err?.message||err||'');
+    const reference=uid('err');
+    console.error('API_UNHANDLED_ERROR',reference,message);
+    const schemaFailure=/(no such table|no such column|has no column named|no such index|has no such table|unknown column)/i.test(message);
+    if(schemaFailure){
+      return json({
+        error:'SCHEMA_MIGRATION_REQUIRED',
+        message:'Cơ sở dữ liệu chưa có đủ bảng hoặc cột cho phiên bản ứng dụng đang chạy. Hãy sao lưu D1, kiểm tra tình trạng hệ thống và áp dụng các migration còn thiếu trước khi dùng chức năng này.',
+        reference,
+        schema_required_version:16
+      },503,{'cache-control':'no-store'});
+    }
+    const unavailable=/(D1_ERROR|SQLITE_BUSY|database is locked|R2.*unavailable|connection.*closed|timed out)/i.test(message);
+    return json({
+      error:unavailable?'DATA_SERVICE_UNAVAILABLE':'INTERNAL_ERROR',
+      message:unavailable?'Dịch vụ dữ liệu tạm thời chưa xử lý được yêu cầu. Vui lòng thử lại sau; nếu tiếp tục lỗi, gửi mã kiểm tra cho quản trị viên.':'Máy chủ gặp lỗi khi xử lý yêu cầu. Vui lòng thử lại; nếu tiếp tục lỗi, gửi mã kiểm tra cho quản trị viên.',
+      reference
+    },unavailable?503:500,{'cache-control':'no-store'});
+  }
 }
 
 // =========================================================

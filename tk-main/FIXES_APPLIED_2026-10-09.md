@@ -46,7 +46,7 @@
 - Bộ xác thực release: **PASS**.
 - Migration áp dụng trên SQLite trống: **PASS**.
 - Câu truy vấn SQL tĩnh kiểm tra: **214**.
-- Kiểm thử tích hợp/API: **80/80 PASS**.
+- Kiểm thử tích hợp/API ở đợt V10: **80/80 PASS** (số liệu lịch sử; kiểm thử V10 cuối đã mở rộng lên 84/84).
 - `npm run build`: **PASS** (`node --check` cho Worker và frontend JavaScript).
 - Bao gồm kiểm thử hồi quy cho phạm vi thẻ, API quản trị toàn mạng, ngày cấp trong tương lai/ngày sai, ảnh hồ sơ riêng tư, giới hạn tra cứu, phê duyệt nhiều đơn vị, hồ sơ học tập/công việc và che định danh người giám hộ.
 
@@ -63,3 +63,27 @@ Cảnh báo duy nhất trong lệnh kiểm thử là cảnh báo thử nghiệm 
 ## Kết luận
 
 Các lỗi đã nhận diện và tái hiện trong cuộc rà soát được sửa ở bản mã nguồn và có kiểm thử hồi quy. **Bản ZIP này là bản nguồn đã sửa và kiểm thử tại chỗ, không phải xác nhận website production đã được cập nhật hoặc đã đạt nghiệm thu vận hành.**
+
+---
+
+## V10 — Khắc phục chuỗi lỗi API / QR / PDF và giao diện (09/10/2026)
+
+- Thêm JSON error boundary cho toàn bộ API. Lỗi schema trả `SCHEMA_MIGRATION_REQUIRED` HTTP 503 với hướng xử lý, không còn lỗi Worker tràn ra làm frontend đọc nhầm response không phải JSON.
+- Tăng chẩn đoán hệ thống lên kiểm tra bảng/cột lõi; kiểm tra đọc danh sách R2 khi có binding, không tự ghi/xóa probe vào kho thật.
+- Trạng thái email không còn ngụ ý delivery đã thành công; luôn ghi rõ chưa thử gửi.
+- PDF hiển thị thông điệp của API QR khi không tải được ảnh xác minh.
+- Bổ sung migration `0016_schema_health_baseline.sql` để lấp các mốc phiên bản bị bỏ sót trong migrations trước đó.
+- Tăng cache-busting CSS toàn bộ trang HTML; sửa khoảng cách, xuống dòng và hiển thị trạng thái/lỗi responsive toàn hệ thống.
+- Bổ sung test hồi quy lỗi thiếu bảng và lỗi QR khi xuất PDF.
+- Kết quả cục bộ: build/release PASS, **84/84 kiểm thử tích hợp/API đạt**.
+- Chưa deploy production; phải backup và đối chiếu D1 migration history trước khi chạy migration từ xa.
+
+## V11 — Khắc phục đồng thời chuỗi lỗi schema/API/QR/PDF và hiển thị (09/10/2026)
+
+- Thông báo lỗi API được chuẩn hóa JSON, gồm mã `SCHEMA_MIGRATION_REQUIRED`, mã tham chiếu và hướng khắc phục khi bảng/cột chưa tồn tại.
+- Health check kiểm tra bảng/cột bắt buộc thay vì dựa vào mỗi kết nối DB hoặc số phiên bản; R2/email nêu đúng phần đã/chưa kiểm tra.
+- Xử lý thông báo QR/PDF có nội dung từ API, chặn toast lặp, giữ số toast và chiều cao trong giới hạn.
+- Sửa bố cục responsive toàn cục: tab, toolbar, hàng nhãn/trạng thái, bảng, nút, thông báo lỗi; làm mới cache-busting asset trên trang HTML.
+- Bổ sung migration schema baseline 0016 và test hồi quy thiếu bảng/cột, health check, QR/PDF.
+- Kiểm thử cục bộ mới nhất: `npm run build` PASS, `npm test` PASS, **84/84 kiểm thử tích hợp/API đạt**.
+- Chưa triển khai production; cần backup và đối chiếu lịch sử D1 migration trước khi cập nhật.

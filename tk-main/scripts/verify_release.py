@@ -7,7 +7,7 @@ errors=[]
 def ok(name): print('[OK]',name)
 def fail(name,msg): errors.append(f'{name}: {msg}'); print('[FAIL]',name,msg)
 
-required=['public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql']
+required=['public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql','migrations/0016_schema_health_baseline.sql','REMEDIATION_REPORT_2026-10-09_V11.md']
 for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
@@ -111,7 +111,7 @@ for name,marker in v4_front_checks.items():
     else: fail(name,'marker missing')
 
 index=(ROOT/'public/index.html').read_text()
-if 'v=20261009-member-v8-audit-fix' in index: ok('cache busting current release')
+if 'v=20261009-member-v11-chainfix' in index: ok('cache busting current release')
 else: fail('cache busting','index does not force current release assets')
 
 # The card designer is retired per product requirements; legacy fixed copy/data remains intact.
@@ -217,7 +217,7 @@ if image_url_hits: fail('external image sources',', '.join(sorted(set(image_url_
 else: ok('no direct external image sources in public HTML/CSS/JS')
 for page in ['contact.html','privacy.html','terms.html','support.html','verify.html','setup.html']:
     txt=(ROOT/'public'/page).read_text()
-    if 'brand.js?v=20261009-brand-v1' in txt and 'styles.css?v=20261009-member-v8-audit-fix' in txt:
+    if 'brand.js?v=20261009-brand-v1' in txt and 'styles.css?v=20261009-member-v11-chainfix' in txt:
         ok('shared brand/theme cache '+page)
     else: fail('shared brand/theme cache '+page,'brand or style cache version missing')
 
