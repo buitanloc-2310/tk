@@ -238,6 +238,26 @@ for marker,name in [
 if "ext.guardian_id_number,guardian_id_number" in back: fail('guardian identifier minimization','unmasked identifier may reach browser')
 else: ok('guardian identifier masked server-side')
 
+# Super VIP P1-P7 contract checks (OTP Email Change, Governance PATCH + SoD, Config Impact Preview & Rollback, Email Retry, Export Bundle, ZIP Inspector).
+for marker, name in [
+    ('email_change_otp_token', 'OTP-verified self-service email change'),
+    ('EMAIL_CHANGE_OTP_INVALID', 'OTP email change token validation'),
+    ('govPatchMatch', 'governance registry lifecycle PATCH endpoint'),
+    ('/api/admin/portal-config/preview-impact', 'configuration impact preview endpoint (P6.22)'),
+    ('cfgRollbackMatch', 'configuration version rollback endpoint (P6.34)'),
+    ('emailRetryMatch', 'safe email delivery retry endpoint (P6.19)'),
+    ('/api/admin/export-bundle', 'vendor-independent standardized export bundle (P6.36)'),
+    ('changeEmailOtpBtn', 'frontend OTP email change modal'),
+    ('studioPreviewImpact', 'frontend configuration impact preview UI'),
+    ('data-cfg-rollback', 'frontend configuration version rollback UI'),
+    ('data-email-retry', 'frontend email delivery retry UI'),
+    ('runZipInspectBtn', 'frontend interactive ZIP archive safety inspector UI'),
+    ('exportBundleBtn', 'frontend vendor-independent data export UI'),
+]:
+    if marker in front + back: ok(name)
+    else: fail(name, 'Super VIP marker missing')
+
+
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')
     for e in errors: print('-',e)

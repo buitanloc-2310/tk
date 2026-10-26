@@ -1,8 +1,6 @@
 -- Migration 0017: Chuyển đổi sang Trung tâm Nghiệp vụ Số Sky First & Tích hợp toàn diện năng lực P1–P7
 -- Bảo toàn 100% bảng, cột, khóa chính/phụ và dữ liệu lịch sử từ phiên bản 1–16.
 
-PRAGMA foreign_keys = ON;
-
 -- 1. Hệ thống OTP xác minh email dùng một lần (P6.44, Mục 13.2)
 CREATE TABLE IF NOT EXISTS email_otp_tokens(
   id TEXT PRIMARY KEY,
@@ -48,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_email_logs_recipient ON email_delivery_logs(recip
 -- 3. Hồ sơ bằng chứng pháp lý, điều khoản & đồng ý dữ liệu cá nhân (P6.49, P6.50, Mục 11)
 CREATE TABLE IF NOT EXISTS legal_consent_records(
   id TEXT PRIMARY KEY,
-  subject_type TEXT NOT NULL CHECK(subject_type IN ('account_request','person','account')),
+  subject_type TEXT NOT NULL CHECK(subject_type IN ('account_request','person','account','email_change')),
   subject_id TEXT NOT NULL,
   email TEXT NOT NULL,
   terms_version TEXT NOT NULL DEFAULT '2026.10-SFN-TERMS',

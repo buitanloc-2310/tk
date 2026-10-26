@@ -14,10 +14,11 @@ let nativeSqlite=null;
 try{nativeSqlite=await import('node:sqlite')}catch{}
 if(nativeSqlite?.DatabaseSync){
   const rawDb=new nativeSqlite.DatabaseSync(':memory:');
+  const normArgs=a=>a.map(x=>x===undefined?null:typeof x==='boolean'?(x?1:0):x);
   dbExec=async(sql)=>rawDb.exec(sql);
-  dbGet=async(sql,...args)=>rawDb.prepare(sql).get(...args)||null;
-  dbAll=async(sql,...args)=>rawDb.prepare(sql).all(...args);
-  dbRun=async(sql,...args)=>rawDb.prepare(sql).run(...args);
+  dbGet=async(sql,...args)=>{const r=rawDb.prepare(sql).get(...normArgs(args));return r?{...r}:null;};
+  dbAll=async(sql,...args)=>rawDb.prepare(sql).all(...normArgs(args)).map(r=>({...r}));
+  dbRun=async(sql,...args)=>rawDb.prepare(sql).run(...normArgs(args));
 }else{
   const proc=spawn('python3',['-u','-c',`
 import sqlite3, sys, json
@@ -306,6 +307,162 @@ assert.equal(r.status,200);assert.equal(r.code_package_ready,true);assert.equal(
   const badZipReq=new Request('https://nghiepvu.skyfirst.io.vn/api/admin/archive-inspect',{method:'POST',headers:{cookie:'sfn_session=test',origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/zip'},body:new Uint8Array([1,2,3,4])});
   const badZipRes=await api(badZipReq,{DB},new URL(badZipReq.url));
   assert.equal(badZipRes.status,400);checks++;
+}
+
+// =========================================================
+// SUPER VIP INTEGRATION TESTS (M4_SUPER_VIP_UPGRADE)
+// =========================================================
+function buildTestZip(entries){
+  const localParts=[];
+  const centralParts=[];
+  let offset=0;
+  for(const ent of entries){
+    const nameBytes=Buffer.from(ent.name,'utf8');
+    const dataBytes=Buffer.from(ent.content||'hello','utf8');
+    const compSize=ent.compSize??dataBytes.length;
+    const uncompSize=ent.uncompSize??dataBytes.length;
+    const lh=Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50,0);
+    lh.writeUInt16LE(20,4);
+    lh.writeUInt32LE(compSize,18);
+    lh.writeUInt32LE(uncompSize,22);
+    lh.writeUInt16LE(nameBytes.length,26);
+    localParts.push(lh,nameBytes,dataBytes);
+    const ch=Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50,0);
+    ch.writeUInt16LE(20,4);
+    ch.writeUInt16LE(20,6);
+    ch.writeUInt32LE(compSize,20);
+    ch.writeUInt32LE(uncompSize,24);
+    ch.writeUInt16LE(nameBytes.length,28);
+    ch.writeUInt32LE(offset,42);
+    centralParts.push(ch,nameBytes);
+    offset+=30+nameBytes.length+dataBytes.length;
+  }
+  const cdBuf=Buffer.concat(centralParts);
+  const eocd=Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50,0);
+  eocd.writeUInt16LE(entries.length,8);
+  eocd.writeUInt16LE(entries.length,10);
+  eocd.writeUInt32LE(cdBuf.length,12);
+  eocd.writeUInt32LE(offset,16);
+  return new Uint8Array(Buffer.concat([...localParts,cdBuf,eocd]));
+}
+
+// 1. Valid ZIP inspection passes (200) and traversal/executable ZIP fails (400)
+{
+  const cleanZip=buildTestZip([{name:'docs/README.md',content:'# Sky First'},{name:'src/index.js',content:'export default {};'}]);
+  const cleanRes=await api(new Request('https://nghiepvu.skyfirst.io.vn/api/admin/archive-inspect',{method:'POST',headers:{cookie:'sfn_session=test',origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/zip'},body:cleanZip}),{DB},new URL('https://nghiepvu.skyfirst.io.vn/api/admin/archive-inspect'));
+  const cleanBody=await cleanRes.json();
+  assert.equal(cleanRes.status,200);assert.equal(cleanBody.valid,true);assert.equal(cleanBody.file_count,2);checks+=3;
+
+  const evilZip=buildTestZip([{name:'../../etc/passwd',content:'root'},{name:'malware.exe',content:'MZ'}]);
+  const evilRes=await api(new Request('https://nghiepvu.skyfirst.io.vn/api/admin/archive-inspect',{method:'POST',headers:{cookie:'sfn_session=test',origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/zip'},body:evilZip}),{DB},new URL('https://nghiepvu.skyfirst.io.vn/api/admin/archive-inspect'));
+  const evilBody=await evilRes.json();
+  assert.equal(evilRes.status,400);assert.equal(evilBody.valid,false);assert.equal(evilBody.reason,'PATH_TRAVERSAL');assert(evilBody.risks.some(x=>(x.risk||String(x)).includes('EXECUTABLE')));checks+=3;
+}
+
+// 2. Self-Service Email Change via OTP (purpose='email_change')
+{
+  // Without OTP token -> 409 EMAIL_CHANGE_REQUIRES_VERIFICATION
+  r=await call('/api/me','PATCH',{date_of_birth:'1995-01-15',email:'new-admin-email@skyfirst.io.vn'});
+  assert.equal(r.status,409);assert.equal(r.error,'EMAIL_CHANGE_REQUIRES_VERIFICATION');checks+=2;
+
+  // With invalid OTP token -> 400 EMAIL_CHANGE_OTP_INVALID
+  r=await call('/api/me','PATCH',{date_of_birth:'1995-01-15',email:'new-admin-email@skyfirst.io.vn',email_change_otp_token:'bad-otp-token'});
+  assert.equal(r.status,400);assert.equal(r.error,'EMAIL_CHANGE_OTP_INVALID');checks+=2;
+
+  // Request OTP for email_change
+  const newAdminEmail='admin-verified-new@skyfirst.io.vn';
+  r=await call('/api/public/email-otp/request','POST',{email:newAdminEmail,purpose:'email_change',full_name:'Admin'});
+  assert.equal(r.status,202);assert.equal(r.ok,true);checks+=2;
+
+  // Seed known OTP hash for email_change and verify
+  const changeOtpCode='889900';
+  const changeOtpHash=createHash('sha256').update(newAdminEmail+'|email_change|'+changeOtpCode).digest('hex');
+  await dbRun("UPDATE email_otp_tokens SET otp_hash=? WHERE email=? AND purpose='email_change'",changeOtpHash,newAdminEmail);
+  r=await call('/api/public/email-otp/verify','POST',{email:newAdminEmail,otp:changeOtpCode,purpose:'email_change'});
+  assert.equal(r.status,200);assert.equal(r.verified,true);const changeOtpToken=r.otp_verification_token;assert(changeOtpToken);checks+=3;
+
+  // Perform PATCH /api/me with valid email_change_otp_token -> 200
+  r=await call('/api/me','PATCH',{date_of_birth:'1995-01-15',email:newAdminEmail,email_change_otp_token:changeOtpToken});
+  assert.equal(r.status,200);assert.equal(r.ok,true);assert.equal(r.email_verified,true);assert.equal(r.person.email,newAdminEmail);checks+=4;
+
+  // Verify DB updated both people.email and accounts.email + legal_consent_records
+  const updatedAcc=await dbGet("SELECT email FROM accounts WHERE id='a'");
+  assert.equal(updatedAcc.email,newAdminEmail);
+  const emailChangeConsent=await dbGet("SELECT * FROM legal_consent_records WHERE purpose_scope='self_service_email_change' AND email=?",newAdminEmail);
+  assert(emailChangeConsent);assert.equal(emailChangeConsent.email_verified,1);checks+=3;
+
+  // Token cannot be reused for another email change
+  r=await call('/api/me','PATCH',{date_of_birth:'1995-01-15',email:'another-email@skyfirst.io.vn',email_change_otp_token:changeOtpToken});
+  assert.equal(r.status,400);assert.equal(r.error,'EMAIL_CHANGE_OTP_INVALID');checks+=2;
+}
+
+// 3. Governance Registry Lifecycle PATCH & SoD Approval Enforcement
+{
+  // Create a pending workflow_change owned by 'a'
+  r=await call('/api/admin/governance/registry','POST',{domain_group:'workflow_change',code:'WF-CHG-2026-02',title:'Cập nhật bước kiểm tra hồ sơ đa đơn vị',status:'pending_verification',summary:'Đề xuất rút ngắn SLA bước phân loại.'});
+  assert.equal(r.status,201);const wfChangeId=r.id;checks+=2;
+
+  // Owner 'a' updating summary/version while still pending_verification succeeds (200)
+  r=await call('/api/admin/governance/registry/'+encodeURIComponent(wfChangeId),'PATCH',{version_label:'1.1',summary:'Đã bổ sung tài liệu đánh giá tác động.'});
+  assert.equal(r.status,'pending_verification');assert.equal(r.ok,true);assert.equal(r.version_label,'1.1');checks+=3;
+
+  // Owner 'a' attempting to self-approve their own workflow_change is blocked by SoD (409)
+  r=await call('/api/admin/governance/registry/'+encodeURIComponent(wfChangeId),'PATCH',{status:'approved'});
+  assert.equal(r.status,409);assert.equal(r.error,'SOD_CONFLICT_DETECTED');checks+=2;
+
+  // Create a second Super Admin session ('a_rev') to independently approve the workflow_change
+  await dbRun("INSERT INTO people(id,member_code,full_name,status) VALUES('p_rev','SFN-REV','Người Phê Duyệt Độc Lập','active')");
+  await dbRun("INSERT INTO accounts(id,person_id,username,password_hash,password_salt,force_password_change) VALUES('a_rev','p_rev','reviewer','x','y',0)");
+  await dbRun("INSERT INTO account_scopes(id,account_id,role_id,org_node_id) VALUES('s_rev','a_rev','role_super_admin','org_sfn')");
+  const revTokenHash=createHash('sha256').update('rev_session_token').digest('hex');
+  await dbRun("INSERT INTO sessions(id,account_id,token_hash,expires_at) VALUES('ses_rev','a_rev',?,datetime('now','+1 day'))",revTokenHash);
+
+  const revReq=new Request('https://nghiepvu.skyfirst.io.vn/api/admin/governance/registry/'+encodeURIComponent(wfChangeId),{method:'PATCH',headers:{cookie:'sfn_session=rev_session_token','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:JSON.stringify({status:'approved',evidence_ref:'BB-HDQT-2026-10'})});
+  const revRes=await api(revReq,{DB},new URL(revReq.url));
+  const revBody=await revRes.json();
+  assert.equal(revRes.status,200);assert.equal(revBody.ok,true);assert.equal(revBody.status,'approved');
+  const approvedGov=await dbGet('SELECT status,approver_account_id FROM governance_registry WHERE id=?',wfChangeId);
+  assert.equal(approvedGov.status,'approved');assert.equal(approvedGov.approver_account_id,'a_rev');checks+=5;
+}
+
+// 4. Configuration Impact Preview (P6.22) & Version Rollback (P6.34)
+{
+  r=await call('/api/admin/portal-config/preview-impact','POST',{brand:{siteName:'Trung tâm Nghiệp vụ Số Sky First',primaryColor:'#1d4ed8',baseFontSize:17},tagline:'Thông điệp mới thử nghiệm'});
+  assert.equal(r.status,200);assert.equal(r.valid,true);assert(Array.isArray(r.affected_components));assert(r.affected_components.length>=1);checks+=4;
+
+  r=await call('/api/admin/portal-config/preview-impact','POST',{brand:{primaryColor:'not-a-color'},stats:[{key:'programs',mode:'auto'}]});
+  assert.equal(r.status,200);assert.equal(r.valid,false);assert(r.errors.length>=2);checks+=3;
+
+  // Save a new portal-config version so we have a history entry to rollback
+  const beforeCfg=await call('/api/public/portal-config','GET');
+  r=await call('/api/admin/portal-config','PUT',{tagline:'Thông điệp tạm thời trước khi rollback',change_reason:'Thử nghiệm rollback'});
+  assert.equal(r.status,200);checks++;
+
+  const govOv=await call('/api/admin/governance/overview','GET');
+  assert(govOv.config_history.length>=1);
+  const latestHistId=govOv.config_history[0].id;
+  r=await call('/api/admin/config-history/'+encodeURIComponent(latestHistId)+'/rollback','POST',{restore_mode:'previous',change_reason:'Khôi phục về cấu hình chuẩn'});
+  assert.equal(r.status,200);assert.equal(r.ok,true);assert.equal(r.settings.tagline,beforeCfg.tagline);checks+=3;
+}
+
+// 5. Safe Email Retry (P6.19)
+{
+  const emCenter=await call('/api/admin/email-center','GET');
+  const firstLog=emCenter.delivery_logs[0];
+  assert(firstLog);
+  r=await call('/api/admin/email-center/'+encodeURIComponent(firstLog.id)+'/retry','POST',{});
+  assert.equal(r.ok,true);assert.equal(r.status,'not_configured');assert(r.retry_count>=1);checks+=4;
+}
+
+// 6. Vendor-Independent Standardized Export Bundle (P6.36)
+{
+  r=await call('/api/admin/export-bundle','GET');
+  assert.equal(r.status,200);assert.equal(r.ok,true);assert.equal(r.bundle.format,'skyfirst-operations-center-export-v1');
+  assert.equal(typeof r.sha256_checksum,'string');assert.equal(r.sha256_checksum.length,64);
+  assert(r.bundle.org_nodes.length>=1);assert(r.bundle.governance_registry.length>=10);checks+=6;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

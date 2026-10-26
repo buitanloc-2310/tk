@@ -2296,12 +2296,15 @@ async function renderProfile(c){
         </p>
       </div>
 
-      <button
-        id="editProfile"
-        class="primary"
-      >
-        Cập nhật hồ sơ
-      </button>
+      <div class="toolbar">
+        <button id="changeEmailOtpBtn" class="secondary" type="button">Đổi email đăng nhập (Xác minh OTP)</button>
+        <button
+          id="editProfile"
+          class="primary"
+        >
+          Cập nhật hồ sơ
+        </button>
+      </div>
 
     </div>
 
@@ -2384,6 +2387,63 @@ async function renderProfile(c){
     </div>
   `;
 
+
+  $('#changeEmailOtpBtn').onclick=()=>{
+    let verifiedEmailToken='';
+    modal('Đổi email đăng nhập (Xác minh OTP · P2.06 / P6.44)',`
+      <form id="changeEmailForm" class="form-grid">
+        <p class="muted" style="grid-column:1/-1">Email hiện tại: <b>${esc(p.email||'—')}</b>. Để bảo vệ tài khoản, hệ thống yêu cầu xác minh mã OTP 6 chữ số gửi tới địa chỉ email mới trước khi cập nhật.</p>
+        <label style="grid-column:1/-1">Địa chỉ email mới *<input type="email" name="new_email" id="newEmailInput" required placeholder="nhap-email-moi@domain.vn"></label>
+        <div class="toolbar" style="grid-column:1/-1">
+          <button type="button" class="secondary" id="reqEmailChangeOtp">1. Gửi mã OTP tới email mới</button>
+          <input id="emailChangeOtpCode" placeholder="Nhập 6 chữ số OTP" maxlength="6" pattern="\d{6}" style="max-width:170px">
+          <button type="button" class="secondary" id="verifyEmailChangeOtp">2. Xác minh OTP</button>
+        </div>
+        <div id="emailChangeOtpMsg" class="meta" style="grid-column:1/-1" aria-live="polite"></div>
+        <div style="grid-column:1/-1"><button class="primary" id="submitEmailChangeBtn" disabled>3. Lưu email đăng nhập mới</button></div>
+      </form>
+    `);
+    $('#reqEmailChangeOtp').onclick=async()=>{
+      const em=($('#newEmailInput')?.value||'').trim().toLowerCase();
+      const msg=$('#emailChangeOtpMsg');
+      if(!em||!/^\S+@\S+\.\S+$/.test(em)){msg.textContent='Vui lòng nhập địa chỉ email mới hợp lệ.';return}
+      if(em===String(p.email||'').toLowerCase()){msg.textContent='Email mới trùng với email hiện tại.';return}
+      $('#reqEmailChangeOtp').disabled=true;msg.textContent='Đang gửi yêu cầu OTP...';
+      try{
+        const r=await api('/api/public/email-otp/request',{method:'POST',body:JSON.stringify({email:em,purpose:'email_change',full_name:p.full_name})});
+        msg.textContent=r.message||'Đã tạo yêu cầu OTP.';
+      }catch(e){msg.textContent=e.data?.message||e.data?.error||e.message}
+      finally{$('#reqEmailChangeOtp').disabled=false}
+    };
+    $('#verifyEmailChangeOtp').onclick=async()=>{
+      const em=($('#newEmailInput')?.value||'').trim().toLowerCase();
+      const code=($('#emailChangeOtpCode')?.value||'').trim();
+      const msg=$('#emailChangeOtpMsg');
+      if(!/\d{6}/.test(code)){msg.textContent='Vui lòng nhập đúng 6 chữ số OTP.';return}
+      $('#verifyEmailChangeOtp').disabled=true;msg.textContent='Đang kiểm tra mã OTP...';
+      try{
+        const r=await api('/api/public/email-otp/verify',{method:'POST',body:JSON.stringify({email:em,otp:code,purpose:'email_change'})});
+        verifiedEmailToken=r.otp_verification_token||'';
+        $('#submitEmailChangeBtn').disabled=!verifiedEmailToken;
+        msg.innerHTML='<b class="status-ok">✓ Đã xác minh OTP email mới. Bạn có thể bấm Lưu email đăng nhập mới.</b>';
+      }catch(e){msg.textContent=e.data?.message||e.data?.error||e.message}
+      finally{$('#verifyEmailChangeOtp').disabled=false}
+    };
+    $('#changeEmailForm').onsubmit=async e=>{
+      e.preventDefault();
+      const em=($('#newEmailInput')?.value||'').trim().toLowerCase();
+      if(!verifiedEmailToken){toast('Vui lòng xác minh mã OTP trước.','warn');return}
+      try{
+        await api('/api/me',{method:'PATCH',body:JSON.stringify({email:em,email_change_otp_token:verifiedEmailToken})});
+        await refreshMe();
+        $('#modal')?.remove();
+        toast('Đã cập nhật email đăng nhập mới thành công.');
+        renderApp();
+      }catch(err){
+        $('#emailChangeOtpMsg').textContent=err.data?.message||err.data?.error||err.message;
+      }
+    };
+  };
 
   $('#editProfile').onclick=()=>{
 
@@ -8087,8 +8147,14 @@ async function renderPortalStudio(c){
       <hr><h2>Thông điệp và số liệu ở trang đăng nhập</h2><div class="studio-grid">
       ${fallbacks.map(([key,title])=>{const x=byKey.get(key)||{key,label:title,mode:key==='programs'?'manual':'auto',enabled:key!=='programs',value:null};return `<fieldset class="studio-stat" data-stat-key="${key}"><legend>${esc(title)}</legend><label>Tên hiển thị<input name="label" maxlength="75" value="${esc(x.label||title)}" required></label><label>Cách lấy số liệu<select name="mode"><option value="auto" ${x.mode==='auto'?'selected':''} ${key==='programs'?'disabled':''}>Tự động từ hệ thống</option><option value="manual" ${x.mode==='manual'?'selected':''}>Nhập số đã kiểm chứng</option></select></label><label>Giá trị công bố<input name="value" type="number" min="0" max="1000000000" step="1" value="${x.value??''}" placeholder="Chỉ dùng khi nhập thủ công"></label><label class="studio-check"><input type="checkbox" name="enabled" ${x.enabled!==false?'checked':''}> Hiển thị chỉ số</label></fieldset>`}).join('')}</div>
       <label>Thông điệp bên dưới thống kê<textarea name="tagline" maxlength="190" rows="2">${esc(settings.tagline||published.tagline||'')}</textarea></label>
-      <div class="toolbar"><button class="primary" id="studioSave">Lưu thay đổi</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div>
-    </form>`;
+      <label>Lý do thay đổi cấu hình (ghi vào lịch sử phiên bản P6.34)<input name="change_reason" maxlength="240" placeholder="Ví dụ: Cập nhật số liệu quý IV và điều chỉnh màu nhận diện"></label>
+      <div class="toolbar"><button class="primary" id="studioSave">Lưu thay đổi</button><button type="button" class="secondary" id="studioPreviewImpact">Xem trước tác động (P6.22)</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div>
+      <div id="studioImpactBox" style="margin-top:10px"></div>
+    </form>
+    <div class="card" style="margin-top:14px">
+      <div class="section-title"><div><h2>Lịch sử phiên bản &amp; Khôi phục cấu hình (P6.21, P6.34)</h2><p class="muted">Mỗi lần lưu cấu hình được ghi nhận phiên bản kèm trạng thái trước/sau để hỗ trợ khôi phục an toàn.</p></div></div>
+      <div id="studioHistoryBox">Đang tải lịch sử phiên bản...</div>
+    </div>`;
     const form=$('#studioForm');
     $('#uploadBrandLogo').onclick=async()=>{
       const file=$('#brandLogoFile').files?.[0],msg=$('#logoUploadMsg'),button=$('#uploadBrandLogo');
@@ -8103,10 +8169,43 @@ async function renderPortalStudio(c){
         const stats=[...form.querySelectorAll('[data-stat-key]')].map(el=>({key:el.dataset.statKey,label:el.querySelector('[name="label"]').value,mode:el.querySelector('[name="mode"]').value,value:el.querySelector('[name="value"]').value||null,enabled:el.querySelector('[name="enabled"]').checked}));
         const links=[...form.querySelectorAll('[data-portal-link]')].map(el=>({name:el.querySelector('[name="name"]').value,url:el.querySelector('[name="url"]').value,description:el.querySelector('[name="description"]').value}));
         const brand={siteName:form.elements.siteName.value,logoUrl:form.elements.logoUrl.value,primaryColor:form.elements.primaryColor.value,accentColor:form.elements.accentColor.value,navColor:form.elements.navColor.value,fontFamily:form.elements.fontFamily.value,baseFontSize:Number(form.elements.baseFontSize.value),cornerRadius:Number(form.elements.cornerRadius.value),contentMaxWidth:Number(form.elements.contentMaxWidth.value)};
-        await api('/api/admin/portal-config',{method:'PUT',body:JSON.stringify({stats,tagline:form.elements.tagline.value,brand,links})});
+        await api('/api/admin/portal-config',{method:'PUT',body:JSON.stringify({stats,tagline:form.elements.tagline.value,brand,links,change_reason:form.elements.change_reason?.value||''})});
         const refreshed=await api('/api/public/portal-config');applyPortalConfig(refreshed);msg.textContent='Đã lưu và áp dụng cấu hình.';toast('Đã cập nhật giao diện và các liên kết.');
+        await loadStudioHistory();
       }catch(err){msg.textContent='Không thể lưu thay đổi: '+(err.data?.message||err.data?.detail||err.data?.error||err.message)}finally{button.disabled=false}
     };
+    const collectStudioPayload=()=>{
+      const stats=[...form.querySelectorAll('[data-stat-key]')].map(el=>({key:el.dataset.statKey,label:el.querySelector('[name="label"]').value,mode:el.querySelector('[name="mode"]').value,value:el.querySelector('[name="value"]').value||null,enabled:el.querySelector('[name="enabled"]').checked}));
+      const links=[...form.querySelectorAll('[data-portal-link]')].map(el=>({name:el.querySelector('[name="name"]').value,url:el.querySelector('[name="url"]').value,description:el.querySelector('[name="description"]').value}));
+      const brand={siteName:form.elements.siteName.value,logoUrl:form.elements.logoUrl.value,primaryColor:form.elements.primaryColor.value,accentColor:form.elements.accentColor.value,navColor:form.elements.navColor.value,fontFamily:form.elements.fontFamily.value,baseFontSize:Number(form.elements.baseFontSize.value),cornerRadius:Number(form.elements.cornerRadius.value),contentMaxWidth:Number(form.elements.contentMaxWidth.value)};
+      return {stats,tagline:form.elements.tagline.value,brand,links};
+    };
+    $('#studioPreviewImpact').onclick=async()=>{
+      const box=$('#studioImpactBox');box.innerHTML='<div class="muted">Đang phân tích phạm vi ảnh hưởng...</div>';
+      try{
+        const res=await api('/api/admin/portal-config/preview-impact',{method:'POST',body:JSON.stringify(collectStudioPayload())});
+        box.innerHTML=`<div class="request-note"><b>Kết quả phân tích tác động trước khi lưu (P6.22):</b> ${res.valid?'<span class="status-ok">Hợp lệ</span>':'<span class="status-bad">Có lỗi cần sửa</span>'}<ul>${(res.affected_components||[]).map(x=>`<li>Ảnh hưởng: ${esc(x)}</li>`).join('')}${(res.warnings||[]).map(w=>`<li class="status-bad">Lưu ý: ${esc(w)}</li>`).join('')}${(res.errors||[]).map(er=>`<li class="status-bad">Lỗi: ${esc(er)}</li>`).join('')}</ul></div>`;
+      }catch(e){box.textContent='Không thể phân tích tác động: '+(e.data?.message||e.message)}
+    };
+    async function loadStudioHistory(){
+      const hbox=$('#studioHistoryBox');if(!hbox)return;
+      try{
+        const gov=await api('/api/admin/governance/overview');
+        const rows=gov.config_history||[];
+        hbox.innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Phiên bản</th><th>Khóa cấu hình</th><th>Lý do thay đổi</th><th>Thời gian</th><th>Thao tác</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>#${r.version_no}</b></td><td><code>${esc(r.config_key)}</code></td><td>${esc(r.change_reason||'—')}</td><td>${esc(r.created_at)}</td><td><button type="button" class="secondary" data-cfg-rollback="${esc(r.id)}" data-cfg-ver="${r.version_no}">Khôi phục bản #${r.version_no}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Chưa có lịch sử phiên bản cấu hình.</div>';
+        $$('[data-cfg-rollback]').forEach(btn=>btn.onclick=async()=>{
+          if(!confirm(`Khôi phục cấu hình giao diện về phiên bản #${btn.dataset.cfgVer}?`))return;
+          btn.disabled=true;
+          try{
+            await api('/api/admin/config-history/'+encodeURIComponent(btn.dataset.cfgRollback)+'/rollback',{method:'POST',body:JSON.stringify({change_reason:`Khôi phục thủ công về bản #${btn.dataset.cfgVer}`})});
+            const refreshed=await api('/api/public/portal-config');applyPortalConfig(refreshed);
+            toast('Đã khôi phục phiên bản cấu hình.');
+            await renderPortalStudio(c);
+          }catch(e){toast(e.data?.message||e.message,'warn');btn.disabled=false}
+        });
+      }catch{hbox.innerHTML='<div class="empty">Không tải được lịch sử cấu hình.</div>'}
+    }
+    await loadStudioHistory();
   }catch(err){c.innerHTML='<div class="card">Không thể tải cấu hình: '+esc(err.data?.message||err.data?.detail||err.data?.error||err.message)+'</div>'}
 }
 
@@ -8702,20 +8801,23 @@ async function renderAdminWork(c){
       const d=await api('/api/admin/governance/registry');
       const items=(d.items||[]).filter(x=>['workflow_def','workflow_change','workflow_exception','sod_rule'].includes(x.domain_group));
       host.innerHTML=`<div class="section-title"><div><h2>Điều phối Quy trình, Phân tách nhiệm vụ (SoD) &amp; Ngoại lệ (P4.01–P4.08)</h2><p class="muted">Quản lý phiên bản quy trình, quy tắc phân tách người lập/người duyệt và lịch sử ngoại lệ có phê duyệt.</p></div><button class="primary" id="newWfEntry">Thêm mục quy trình / ngoại lệ</button></div>
-      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Tóm tắt &amp; Bằng chứng</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">Nguồn: ${esc(x.evidence_ref||'—')}</div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có bản ghi quy trình.</td></tr>'}</tbody></table></div>`;
+      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Tóm tắt &amp; Bằng chứng</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td><span class="badge ${x.status==='active'||x.status==='approved'?'ok':'warn'}">${esc(x.status)}</span></td><td>${esc(x.summary||'')}<div class="meta">Nguồn: ${esc(x.evidence_ref||'—')}</div></td><td><button class="secondary" data-gov-edit="${esc(x.id)}">Cập nhật / Duyệt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có bản ghi quy trình.</td></tr>'}</tbody></table></div>`;
       $('#newWfEntry').onclick=()=>openGovernanceModal(['workflow_def','workflow_change','workflow_exception','sod_rule'],load);
+      $$('[data-gov-edit]').forEach(b=>b.onclick=()=>{const row=items.find(r=>r.id===b.dataset.govEdit);if(row)openGovernanceEditModal(row,load)});
     }else if(activeWTab==='knowledge'){
       const d=await api('/api/admin/governance/registry');
       const items=(d.items||[]).filter(x=>['knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment','ops_lesson'].includes(x.domain_group));
       host.innerHTML=`<div class="section-title"><div><h2>Tri thức Tổ chức, Đồ thị Tri thức, Mô phỏng &amp; Quản trị AI (P5.01–P5.14)</h2><p class="muted">Lưu trữ hướng dẫn chính thức có nguồn xác minh, phân biệt rõ kịch bản mô phỏng với dữ liệu thực tế.</p></div><button class="primary" id="newKnEntry">Thêm tri thức / kịch bản mô phỏng</button></div>
-      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Nội dung &amp; Dẫn nguồn</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">Căn cứ: ${esc(x.evidence_ref||'—')}</div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có mục tri thức nào.</td></tr>'}</tbody></table></div>`;
+      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Nội dung &amp; Dẫn nguồn</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td><span class="badge ${x.status==='active'||x.status==='approved'?'ok':'warn'}">${esc(x.status)}</span></td><td>${esc(x.summary||'')}<div class="meta">Căn cứ: ${esc(x.evidence_ref||'—')}</div></td><td><button class="secondary" data-gov-edit="${esc(x.id)}">Cập nhật</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có mục tri thức nào.</td></tr>'}</tbody></table></div>`;
       $('#newKnEntry').onclick=()=>openGovernanceModal(['knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment','ops_lesson'],load);
+      $$('[data-gov-edit]').forEach(b=>b.onclick=()=>{const row=items.find(r=>r.id===b.dataset.govEdit);if(row)openGovernanceEditModal(row,load)});
     }else if(activeWTab==='capabilities'){
       const d=await api('/api/admin/governance/registry');
       const items=(d.items||[]).filter(x=>['capability_map','case_lifecycle','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio','csr_program','esd_program'].includes(x.domain_group));
       host.innerHTML=`<div class="section-title"><div><h2>Năng lực Nghiệp vụ Chuyên sâu, SLA, Chất lượng, Rủi ro &amp; Danh mục CSR/ESD (P6.23–P6.24, P7.01–P7.20)</h2><p class="muted">Quản lý bản đồ năng lực, cam kết thời hạn (SLA), chất lượng đầu ra, căn cứ quyết định, danh mục rủi ro và chương trình sáng kiến.</p></div><button class="primary" id="newCapEntry">Thêm hồ sơ năng lực / rủi ro / sáng kiến</button></div>
-      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Mô tả &amp; Bằng chứng</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">Tham chiếu: ${esc(x.evidence_ref||'—')}</div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có dữ liệu.</td></tr>'}</tbody></table></div>`;
+      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Mô tả &amp; Bằng chứng</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td><span class="badge ${x.status==='active'||x.status==='approved'?'ok':'warn'}">${esc(x.status)}</span></td><td>${esc(x.summary||'')}<div class="meta">Tham chiếu: ${esc(x.evidence_ref||'—')}</div></td><td><button class="secondary" data-gov-edit="${esc(x.id)}">Cập nhật / Duyệt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có dữ liệu.</td></tr>'}</tbody></table></div>`;
       $('#newCapEntry').onclick=()=>openGovernanceModal(['capability_map','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio','csr_program','esd_program'],load);
+      $$('[data-gov-edit]').forEach(b=>b.onclick=()=>{const row=items.find(r=>r.id===b.dataset.govEdit);if(row)openGovernanceEditModal(row,load)});
     }
   };
   $$('#workCenterTabs [data-wtab]').forEach(b=>b.onclick=()=>{
@@ -8723,6 +8825,32 @@ async function renderAdminWork(c){
     b.classList.add('active');activeWTab=b.dataset.wtab;load();
   });
   $('#workRefresh').onclick=load; await load();
+}
+
+function openGovernanceEditModal(row,onDone){
+  modal('Cập nhật / Phê duyệt Sổ đăng ký · '+esc(row.code),`<form id="govEditForm" class="form-grid">
+    <label>Mã định danh<input value="${esc(row.code)}" disabled></label>
+    <label>Phân nhóm<input value="${esc(row.domain_group)}" disabled></label>
+    <label style="grid-column:1/-1">Tiêu đề *<input name="title" required value="${esc(row.title||'')}"></label>
+    <label>Phiên bản<input name="version_label" value="${esc(row.version_label||'1.0')}"></label>
+    <label>Trạng thái<select name="status">
+      <option value="active" ${row.status==='active'?'selected':''}>Đang hiệu lực (active)</option>
+      <option value="draft" ${row.status==='draft'?'selected':''}>Bản nháp (draft)</option>
+      <option value="pending_verification" ${row.status==='pending_verification'?'selected':''}>Chờ xác minh (pending_verification)</option>
+      <option value="approved" ${row.status==='approved'?'selected':''}>Đã phê duyệt (approved - kiểm tra SoD)</option>
+      <option value="archived" ${row.status==='archived'?'selected':''}>Lưu trữ (archived)</option>
+    </select></label>
+    <label style="grid-column:1/-1">Nguồn căn cứ / Bằng chứng<input name="evidence_ref" value="${esc(row.evidence_ref||'')}"></label>
+    <label style="grid-column:1/-1">Tóm tắt nội dung *<textarea name="summary" rows="3" required>${esc(row.summary||'')}</textarea></label>
+    <button class="primary">Lưu cập nhật</button>
+  </form>`);
+  $('#govEditForm').onsubmit=async e=>{
+    e.preventDefault();
+    try{
+      await api('/api/admin/governance/registry/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+      $('#modal')?.remove();toast('Đã cập nhật mục quản trị.');if(onDone)await onDone();
+    }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+  };
 }
 
 function openGovernanceModal(domains,onDone){
@@ -8749,14 +8877,58 @@ async function renderAdminSystem(c){
     <div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div>
   </div>
   <div class="card" style="margin-top:14px"><h2>Cổng Kiểm tra Trước Khi Phát hành (P6.52) &amp; Trung tâm Email/OTP (P6.19, P6.44)</h2><div id="releaseGateBox">Đang tải...</div></div>
+  <div class="card" style="margin-top:14px"><h2>Kiểm tra An toàn Gói ZIP (P6.47) &amp; Xuất Gói Dữ liệu Độc lập Nhà cung cấp (P6.36)</h2>
+    <div class="toolbar" style="margin-bottom:10px">
+      <input type="file" id="zipInspectFile" accept=".zip,application/zip" aria-label="Chọn tệp ZIP cần kiểm tra">
+      <button type="button" class="secondary" id="runZipInspectBtn">Kiểm tra cấu trúc gói ZIP (P6.47)</button>
+      <button type="button" class="primary" id="exportBundleBtn">Xuất gói dữ liệu chuẩn hóa JSON + SHA-256 (P6.36)</button>
+    </div>
+    <div id="zipInspectResult" class="meta" aria-live="polite">Chọn tệp .zip để kiểm tra số lượng tệp, dung lượng giải nén, tỷ lệ nén và đường dẫn độc hại mà không thực thi mã.</div>
+  </div>
   <div class="card" style="margin-top:14px"><h2>Sổ đăng ký Nghĩa vụ Pháp lý &amp; Danh mục Cổng Dịch vụ (P6.04, P6.15)</h2><div id="legalAndServiceBox">Đang tải...</div></div>`;
   const refresh=async()=>{let f={items:[]},h={database:'unknown',schema_version:null,required_schema_version:16,schema_status:'unknown',missing_tables:[],missing_columns:[],r2_binding:false,r2_read_status:'not_configured',r2_write_status:'not_tested',email_binding:false,email_status:'not_configured'};let filterError='',healthError='';try{f=await api('/api/admin/saved-filters')}catch(e){filterError=e.message}try{h=await api('/api/admin/system-health')}catch(e){healthError=e.message}$('#savedFilters').innerHTML=(f.items||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div class="meta">${esc(x.view)} · ${esc(x.query||'Không có điều kiện')}</div></div><button class="danger" data-filter-del="${esc(x.id)}">Xóa</button></div>`).join('')||(filterError?`<div class="service-warning">Không tải được bộ lọc: ${esc(filterError)}</div>`:'<div class="empty">Chưa có bộ lọc đã lưu.</div>');const version=Number(h.schema_version||0),required=Number(h.required_schema_version||16),missing=Array.isArray(h.missing_tables)?h.missing_tables:[],missingColumns=Array.isArray(h.missing_columns)?h.missing_columns:[],migrationBehind=h.schema_status==='outdated'||version<required||missing.length>0||missingColumns.length>0;const dbLabel=h.database==='ok'?'Kết nối đã kiểm tra':h.database==='error'?'Không kết nối được':'Chưa xác minh';const r2Label=h.r2_read_status==='read_ok'?'Đọc danh sách được · chưa thử tải lên/xóa':h.r2_read_status==='read_failed'?'Không đọc được kho tệp':h.r2_read_status==='binding_present_test_unavailable'?'Binding có sẵn · chưa kiểm tra đọc/ghi':'Chưa được kiểm tra';const emailLabel=h.email_status==='configured_delivery_not_tested'?'Đã khai báo khóa · chưa kiểm tra gửi thực tế':'Chưa cấu hình';$('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b class="${h.database==='ok'?'status-ok':'status-bad'}">${dbLabel}</b></div><div class="list-row"><span>Phiên bản lược đồ ghi nhận</span><b>${esc(h.schema_version??'Chưa xác định')}</b></div><div class="list-row"><span>Phiên bản yêu cầu</span><b>${required}</b></div><div class="list-row"><span>Đối chiếu cấu trúc bảng</span><b class="${migrationBehind?'status-bad':'status-ok'}">${migrationBehind?'Chưa đạt yêu cầu':'Đã đối chiếu bảng bắt buộc'}</b></div>${missing.length?`<div class="service-warning"><b>Thiếu ${missing.length} bảng bắt buộc:</b><div class="health-table-list">${missing.map(esc).join(' · ')}</div></div>`:''}${missingColumns.length?`<div class="service-warning"><b>Thiếu ${missingColumns.length} cột bắt buộc:</b><div class="health-table-list">${missingColumns.map(esc).join(' · ')}</div></div>`:''}<div class="list-row"><span>Kho tệp R2</span><b>${esc(r2Label)}</b></div><div class="list-row"><span>Email</span><b>${esc(emailLabel)}</b></div>${migrationBehind?'<div class="service-warning"><b>Cần cập nhật cơ sở dữ liệu.</b> Một số bảng hoặc migration còn thiếu. Hãy sao lưu D1, đối chiếu lịch sử migration và áp dụng migration theo thứ tự trước khi sử dụng QR, thẻ hoặc lịch sử cấp phát.</div>':''}${healthError?`<div class="service-warning">Không đọc được tình trạng hệ thống: ${esc(healthError)}</div>`:''}<div class="meta health-footnote">Trạng thái đọc R2 không chứng minh tải lên/xóa hoạt động; trạng thái email chỉ phản ánh cấu hình, không phải email đã gửi thành công.</div>`;$$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()});
   try{
     const [rel,em,reg]=await Promise.all([api('/api/admin/release-readiness'),api('/api/admin/email-center'),api('/api/admin/governance/registry')]);
-    $('#releaseGateBox').innerHTML=`<div class="stack-list">${(rel.gates||[]).map(g=>`<div class="list-row"><span><b>${esc(g.title)}</b><div class="meta">${esc(g.detail)}</div></span><b class="${g.status==='passed'?'status-ok':'status-bad'}">${esc(g.status)}</b></div>`).join('')}</div><p class="meta" style="margin-top:10px">${esc(em.mailbox_note||'')}</p>`;
+    const logs=(em.delivery_logs||[]).slice(0,15);
+    $('#releaseGateBox').innerHTML=`<div class="stack-list">${(rel.gates||[]).map(g=>`<div class="list-row"><span><b>${esc(g.title)}</b><div class="meta">${esc(g.detail)}</div></span><b class="${g.status==='passed'?'status-ok':'status-bad'}">${esc(g.status)}</b></div>`).join('')}</div>
+    <p class="meta" style="margin-top:10px">${esc(em.mailbox_note||'')}</p>
+    <h3 style="margin-top:14px">Nhật ký gửi Email gần đây &amp; Thử gửi lại an toàn (P6.19)</h3>
+    <div class="table-wrap"><table><thead><tr><th>Mẫu thư</th><th>Người nhận</th><th>Tiêu đề</th><th>Trạng thái</th><th>Số lần thử lại</th><th>Thời gian</th><th>Thao tác</th></tr></thead><tbody>${logs.map(l=>`<tr><td><code>${esc(l.template_code)}</code></td><td>${esc(l.recipient_email)}</td><td>${esc(l.subject)}</td><td><span class="badge ${l.status==='sent'?'ok':'warn'}">${esc(l.status)}</span><div class="meta">${esc(l.error_detail||'')}</div></td><td>${Number(l.retry_count||0)}</td><td>${esc(l.created_at)}</td><td>${l.status==='sent'?'—':`<button type="button" class="secondary" data-email-retry="${esc(l.id)}">Thử gửi lại</button>`}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có bản ghi gửi email.</td></tr>'}</tbody></table></div>`;
+    $$('[data-email-retry]').forEach(btn=>btn.onclick=async()=>{
+      btn.disabled=true;
+      try{
+        const r=await api('/api/admin/email-center/'+encodeURIComponent(btn.dataset.emailRetry)+'/retry',{method:'POST',body:'{}'});
+        toast(r.message||`Đã thử gửi lại (trạng thái: ${r.status}).`,r.sent?'ok':'warn');
+        await refresh();
+      }catch(e){toast(e.data?.message||e.message,'warn');btn.disabled=false}
+    });
     const legals=(reg.items||[]).filter(x=>['legal_obligation','service_catalog'].includes(x.domain_group));
     $('#legalAndServiceBox').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Nhóm</th><th>Mã</th><th>Tên mục / Văn bản</th><th>Trạng thái</th><th>Chi tiết &amp; Nguồn</th></tr></thead><tbody>${legals.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">${esc(x.evidence_ref||'')}</div></td></tr>`).join('')}</tbody></table></div>`;
   }catch{}}
+  $('#runZipInspectBtn').onclick=async()=>{
+    const f=$('#zipInspectFile')?.files?.[0];
+    const out=$('#zipInspectResult');
+    if(!f){out.textContent='Vui lòng chọn một tệp .zip trước khi kiểm tra.';return}
+    $('#runZipInspectBtn').disabled=true;out.textContent='Đang phân tích cấu trúc gói ZIP...';
+    try{
+      const buf=await f.arrayBuffer();
+      const resp=await fetch('/api/admin/archive-inspect',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/zip'},body:buf});
+      const r=await resp.json().catch(()=>({}));
+      out.innerHTML=`<div class="request-note"><b>Kết quả kiểm tra gói ZIP (${esc(f.name)}):</b> <span class="${r.valid?'status-ok':'status-bad'}">${r.valid?'AN TOÀN (PASSED)':'BỊ CHẶN (BLOCKED) · '+esc(r.reason||'')}</span><br>Số tệp: <b>${r.file_count??0}</b> · Dung lượng giải nén: <b>${r.total_uncompressed_bytes??0} bytes</b> · Tỷ lệ nén tối đa: <b>${r.max_compression_ratio??0}:1</b> · Độ sâu thư mục: <b>${r.max_depth??0}</b>${(r.risks&&r.risks.length)?`<br>Cảnh báo: <code>${esc(r.risks.map(x=>typeof x==='object'?`${x.file}: ${x.risk}`:String(x)).join(', '))}</code>`:''}</div>`;
+    }catch(e){out.textContent='Lỗi khi kiểm tra gói ZIP: '+e.message}
+    finally{$('#runZipInspectBtn').disabled=false}
+  };
+  $('#exportBundleBtn').onclick=async()=>{
+    $('#exportBundleBtn').disabled=true;
+    try{
+      const d=await api('/api/admin/export-bundle');
+      const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json;charset=utf-8'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='skyfirst-operations-center-export.json';a.click();URL.revokeObjectURL(a.href);
+      $('#zipInspectResult').innerHTML=`<div class="request-note"><b>Đã xuất gói dữ liệu chuẩn hóa (P6.36):</b> SHA-256 Checksum: <code>${esc(d.sha256_checksum)}</code></div>`;
+      toast('Đã tải xuống gói dữ liệu chuẩn hóa.');
+    }catch(e){toast(e.data?.message||e.message,'warn')}
+    finally{$('#exportBundleBtn').disabled=false}
+  };
   $('#savedFilterForm').onsubmit=async e=>{e.preventDefault();const x=Object.fromEntries(new FormData(e.target));await api('/api/admin/saved-filters',{method:'POST',body:JSON.stringify(x)});e.target.reset();toast('Đã lưu bộ lọc.');await refresh()}; await refresh();
 }
 

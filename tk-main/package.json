@@ -6,15 +6,16 @@
     "dev": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "db:migrate:remote": "wrangler d1 migrations apply tk --remote",
-    "check": "node --check src/index.js && node --check public/app.js",
+    "db:migrate:local": "wrangler d1 migrations apply tk --local",
+    "check": "node --check src/index.js && node --check src/local-qr.js && node --check src/qr-code/index.js && node --check public/app.js && node --check public/brand.js",
     "build": "npm run check",
-    "test": "python3 scripts/verify_release.py && node scripts/validate-center.mjs"
+    "test": "node scripts/verify-release.mjs && node scripts/validate-center.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.30.0"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=18.0.0"
   },
   "type": "module"
 }

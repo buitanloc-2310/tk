@@ -2005,7 +2005,21 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(!next[key])return json({error:'PERSONAL_FIELD_REQUIRED',field:key,message:`Vui lòng nhập ${label}.`},400);
     }
     if(next.email&&!/^\S+@\S+\.\S+$/.test(next.email))return json({error:'EMAIL_INVALID',field:'email',message:'Email không hợp lệ.'},400);
-    if(next.email!==String(current.email||''))return json({error:'EMAIL_CHANGE_REQUIRES_VERIFICATION',field:'email',message:'Email đăng nhập chỉ được thay đổi sau khi xác minh email mới. Vui lòng liên hệ support@skyfirst.io.vn để cập nhật an toàn.'},409);
+    let emailChangeOtpId=null;
+    if(next.email!==String(current.email||'').toLowerCase()){
+      const emailChangeOtpToken=clean(b.email_change_otp_token,512);
+      if(!emailChangeOtpToken){
+        return json({error:'EMAIL_CHANGE_REQUIRES_VERIFICATION',field:'email',message:'Email đăng nhập chỉ được thay đổi sau khi xác minh mã OTP gửi tới email mới. Vui lòng bấm "Đổi email đăng nhập (Xác minh OTP)" hoặc liên hệ support@skyfirst.io.vn.'},409);
+      }
+      await ensureGovernanceTables(env);
+      const dupEmail=await env.DB.prepare(`SELECT 1 FROM accounts WHERE lower(email)=? AND id!=? UNION ALL SELECT 1 FROM people WHERE lower(email)=? AND id!=? LIMIT 1`).bind(next.email,s.account_id,next.email,s.person_id).first();
+      if(dupEmail)return json({error:'EMAIL_ALREADY_USED',field:'email',message:'Email này đã được sử dụng bởi một hồ sơ khác.'},409);
+      const otpHash=await sha256(emailChangeOtpToken);
+      const otpRow=await env.DB.prepare(`SELECT id,used_at,verified_at,CASE WHEN expires_at<=CURRENT_TIMESTAMP THEN 1 ELSE 0 END is_expired FROM email_otp_tokens WHERE verify_token_hash=? AND lower(email)=? AND purpose='email_change' LIMIT 1`).bind(otpHash,next.email).first();
+      if(!otpRow||!otpRow.verified_at||otpRow.is_expired)return json({error:'EMAIL_CHANGE_OTP_INVALID',field:'email_change_otp_token',message:'Mã xác nhận OTP đổi email không hợp lệ hoặc đã hết hạn.'},400);
+      if(otpRow.used_at)return json({error:'OTP_ALREADY_USED',field:'email_change_otp_token',message:'Mã xác nhận OTP đổi email đã được sử dụng.'},409);
+      emailChangeOtpId=otpRow.id;
+    }
     if(next.id_number&& !/^\d{12}$/.test(next.id_number))return json({error:'ID_NUMBER_MUST_BE_12_DIGITS',field:'id_number',message:'CCCD phải gồm đúng 12 chữ số.'},400);
 
     try{
@@ -2025,8 +2039,13 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         env.DB.prepare(`UPDATE accounts SET email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next.email||null,s.account_id),
         env.DB.prepare(`INSERT INTO people_work_profiles(person_id,school_name,employment_status,workplace_name,work_department,job_title,updated_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(person_id) DO UPDATE SET school_name=excluded.school_name,employment_status=excluded.employment_status,workplace_name=excluded.workplace_name,work_department=excluded.work_department,job_title=excluded.job_title,updated_at=CURRENT_TIMESTAMP`).bind(s.person_id,nextWork.school_name||null,nextWork.employment_status||null,nextWork.workplace_name||null,nextWork.work_department||null,nextWork.job_title||null)
       ]);
-      await audit(env,s.account_id,'profile_updated','person',s.person_id,null,{fields:Object.keys(b||{})});
-      return json({ok:true,person:next,work_profile:nextWork});
+      if(emailChangeOtpId){
+        await env.DB.prepare(`UPDATE email_otp_tokens SET used_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(emailChangeOtpId).run();
+        await env.DB.prepare(`INSERT INTO legal_consent_records(id,subject_type,subject_id,email,terms_version,privacy_version,read_acknowledged,terms_accepted,privacy_consent,accuracy_committed,is_minor,guardian_consent,email_verified,otp_token_id,purpose_scope,ip_hint,user_agent) VALUES(?,'person',?,?,'2026.10-SFN-TERMS','2026.10-SFN-PDPD',1,1,1,1,0,0,1,?,'self_service_email_change',?,?)`).bind(uid('consent'),s.person_id,next.email,emailChangeOtpId,clientHint(req),clean(req.headers.get('user-agent'),500)).run();
+        await safeSecurityEvent(env,s.account_id,'email_changed_via_otp',req,{previous_email:current.email,new_email:next.email,otp_id:emailChangeOtpId});
+      }
+      await audit(env,s.account_id,'profile_updated','person',s.person_id,null,{fields:Object.keys(b||{}),email_changed:Boolean(emailChangeOtpId)});
+      return json({ok:true,email_verified:Boolean(emailChangeOtpId),person:next,work_profile:nextWork});
     }catch(err){
       const msg=String(err?.message||err);
       if(/unique/i.test(msg)&&/email/i.test(msg))return json({error:'EMAIL_ALREADY_USED',message:'Email này đã được sử dụng.'},409);
@@ -5643,6 +5662,177 @@ env.DB.prepare(`
       delivery_logs:logs.results||[],
       otp_records:otps.results||[]
     });
+  }
+
+  // P4-P7 Governance Registry Update & Approval Lifecycle (with SoD enforcement)
+  const govPatchMatch=url.pathname.match(/^\/api\/admin\/governance\/registry\/([^/]+)$/);
+  if(govPatchMatch&&req.method==='PATCH'){
+    if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN',message:'Cần quyền Quản trị Mạng lưới hoặc Quản trị Hệ thống để cập nhật mục quản trị.'},403);
+    await ensureGovernanceTables(env);
+    const gid=decodeURIComponent(govPatchMatch[1]);
+    const existing=await env.DB.prepare(`SELECT * FROM governance_registry WHERE id=?`).bind(gid).first();
+    if(!existing)return json({error:'NOT_FOUND'},404);
+    const b=await bodyJson(req);
+    const nextStatus=clean(b.status,40)||existing.status;
+    const nextTitle=clean(b.title,240)||existing.title;
+    const nextVersion=clean(b.version_label,30)||existing.version_label;
+    const nextSummary=b.summary!==undefined?clean(b.summary,2000):existing.summary;
+    const nextEvidence=b.evidence_ref!==undefined?clean(b.evidence_ref,500):existing.evidence_ref;
+    const nextPayload=typeof b.payload==='object'&&b.payload!==null?JSON.stringify(b.payload):(b.payload_json!==undefined?clean(b.payload_json,4000):existing.payload_json);
+    const nextEffectiveTo=b.effective_to!==undefined?(clean(b.effective_to,20)||null):existing.effective_to;
+    // SoD check (P4.03): Owner cannot self-approve restricted governance records
+    if(nextStatus==='approved'&&['workflow_change','workflow_exception','decision_record'].includes(existing.domain_group)){
+      const effectiveOwner=clean(b.owner_account_id,100)||existing.owner_account_id;
+      if(effectiveOwner===s.account_id){
+        return json({error:'SOD_CONFLICT_DETECTED',message:'Xung đột phân tách nhiệm vụ (SoD): Người đề xuất / chủ sở hữu không được tự phê duyệt trực tiếp thay đổi quy trình, ngoại lệ hoặc quyết định.'},409);
+      }
+    }
+    const reviewerId=clean(b.reviewer_account_id,100)||existing.reviewer_account_id||s.account_id;
+    const approverId=nextStatus==='approved'?(clean(b.approver_account_id,100)||s.account_id):(clean(b.approver_account_id,100)||existing.approver_account_id);
+    await env.DB.prepare(`UPDATE governance_registry SET title=?,status=?,version_label=?,summary=?,evidence_ref=?,payload_json=?,reviewer_account_id=?,approver_account_id=?,effective_to=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(
+      nextTitle,nextStatus,nextVersion,nextSummary,nextEvidence,nextPayload,reviewerId,approverId,nextEffectiveTo,gid
+    ).run();
+    await audit(env,s.account_id,'governance_entry_updated',existing.domain_group,gid,existing.org_node_id,{code:existing.code,previous_status:existing.status,status:nextStatus,version_label:nextVersion});
+    return json({ok:true,id:gid,code:existing.code,status:nextStatus,version_label:nextVersion});
+  }
+
+  // P6.22 Configuration Impact Preview
+  if(url.pathname==='/api/admin/portal-config/preview-impact'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const b=await bodyJson(req);
+    const stored=await env.DB.prepare("SELECT value_json FROM system_settings WHERE key='member_portal_v4'").first();
+    let prev={};try{prev=JSON.parse(stored?.value_json||'{}')}catch{}
+    const affected=[];
+    const warnings=[];
+    const errors=[];
+    if(b.brand&&typeof b.brand==='object'){
+      const prevBrand=prev.brand||{};
+      if(b.brand.siteName&&b.brand.siteName!==prevBrand.siteName){
+        affected.push('Tiêu đề hệ thống trên Header, trang Đăng nhập, Tra cứu, Xác minh thẻ và Thiết lập');
+        if(!String(b.brand.siteName).includes('Sky First'))warnings.push('Tên hiển thị mới không chứa cụm từ nhận diện "Sky First".');
+      }
+      for(const ck of ['primaryColor','accentColor','navColor']){
+        if(b.brand[ck]!==undefined&&!/^#[a-f0-9]{6}$/i.test(String(b.brand[ck]||'')))errors.push(`Mã màu ${ck} không đúng định dạng #RRGGBB.`);
+        else if(b.brand[ck]&&b.brand[ck]!==prevBrand[ck])affected.push(`Bảng màu giao diện (${ck})`);
+      }
+      if(b.brand.baseFontSize!==undefined){
+        const fs=Number(b.brand.baseFontSize);
+        if(!Number.isInteger(fs)||fs<14||fs>20)errors.push('Cỡ chữ cơ bản phải từ 14px đến 20px.');
+        else if(fs!==Number(prevBrand.baseFontSize||16))affected.push(`Cỡ chữ toàn hệ thống (${fs}px)`);
+      }
+    }
+    if(b.links!==undefined){
+      if(!Array.isArray(b.links)||b.links.length!==5)errors.push('Danh sách liên kết hệ sinh thái phải có đúng 5 cổng Sky First.');
+      else affected.push('Menu liên kết hệ sinh thái Sky First trên toàn bộ trang công khai và cổng thành viên');
+    }
+    if(b.stats!==undefined){
+      if(!Array.isArray(b.stats))errors.push('Cấu hình thống kê không hợp lệ.');
+      else{
+        affected.push('Khối số liệu hoạt động tại cổng Đăng nhập / Đăng ký');
+        if(b.stats.some(x=>x.key==='programs'&&x.mode==='auto'))errors.push('Chỉ số chương trình/dự án bắt buộc dùng chế độ nhập thủ công đã kiểm chứng (manual).');
+      }
+    }
+    if(b.tagline!==undefined&&clean(b.tagline,190)!==clean(prev.tagline,190)){
+      affected.push('Thông điệp truyền cảm hứng dưới bảng số liệu trang Đăng nhập');
+    }
+    return json({
+      ok:true,
+      valid:errors.length===0,
+      affected_components:affected.length?affected:['Không phát hiện thay đổi so với cấu hình đang áp dụng'],
+      warnings,
+      errors
+    });
+  }
+
+  // P6.21, P6.34 Configuration Version Rollback
+  const cfgRollbackMatch=url.pathname.match(/^\/api\/admin\/config-history\/([^/]+)\/rollback$/);
+  if(cfgRollbackMatch&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const hid=decodeURIComponent(cfgRollbackMatch[1]);
+    const row=await env.DB.prepare(`SELECT * FROM system_config_history WHERE id=?`).bind(hid).first();
+    if(!row)return json({error:'NOT_FOUND',message:'Không tìm thấy phiên bản cấu hình cần khôi phục.'},404);
+    const b=await bodyJson(req);
+    const targetJson=(b.restore_mode==='previous'&&row.previous_value_json&&row.previous_value_json!=='{}')?row.previous_value_json:row.new_value_json;
+    let restoredObj={};try{restoredObj=JSON.parse(targetJson||'{}')}catch{return json({error:'INVALID_STORED_CONFIG'},400)}
+    const curRow=await env.DB.prepare(`SELECT value_json FROM system_settings WHERE key=?`).bind(row.config_key).first();
+    await env.DB.prepare(`INSERT INTO system_settings(key,value_json,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(row.config_key,JSON.stringify(restoredObj)).run();
+    const verRow=await env.DB.prepare(`SELECT COALESCE(MAX(version_no),0)+1 v FROM system_config_history WHERE config_key=?`).bind(row.config_key).first();
+    const nextVer=Number(verRow?.v||1);
+    const reason=clean(b.change_reason,300)||`Khôi phục cấu hình từ phiên bản #${row.version_no}`;
+    await env.DB.prepare(`INSERT INTO system_config_history(id,config_key,version_no,previous_value_json,new_value_json,change_reason,impact_summary_json,actor_account_id,approved_by_account_id) VALUES(?,?,?,?,?,?,?,?,?)`).bind(
+      uid('cfghist'),row.config_key,nextVer,curRow?.value_json||'{}',JSON.stringify(restoredObj),reason,JSON.stringify({rollback_from_id:hid,rollback_from_version:row.version_no}),s.account_id,s.account_id
+    ).run();
+    await audit(env,s.account_id,'portal_config_rollback','system_settings',row.config_key,null,{from_history_id:hid,from_version:row.version_no,new_version:nextVer});
+    return json({ok:true,config_key:row.config_key,restored_from_version:row.version_no,new_version_no:nextVer,settings:restoredObj});
+  }
+
+  // P6.19 Safe Email Delivery Retry
+  const emailRetryMatch=url.pathname.match(/^\/api\/admin\/email-center\/([^/]+)\/retry$/);
+  if(emailRetryMatch&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const lid=decodeURIComponent(emailRetryMatch[1]);
+    const logRow=await env.DB.prepare(`SELECT * FROM email_delivery_logs WHERE id=?`).bind(lid).first();
+    if(!logRow)return json({error:'NOT_FOUND',message:'Không tìm thấy bản ghi nhật ký email.'},404);
+    if(logRow.status==='sent')return json({error:'EMAIL_ALREADY_SENT',message:'Email này đã được gửi thành công, không cần gửi lại.'},409);
+    const nextRetry=Number(logRow.retry_count||0)+1;
+    if(!env.RESEND_API_KEY){
+      await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status='not_configured',error_detail='EMAIL_NOT_CONFIGURED_ON_RETRY',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,lid).run();
+      await audit(env,s.account_id,'email_delivery_retried','email_delivery_log',lid,null,{retry_count:nextRetry,status:'not_configured'});
+      return json({ok:true,sent:false,status:'not_configured',retry_count:nextRetry,message:'Đã ghi nhận thao tác thử lại, nhưng môi trường hiện tại chưa cấu hình khóa RESEND_API_KEY.'},202);
+    }
+    try{
+      const html=memberEmailHtml({
+        title:logRow.subject||'Thông báo từ Trung tâm Nghiệp vụ Số Sky First',
+        name:logRow.recipient_email,
+        intro:'Đây là thư gửi lại từ Trung tâm Nghiệp vụ Số Sky First.',
+        status:'THÔNG BÁO HỆ THỐNG',
+        processing:'',
+        body:'Hệ thống gửi lại thông báo theo yêu cầu kiểm tra của quản trị viên.',
+        ctaUrl:env.APP_URL||DEFAULT_SYSTEM_IDENTITY.appUrl,
+        ctaLabel:'Mở Trung tâm Nghiệp vụ Số Sky First'
+      });
+      const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:logRow.sender_address,to:[logRow.recipient_email],reply_to:logRow.reply_to_address||DEFAULT_SYSTEM_IDENTITY.supportEmail,subject:logRow.subject,html})});
+      const data=await r.json().catch(()=>({}));
+      const ok=Boolean(r.ok&&data&&data.id);
+      const errMsg=ok?null:(data?.message||data?.error||`HTTP_${r.status}`);
+      await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status=?,provider_message_id=?,error_detail=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,ok?'sent':'failed',data?.id||null,errMsg,lid).run();
+      await audit(env,s.account_id,'email_delivery_retried','email_delivery_log',lid,null,{retry_count:nextRetry,status:ok?'sent':'failed'});
+      return json({ok:true,sent:ok,status:ok?'sent':'failed',retry_count:nextRetry,error:errMsg});
+    }catch(e){
+      const errMsg=String(e?.message||e);
+      await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status='failed',error_detail=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,clean(errMsg,500),lid).run();
+      return json({ok:true,sent:false,status:'failed',retry_count:nextRetry,error:errMsg},502);
+    }
+  }
+
+  // P6.36 Vendor-Independent Standardized Metadata & Governance Export Bundle
+  if(url.pathname==='/api/admin/export-bundle'&&req.method==='GET'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [orgs,cardTypes,roles,settings,govItems,counts]=await Promise.all([
+      env.DB.prepare(`SELECT id,code,name,short_name,node_type,parent_id,status,founded_at,term_label,sort_order FROM org_nodes WHERE deleted_at IS NULL ORDER BY sort_order,name`).all(),
+      env.DB.prepare(`SELECT id,code,name,active FROM card_types ORDER BY code`).all(),
+      env.DB.prepare(`SELECT id,code,name FROM roles ORDER BY code`).all(),
+      env.DB.prepare(`SELECT key,value_json,updated_at FROM system_settings ORDER BY key`).all(),
+      env.DB.prepare(`SELECT id,domain_group,code,title,status,version_label,summary,evidence_ref,effective_from,effective_to,updated_at FROM governance_registry ORDER BY domain_group,code`).all(),
+      env.DB.prepare(`SELECT (SELECT COUNT(*) FROM people) people_count,(SELECT COUNT(*) FROM accounts) accounts_count,(SELECT COUNT(*) FROM member_cards) cards_count,(SELECT COUNT(*) FROM legal_consent_records) consents_count`).first()
+    ]);
+    const bundle={
+      format:'skyfirst-operations-center-export-v1',
+      schema_version:17,
+      identity:DEFAULT_SYSTEM_IDENTITY,
+      record_counts:counts||{},
+      org_nodes:orgs.results||[],
+      card_types:cardTypes.results||[],
+      roles:roles.results||[],
+      system_settings:(settings.results||[]).map(x=>({key:x.key,updated_at:x.updated_at,value:(()=>{try{return JSON.parse(x.value_json||'{}')}catch{return x.value_json}})()})),
+      governance_registry:govItems.results||[]
+    };
+    const checksum=await sha256(JSON.stringify(bundle));
+    await audit(env,s.account_id,'system_export_bundle_generated','system_export','bundle_v1',null,{sha256_checksum:checksum});
+    return json({ok:true,exported_at:new Date().toISOString(),sha256_checksum:checksum,bundle},200,{'cache-control':'no-store'});
   }
 
   // P6.52 Pre-Release Readiness Gate
