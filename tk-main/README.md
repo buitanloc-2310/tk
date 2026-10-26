@@ -1,87 +1,70 @@
-# CỔNG THÀNH VIÊN SKY FIRST NETWORK — FINAL LONG-TERM RELEASE
+# TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST — PHIÊN BẢN TÍCH HỢP TOÀN DIỆN P1–P7
 
-Bản này được rà lại theo mục tiêu vận hành ổn định lâu dài trên hạ tầng Cloudflare hiện có.
+Hệ thống quản trị nghiệp vụ, hồ sơ số, thẻ xác minh, quy trình và tuân thủ của **Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First** trên hạ tầng Cloudflare Workers + D1 + R2.
 
-## Hạ tầng giữ nguyên
-- Worker name in the checked-in `wrangler.jsonc`: `tk` (this is the deployment name Wrangler will use; verify it is the production Worker bound to the member domain before deploying)
-- Domain: `https://member.skyfirst.io.vn`
-- D1 binding: `DB`
-- D1 database: `tk`
-- D1 database ID: `ff630699-cc44-471d-9507-aa94c84468fb`
-- R2 binding: `FILES`
-- R2 bucket: `tksfn`
-- PBKDF2: 100000 iterations
+## 1. Danh tính chính thức của hệ thống
+- **Tên hệ thống:** Trung tâm Nghiệp vụ Số Sky First
+- **Tên tổ chức:** Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First
+- **Domain mục tiêu:** `https://nghiepvu.skyfirst.io.vn`
+- **Email hệ thống:** `nghiepvu@skyfirst.io.vn`
+- **Email gửi tự động:** `noreply@skyfirst.io.vn`
+- **Email hỗ trợ:** `support@skyfirst.io.vn`
+- **Email liên hệ:** `lienhe@skyfirst.io.vn`
 
-Không tạo D1/R2/domain mới và không cần xóa dữ liệu đang có.
+## 2. Hạ tầng kỹ thuật bảo toàn (Không tự ý thay đổi ID/Binding)
+- **Worker name (`wrangler.jsonc`):** `tk`
+- **D1 binding:** `DB` (`database_name`: `tk`, `database_id`: `ff630699-cc44-471d-9507-aa94c84468fb`)
+- **R2 binding:** `FILES` (`bucket_name`: `tksfn`)
+- **Thuật toán băm mật khẩu:** PBKDF2-SHA256 (`100000` vòng lặp)
+- **Phiên bản lược đồ mục tiêu:** Schema Version `17` (tương thích ngược với Schema Version `16`)
 
-## Những phần đã được rà lại
-- Frontend `public/app.js` và Worker `src/index.js` đều qua `node --check`.
-- Đã đối chiếu các API thành viên thường dùng, bao gồm CV, thẻ và quá trình công tác.
-- Đã sửa route vòng đời Đơn vị/vai trò để PATCH/End/Hide/Show nằm ngoài route POST tạo mới.
-- Các tab quản trị thành viên có thao tác vòng đời phù hợp: Mục tiêu, Công việc, Hoạt động, GCN, Thành tích, Thẻ, Tài liệu, Phân quyền.
-- Quá trình công tác là dữ liệu lịch sử từ `org_memberships`.
-- GCN ngoài hệ thống có route duyệt/từ chối xác minh.
-- Hồ sơ học tập/công tác được giữ trong `people` và luồng yêu cầu tài khoản.
-- Yêu cầu cấp tài khoản hiển thị thời gian dự kiến xử lý **60 phút đến 48 giờ**.
-- CCCD/địa chỉ không đưa vào CV mặc định hoặc trang xác minh công khai.
-- Mutation quan trọng tiếp tục ghi audit log.
+> **Cảnh báo an toàn dữ liệu & triển khai:**
+> - Không xóa D1/R2 hiện hữu, không chạy lại `SETUP_D1_CONSOLE.sql` hay `0001_initial.sql` trên database đang có dữ liệu thật.
+> - Trước khi gắn hoặc triển khai lên domain `https://nghiepvu.skyfirst.io.vn`, người có thẩm quyền phải xác nhận rõ trên Cloudflare Dashboard xem Worker `tk` và D1 `tk` đang phục vụ cổng cũ (`member.skyfirst.io.vn`) chuyển đổi sang `nghiepvu.skyfirst.io.vn` hay là tài nguyên tách biệt.
+> - Việc cập nhật địa chỉ email gửi trong mã nguồn không đồng nghĩa với việc đã tạo mailbox/alias hoặc cấu hình bản ghi DNS (`SPF`, `DKIM`, `DMARC`) trên nhà cung cấp dịch vụ email.
 
-## Migration mới 0008
-`0008_account_request_profile.sql` tạo bảng phụ `account_request_profiles` để lưu thông tin học tập/công tác của đơn yêu cầu tài khoản mà không phải ALTER nguy hiểm trên bảng production cũ.
+## 3. Các nâng cấp trọng tâm trong bản P1–P7
+1. **Nhận diện & Email chuẩn hóa (Mục 2 & IX):**
+   - Toàn bộ tiêu đề, giao diện công khai (`index.html`, `contact.html`, `privacy.html`, `terms.html`, `support.html`, `setup.html`, `verify.html`), `brand.js`, `app.js`, footer CV và mẫu email HTML (`SkyFirst_Email_Preview_NoLogo.html` + `memberEmailHtml`) được cập nhật sang **Trung tâm Nghiệp vụ Số Sky First** và `https://nghiepvu.skyfirst.io.vn`.
+   - Tách bạch rõ `noreply@skyfirst.io.vn` (gửi tự động), `nghiepvu@skyfirst.io.vn` (email hệ thống), `support@skyfirst.io.vn` (hỗ trợ/reply-to) và `lienhe@skyfirst.io.vn` (liên hệ chung).
+2. **Hệ thống OTP Email & Nhật ký Gửi thư Thực chất (P6.19, P6.20, P6.44, Mục 13.2):**
+   - Endpoint `POST /api/public/email-otp/request` và `POST /api/public/email-otp/verify`.
+   - Mã OTP 6 chữ số chỉ lưu bản băm SHA-256 (`otp_hash`) trong bảng `email_otp_tokens`, thời hạn 10 phút, dùng 1 lần (`used_at`), giới hạn tối đa 5 lần nhập sai (`max_attempts`), thời gian chờ gửi lại 60 giây và giới hạn tần suất theo IP/Email.
+   - Bảng `email_delivery_logs` lưu trạng thái thực tế từ nhà cung cấp (`sent`, `failed`, `not_configured`); tuyệt đối không báo gửi thành công giả khi thiếu `RESEND_API_KEY` hoặc khi API trả lỗi.
+3. **Cổng Kiểm soát Pháp lý & Dữ liệu Cá nhân (Mục 11, P6.04, P6.49, P6.50):**
+   - Đối chiếu [Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15](https://chinhphu.vn/?pageid=27160&docid=214590&classid=1&typegroupid=3) và [Nghị định số 356/2025/NĐ-CP](https://vanban.chinhphu.vn/?pageid=27160&docid=216387) (cùng có hiệu lực từ 01/01/2026).
+   - Tách bạch 3 nhóm xác nhận trong luồng đăng ký và lưu bằng chứng vào bảng `legal_consent_records`: (1) Xác nhận đã đọc thông báo bảo mật, (2) Chấp thuận Điều khoản sử dụng, (3) Đồng ý xử lý dữ liệu cá nhân theo mục đích cụ thể & cam kết tính chính xác.
+   - Phân biệt rõ xác nhận checkbox/OTP với chữ ký điện tử; kiểm soát thông tin người giám hộ đối với người dưới 18 tuổi và tự động xóa số định danh người giám hộ khỏi bảng mở rộng sau khi phê duyệt.
+4. **Hợp nhất Năng lực Quản trị Quy trình (P4), Tri thức (P5), Hệ thống (P6) & Nghiệp vụ Chuyên sâu (P7) vào Một Admin Duy Nhất:**
+   - Hoàn thiện luồng xử lý phiếu hỗ trợ nghiệp vụ (`GET /api/me/support`, `GET /api/admin/support-tickets`, `PATCH /api/admin/support-tickets/:id`) kèm theo dõi SLA và kết quả giải quyết (P7.09, P7.17).
+   - Bổ sung động cơ quản trị hợp nhất (`/api/admin/governance/overview`, `/api/admin/governance/registry`) tích hợp trực tiếp vào `Trung tâm công việc`, `Báo cáo & thống kê` và `Cấu hình hệ thống` trong Admin gốc: kiểm soát phân tách nhiệm vụ (SoD), phát hiện bất thường nghiệp vụ (>48h chờ duyệt, hồ sơ thiếu dữ liệu, thẻ hết hạn), quản lý lịch sử phiên bản cấu hình (`system_config_history`), sổ đăng ký pháp lý, danh mục cổng dịch vụ, khung CSR/ESD (đánh dấu cổng xác nhận định nghĩa ESD của SFN), kiểm tra an toàn gói nén ZIP (`/api/admin/archive-inspect`) và cổng kiểm tra trước phát hành (`/api/admin/release-readiness`).
 
-Không chạy lại `0001_initial.sql` bằng D1 Console trên database production.
+## 4. Kiểm thử & Triển khai An toàn
 
-## Triển khai
-Tại thư mục dự án. Lưu ý: `wrangler.jsonc` là cấu hình quyết định tên Worker khi deploy (`tk` trong ZIP này); tên package npm `sfn-member-portal` không quyết định tên Worker. Chỉ tiếp tục khi đã xác nhận `tk` chính là Worker đang gắn `member.skyfirst.io.vn` trong tài khoản Cloudflare đích.
-
+### Chạy kiểm thử cục bộ
 ```bash
-npm install
-npx wrangler d1 migrations apply tk --remote
-npx wrangler deploy
+npm run build
+npm test
 ```
+(`scripts/validate-center.mjs` hỗ trợ tự động cả Node ≥ 22 `node:sqlite` lẫn cầu nối SQLite trên Node 18+).
 
-Wrangler chỉ áp dụng migration chưa được ghi nhận. Trước khi deploy production, nên chạy kiểm tra release:
-
-```bash
-npm run check
-python scripts/verify_release.py
-```
-
-## Kiểm tra nhanh sau deploy
-1. Đăng nhập tài khoản quản trị hiện tại.
-2. Mở Quản trị thành viên → một hồ sơ thành viên.
-3. Test Đơn vị/vai trò: Thêm → Chỉnh sửa → Ngừng hiệu lực → Ẩn/Hiện lại.
-4. Test Mục tiêu/Công việc: thêm, chỉnh sửa, đổi trạng thái.
-5. Test Hoạt động/Thành tích/Tài liệu: chỉnh sửa và Ẩn/Hiện lại.
-6. Test GCN: cấp, upload PDF, duyệt GCN ngoài hệ thống, thu hồi/khôi phục.
-7. Test Thẻ: cấp, sửa, vô hiệu hóa/kích hoạt lại.
-8. Test Phân quyền: cấp scope, ngừng/khôi phục scope quản trị.
-9. Đăng nhập thành viên và mở Hồ sơ, Thẻ, Quá trình công tác, CV.
-10. Gửi thử một yêu cầu cấp tài khoản mới và duyệt thử.
-
-## Lưu ý vận hành 1–2 năm
-- Không sửa trực tiếp migration đã chạy trên production; mọi thay đổi schema mới phải tạo migration số tiếp theo.
-- Không dùng chức vụ tổ chức để suy ra quyền admin. Quyền quản trị luôn dựa trên `ROLE + SCOPE + PERMISSION`.
-- Không xóa lịch sử đơn vị/vai trò thông thường; dùng ngừng hiệu lực/ẩn.
-- Sao lưu D1 định kỳ trước thay đổi lớn.
-- Chạy `scripts/verify_release.py` trước mỗi lần deploy thay đổi source.
-
-## Security configuration (2026 final hardening)
-
-Audit follow-up: request-uploaded avatars are private and non-cacheable until an authorized reviewer processes the request; successful approval copies an image that passes file-signature validation into the member-avatar namespace. Status lookup should use POST so request codes and email addresses are not placed in the URL. Event cards are not valid before their issue date. Unit-scoped administrators cannot browse cards outside their effective organization scope; unscoped verification QR/event-card records remain network-admin-only until the data model supports unit scope.
-Before first-time setup, configure Cloudflare secret `SETUP_TOKEN` (for example with `wrangler secret put SETUP_TOKEN`). Keep `RESEND_API_KEY` as a secret as well. `/api/setup` requires `X-Setup-Token` and locks itself after the first account exists. Login, password reset and public avatar upload are rate-limited. The member Security Center supports session review/revocation and security-event history.
-
-## Bản 4.1 — 05/10/2026
-Tên cổng: **Trung tâm thành viên số SKY FIRST**. Chức năng tạo trung tâm nằm tại Quản trị → Cơ cấu tổ chức, chỉ dùng trong phạm vi quyền được cấp. Xem `UPGRADE-2026-10-05.md` để biết các sửa lỗi, cách sử dụng và phạm vi kiểm thử.
-
-Cloudflare build command: `npm run build`. Kiểm thử đầy đủ: `npm test` (Node ≥22.13, Python 3). Thiết lập D1/migration và secret theo hướng dẫn sẵn có trước khi triển khai.
-
-## Khắc phục lỗi dữ liệu/API — V10 (09/10/2026)
-
-Bản V10 bổ sung ranh giới lỗi JSON cho Worker, chẩn đoán bảng/cột schema, phân biệt kiểm tra đọc R2 với upload/delete chưa thử, không đánh dấu email đã gửi khi chưa thử, mở rộng bố cục responsive và làm mới cache CSS/JS. Xem `REMEDIATION_REPORT_2026-10-09_V10.md` trước khi phát hành.
-
-Nếu trang đang hiển thị schema version thấp hơn 16, **sao lưu D1 và kiểm tra danh sách migration từ xa trước**. Chạy `npx wrangler d1 migrations list tk --remote`; chỉ chạy `npm run db:migrate:remote` sau khi lịch sử/pending migration khớp và đã xác nhận không có khoảng trống bất thường. Sau khi migration xác nhận thành công mới chạy `npm run deploy`. Không xóa database, không chạy script thiết lập lại dữ liệu để né lỗi schema.
-
-## V11 — Sửa chuỗi lỗi production được phản ánh qua ảnh chụp (09/10/2026)
-
-Xem `REMEDIATION_REPORT_2026-10-09_V11.md`. V11 bổ sung chẩn đoán schema chi tiết và JSON error boundary, cải thiện QR/PDF, chống toast lặp, bố cục responsive và cache-busting. Kết quả kiểm thử cục bộ: 84/84 kiểm thử tích hợp/API đạt. Đây chưa phải nghiệm thu production. Trước triển khai, backup D1, kiểm tra `npx wrangler d1 migrations list tk --remote`, xử lý mọi mismatch migration, xác nhận schema đủ bảng/cột, rồi mới `npm run db:migrate:remote` và `npm run deploy` theo hướng dẫn trong báo cáo.
+### Quy trình triển khai lên Staging / Production (Chỉ thực hiện khi có quyền)
+1. **Sao lưu D1:** Xuất bản sao lưu D1 hiện tại trước khi chạy bất kỳ thay đổi nào.
+2. **Kiểm tra lịch sử migration từ xa:**
+   ```bash
+   npx wrangler d1 migrations list tk --remote
+   ```
+   Đối chiếu danh sách migration (`0001`, `0002`, `0004`..`0017`). Không chạy lại migration cũ đã áp dụng.
+3. **Áp dụng migration mới:**
+   ```bash
+   npx wrangler d1 migrations apply tk --remote
+   ```
+4. **Cấu hình Secrets:**
+   ```bash
+   npx wrangler secret put SETUP_TOKEN
+   npx wrangler secret put RESEND_API_KEY
+   ```
+5. **Deploy Worker:**
+   ```bash
+   npx wrangler deploy
+   ```

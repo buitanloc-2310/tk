@@ -199,6 +199,55 @@ async function ensureEvaluations(env){
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_member_evaluations_org ON member_evaluations(org_node_id,created_at DESC)`).run();
 }
 
+async function ensureGovernanceTables(env){
+  const ddl=[
+    "CREATE TABLE IF NOT EXISTS email_otp_tokens(id TEXT PRIMARY KEY,email TEXT NOT NULL,purpose TEXT NOT NULL DEFAULT 'account_request',otp_hash TEXT NOT NULL,verify_token_hash TEXT UNIQUE,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 5,resend_count INTEGER NOT NULL DEFAULT 0,expires_at TEXT NOT NULL,verified_at TEXT,used_at TEXT,ip_hint TEXT,user_agent TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS email_delivery_logs(id TEXT PRIMARY KEY,template_code TEXT NOT NULL DEFAULT 'master_notification',recipient_email TEXT NOT NULL,sender_address TEXT NOT NULL,reply_to_address TEXT,subject TEXT NOT NULL,provider_name TEXT NOT NULL DEFAULT 'resend',provider_message_id TEXT,status TEXT NOT NULL DEFAULT 'pending',error_detail TEXT,retry_count INTEGER NOT NULL DEFAULT 0,related_entity_type TEXT,related_entity_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS legal_consent_records(id TEXT PRIMARY KEY,subject_type TEXT NOT NULL,subject_id TEXT NOT NULL,email TEXT NOT NULL,terms_version TEXT NOT NULL DEFAULT '2026.10-SFN-TERMS',privacy_version TEXT NOT NULL DEFAULT '2026.10-SFN-PDPD',read_acknowledged INTEGER NOT NULL DEFAULT 0,terms_accepted INTEGER NOT NULL DEFAULT 0,privacy_consent INTEGER NOT NULL DEFAULT 0,accuracy_committed INTEGER NOT NULL DEFAULT 0,is_minor INTEGER NOT NULL DEFAULT 0,guardian_consent INTEGER NOT NULL DEFAULT 0,email_verified INTEGER NOT NULL DEFAULT 0,otp_token_id TEXT,purpose_scope TEXT NOT NULL DEFAULT 'account_review_and_member_operations',ip_hint TEXT,user_agent TEXT,consented_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS system_config_history(id TEXT PRIMARY KEY,config_key TEXT NOT NULL,version_no INTEGER NOT NULL DEFAULT 1,previous_value_json TEXT,new_value_json TEXT NOT NULL,change_reason TEXT,impact_summary_json TEXT NOT NULL DEFAULT '{}',actor_account_id TEXT,approved_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS support_ticket_assignments(ticket_id TEXT PRIMARY KEY,org_node_id TEXT,assigned_account_id TEXT,priority TEXT NOT NULL DEFAULT 'normal',sla_due_at TEXT,resolution_note TEXT,closed_reason TEXT,responded_at TEXT,resolved_at TEXT,updated_by_account_id TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS governance_registry(id TEXT PRIMARY KEY,domain_group TEXT NOT NULL,code TEXT NOT NULL UNIQUE,title TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',org_node_id TEXT,owner_account_id TEXT,reviewer_account_id TEXT,approver_account_id TEXT,related_entity_type TEXT,related_entity_id TEXT,version_label TEXT NOT NULL DEFAULT '1.0',summary TEXT,payload_json TEXT NOT NULL DEFAULT '{}',evidence_ref TEXT,effective_from TEXT,effective_to TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+  ];
+  for(const sql of ddl)await env.DB.prepare(sql).run();
+}
+function inspectZipArchiveHeaders(input){
+  const bytes=input instanceof Uint8Array?input:new Uint8Array(input||[]);
+  if(bytes.byteLength<22)return {valid:false,reason:'ARCHIVE_TOO_SMALL',entries:[]};
+  if(bytes.byteLength>25*1024*1024)return {valid:false,reason:'ARCHIVE_COMPRESSED_TOO_LARGE',entries:[]};
+  if(bytes[0]!==0x50||bytes[1]!==0x4b)return {valid:false,reason:'INVALID_ZIP_MAGIC',entries:[]};
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const dec=new TextDecoder('utf-8',{fatal:false});
+  const forbiddenExt=/\.(exe|dll|bat|cmd|sh|ps1|vbs|scr|msi|jar|com|elf|so|dylib|php|jsp|asp|aspx)$/i;
+  let offset=0,fileCount=0,totalUncompressed=0,maxRatio=0,maxDepth=0;
+  const entries=[],risks=[];
+  while(offset+30<=bytes.byteLength){
+    const sig=view.getUint32(offset,true);
+    if(sig!==0x04034b50)break;
+    const compSize=view.getUint32(offset+18,true);
+    const uncompSize=view.getUint32(offset+22,true);
+    const nameLen=view.getUint16(offset+26,true);
+    const extraLen=view.getUint16(offset+28,true);
+    const headerEnd=offset+30+nameLen+extraLen;
+    if(headerEnd>bytes.byteLength)return {valid:false,reason:'TRUNCATED_ZIP_HEADER',entries};
+    const name=dec.decode(bytes.slice(offset+30,offset+30+nameLen));
+    fileCount++;
+    totalUncompressed+=uncompSize;
+    const ratio=compSize>0?uncompSize/compSize:(uncompSize>0?999:1);
+    if(ratio>maxRatio)maxRatio=ratio;
+    const parts=name.split('/').filter(Boolean);
+    if(parts.length>maxDepth)maxDepth=parts.length;
+    if(name.includes('..')||name.startsWith('/')||name.includes('\\'))risks.push({file:name,risk:'PATH_TRAVERSAL'});
+    if(forbiddenExt.test(name))risks.push({file:name,risk:'EXECUTABLE_OR_SCRIPT_FORBIDDEN'});
+    if(ratio>100&&uncompSize>1024*1024)risks.push({file:name,risk:'SUSPECTED_ZIP_BOMB_RATIO'});
+    entries.push({name,compressed_bytes:compSize,uncompressed_bytes:uncompSize,ratio:Number(ratio.toFixed(2))});
+    if(fileCount>500){risks.push({file:name,risk:'TOO_MANY_FILES_LIMIT_500'});break;}
+    if(totalUncompressed>50*1024*1024){risks.push({file:name,risk:'UNCOMPRESSED_SIZE_LIMIT_50MB'});break;}
+    if(maxDepth>12){risks.push({file:name,risk:'DIRECTORY_DEPTH_LIMIT_12'});break;}
+    offset=headerEnd+compSize;
+  }
+  return {valid:risks.length===0&&fileCount>0,reason:risks.length?risks[0].risk:(fileCount===0?'EMPTY_OR_UNSUPPORTED_STREAM_ZIP':'OK'),file_count:fileCount,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:totalUncompressed,max_compression_ratio:Number(maxRatio.toFixed(2)),max_depth:maxDepth,risks,entries:entries.slice(0,100),execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
+}
+
 async function setupDone(env){
   const r=await env.DB.prepare('SELECT COUNT(*) c FROM accounts').first();
   return Number(r?.c||0)>0;
@@ -451,7 +500,16 @@ const DEFAULT_PORTAL_LINKS=[
   {name:'Trung Tâm Học Tập Số Sky First',url:'https://slc.skyfirst.io.vn/',description:'Học tập và lớp học trực tuyến'},
   {name:'Trung Tâm Thư Điện Tử Sky First',url:'https://mail.skyfirst.io.vn/',description:'Dịch vụ thư điện tử'}
 ];
-const DEFAULT_PORTAL_BRAND={siteName:'Trung Tâm Thành Viên Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,cornerRadius:18,contentMaxWidth:1500};
+const DEFAULT_SYSTEM_IDENTITY={
+  siteName:'Trung tâm Nghiệp vụ Số Sky First',
+  orgName:'Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First',
+  appUrl:'https://nghiepvu.skyfirst.io.vn',
+  systemEmail:'nghiepvu@skyfirst.io.vn',
+  noreplyEmail:'noreply@skyfirst.io.vn',
+  supportEmail:'support@skyfirst.io.vn',
+  contactEmail:'lienhe@skyfirst.io.vn'
+};
+const DEFAULT_PORTAL_BRAND={siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,cornerRadius:18,contentMaxWidth:1500};
 function safeSkyFirstUrl(value){try{const u=new URL(String(value||''));return u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='skyfirst.io.vn'||u.hostname.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}}
 function portalLinksFromSettings(candidates){
   if(!Array.isArray(candidates)||candidates.length!==DEFAULT_PORTAL_LINKS.length)return DEFAULT_PORTAL_LINKS.map(x=>({...x}));
@@ -598,7 +656,7 @@ async function api(req,env,url){
     const savedBrand=settings.brand&&typeof settings.brand==='object'?settings.brand:{};
     const brand={
       ...DEFAULT_PORTAL_BRAND,
-      siteName:clean(savedBrand.siteName||settings.siteName||DEFAULT_PORTAL_BRAND.siteName,100)||DEFAULT_PORTAL_BRAND.siteName,
+      siteName:(()=>{const raw=clean(savedBrand.siteName||settings.siteName||DEFAULT_PORTAL_BRAND.siteName,100);return (!raw||/trung tâm thành viên số|cổng thành viên/i.test(raw))?DEFAULT_PORTAL_BRAND.siteName:raw})(),
       logoUrl:localBrandImagePath(savedBrand.logoUrl||settings.logoUrl||DEFAULT_PORTAL_BRAND.logoUrl),
       primaryColor:/^#[a-f0-9]{6}$/i.test(savedBrand.primaryColor||'')?savedBrand.primaryColor:DEFAULT_PORTAL_BRAND.primaryColor,
       accentColor:/^#[a-f0-9]{6}$/i.test(savedBrand.accentColor||'')?savedBrand.accentColor:DEFAULT_PORTAL_BRAND.accentColor,
@@ -1008,18 +1066,132 @@ async function api(req,env,url){
   }
 
 
-function memberEmailHtml({title,name,intro,code,status,processing='60 phút đến 48 giờ',body,ctaUrl,ctaLabel='Mở Trung Tâm Thành Viên Số Sky First'}){
+function memberEmailHtml({title,name,intro,code,codeLabel='MÃ YÊU CẦU',status,processing='60 phút đến 48 giờ',body,ctaUrl='https://nghiepvu.skyfirst.io.vn/',ctaLabel='Mở Trung tâm Nghiệp vụ Số Sky First'}){
   const e=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
-  return `<!doctype html><html lang="vi"><body style="margin:0;background:#eef6fc;font-family:Arial,sans-serif;color:#13243a"><table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr><td align="center" style="padding:28px 12px"><table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:680px;background:#fff;border:1px solid #dbeaf6;border-radius:22px;overflow:hidden"><tr><td style="height:7px;background:#65b9ed"></td></tr><tr><td style="padding:28px 34px"><div style="font-size:12px;font-weight:700;letter-spacing:1.2px;color:#6597b9">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div><div style="font-size:22px;font-weight:800;margin-top:5px">Sky First Network</div></td></tr><tr><td style="padding:0 34px"><div style="height:1px;background:#e6eff6"></div></td></tr><tr><td style="padding:28px 34px 12px"><div style="display:inline-block;background:#eaf7ff;color:#267eae;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700">${e(status)}</div><h1 style="font-size:27px;line-height:35px;margin:15px 0 10px">${e(title)}</h1><p style="font-size:16px;line-height:26px;color:#41566b">Xin chào <b>${e(name)}</b>,</p><p style="font-size:16px;line-height:26px;color:#41566b">${e(intro)}</p></td></tr>${code?`<tr><td style="padding:10px 34px 18px"><div style="background:#f4f9fd;border:1px solid #dbeaf6;border-radius:16px;padding:20px 22px"><div style="font-size:12px;color:#6b8aa1;font-weight:700">MÃ YÊU CẦU</div><div style="font-size:19px;font-weight:800;margin-top:5px;word-break:break-word">${e(code)}</div><div style="font-size:14px;color:#52697c;margin-top:12px">Trạng thái: <b>${e(status)}</b>${processing?` · Thời gian dự kiến: <b>${e(processing)}</b>`:''}</div></div></td></tr>`:''}<tr><td style="padding:0 34px 18px;font-size:15px;line-height:25px;color:#41566b">${e(body)}</td></tr><tr><td align="center" style="padding:6px 34px 30px"><a href="${e(ctaUrl)}" style="display:inline-block;background:#10243d;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px">${e(ctaLabel)}</a></td></tr><tr><td style="background:#10243d;padding:24px 34px;color:#fff"><b>Trung Tâm Thành Viên Số Sky First · Sky First Network</b><div style="font-size:13px;color:#b9c9d8;margin-top:6px">support@skyfirst.io.vn · lienhe@skyfirst.io.vn · member.skyfirst.io.vn</div></td></tr></table></td></tr></table></body></html>`;
+  const safeCta=safeSkyFirstUrl(ctaUrl)||'https://nghiepvu.skyfirst.io.vn/';
+  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${e(title)} – Trung tâm Nghiệp vụ Số Sky First</title></head><body style="margin:0;background:#eef4f8;font-family:Arial,Helvetica,sans-serif;color:#172b40;-webkit-text-size-adjust:100%"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#eef4f8"><tr><td align="center" style="padding:24px 10px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;background:#fff;border:1px solid #d9e5ee;border-radius:14px;overflow:hidden"><tr><td height="6" style="height:6px;background:#1684bd;font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:22px 26px;border-bottom:1px solid #e6edf2;text-align:left"><div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;font-weight:bold;letter-spacing:.25px;color:#263f56;margin:0;text-align:left">MẠNG LƯỚI GIÁO DỤC VÀ PHÁT TRIỂN CỘNG ĐỒNG SKY FIRST</div><div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:21px;font-weight:800;color:#10243d;margin:6px 0 0;text-align:left">TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST</div></td></tr><tr><td style="padding:26px 26px 10px"><span style="display:inline-block;background:#eaf5fb;color:#176d99;font-size:11px;line-height:16px;font-weight:bold;padding:6px 10px;border-radius:20px">${e(status)}</span><h1 style="font-size:24px;line-height:31px;color:#10243d;margin:16px 0">${e(title)}</h1><p style="font-size:15px;line-height:24px;color:#40566a">Xin chào <strong>${e(name)}</strong>,</p><p style="font-size:15px;line-height:24px;color:#40566a">${e(intro)}</p>${code?`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f9fc;border:1px solid #dce8f0;border-radius:10px;margin:16px 0"><tr><td style="padding:17px 18px"><div style="font-size:11px;font-weight:bold;color:#657e91">${e(codeLabel)}</div><div style="font-size:20px;line-height:28px;font-weight:bold;color:#10243d;margin-top:5px;word-break:break-word">${e(code)}</div><div style="font-size:13px;line-height:21px;color:#526779;margin-top:10px">Trạng thái: <b>${e(status)}</b>${processing?` · Thời gian dự kiến: <b>${e(processing)}</b>`:''}</div></td></tr></table>`:''}<p style="font-size:15px;line-height:24px;color:#40566a;margin-top:14px">${e(body)}</p><table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:24px auto"><tr><td bgcolor="#10243d" style="border-radius:10px"><a href="${e(safeCta)}" style="display:inline-block;padding:14px 22px;color:#fff;text-decoration:none;font-weight:bold">${e(ctaLabel)}</a></td></tr></table></td></tr><tr><td style="padding:22px 26px;background:#f5f9fc;border-top:1px solid #dce8f0"><div style="font-size:12px;line-height:20px;color:#526779">Email này được gửi tự động từ ${e(DEFAULT_SYSTEM_IDENTITY.noreplyEmail)}. Vui lòng không trả lời trực tiếp nếu địa chỉ gửi thư không hỗ trợ tiếp nhận phản hồi.</div><div style="font-size:13px;line-height:21px;color:#263f59;margin-top:18px">Trân trọng,</div><div style="font-size:13px;line-height:21px;font-weight:bold;color:#10243d;margin-top:8px">Trung tâm Nghiệp vụ Số Sky First</div><div style="font-size:12px;line-height:20px;color:#526779">Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First</div><div style="font-size:12px;line-height:20px;margin-top:10px"><a href="mailto:nghiepvu@skyfirst.io.vn" style="color:#126ca5;text-decoration:none">nghiepvu@skyfirst.io.vn</a><span style="color:#8193a2"> · </span><a href="mailto:support@skyfirst.io.vn" style="color:#126ca5;text-decoration:none">support@skyfirst.io.vn</a><span style="color:#8193a2"> · </span><a href="mailto:lienhe@skyfirst.io.vn" style="color:#126ca5;text-decoration:none">lienhe@skyfirst.io.vn</a></div><div style="font-size:11px;line-height:18px;color:#718596;margin-top:14px">© Sky First Network · nghiepvu.skyfirst.io.vn. Bảo lưu các quyền liên quan.</div></td></tr></table></td></tr></table></body></html>`;
 }
-async function sendMemberEmail(env,{to,subject,html}){
-  if(!env.RESEND_API_KEY||!to)return {sent:false,reason:'EMAIL_NOT_CONFIGURED'};
+async function sendMemberEmail(env,{to,subject,html,templateCode='master_notification',entityType=null,entityId=null,senderMode='noreply'}){
+  const noreplyAddr=env.NOREPLY_EMAIL||DEFAULT_SYSTEM_IDENTITY.noreplyEmail;
+  const sysAddr=env.SYSTEM_EMAIL||DEFAULT_SYSTEM_IDENTITY.systemEmail;
+  const supportAddr=env.SUPPORT_EMAIL||DEFAULT_SYSTEM_IDENTITY.supportEmail;
+  const fromAddr=senderMode==='system'?`Trung tâm Nghiệp vụ Số Sky First <${sysAddr}>`:`Trung tâm Nghiệp vụ Số Sky First <${noreplyAddr}>`;
+  const replyTo=supportAddr;
+  const logId=uid('emlog');
+  const logWrite=async(status,providerId=null,errDetail=null)=>{
+    try{
+      await ensureGovernanceTables(env);
+      await env.DB.prepare(`INSERT INTO email_delivery_logs(id,template_code,recipient_email,sender_address,reply_to_address,subject,provider_name,provider_message_id,status,error_detail,related_entity_type,related_entity_id) VALUES(?,?,?,?,?,?,'resend',?,?,?,?,?)`).bind(logId,clean(templateCode,80),clean(to,200),fromAddr,replyTo,clean(subject,240),providerId,status,errDetail?clean(errDetail,500):null,entityType,entityId).run();
+    }catch(e){console.error('EMAIL_LOG_WRITE_ERROR',String(e?.message||e))}
+  };
+  if(!env.RESEND_API_KEY||!to){
+    await logWrite('not_configured',null,'EMAIL_NOT_CONFIGURED');
+    return {sent:false,reason:'EMAIL_NOT_CONFIGURED',log_id:logId};
+  }
   try{
-    const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:'Trung Tâm Thành Viên Số Sky First <support@skyfirst.io.vn>',to:[to],reply_to:'lienhe@skyfirst.io.vn',subject,html})});
+    const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:fromAddr,to:[to],reply_to:replyTo,subject,html})});
     const data=await r.json().catch(()=>({}));
-    return {sent:r.ok,id:data.id||null,error:r.ok?null:(data.message||`HTTP_${r.status}`)};
-  }catch(e){return {sent:false,error:String(e?.message||e)}}
+    const ok=Boolean(r.ok&&data&&data.id);
+    const errMsg=ok?null:(data?.message||data?.error||`HTTP_${r.status}`);
+    await logWrite(ok?'sent':'failed',data?.id||null,errMsg);
+    return {sent:ok,id:data?.id||null,error:errMsg,log_id:logId};
+  }catch(e){
+    const errMsg=String(e?.message||e);
+    await logWrite('failed',null,errMsg);
+    return {sent:false,error:errMsg,log_id:logId};
+  }
 }
+
+  // =========================================================
+  // PUBLIC EMAIL OTP VERIFICATION (P6.44, Mục 13.2)
+  // =========================================================
+  if(url.pathname==='/api/public/email-otp/request'&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const email=clean(b.email,200).toLowerCase();
+    const purpose=['account_request','email_change','security_verify'].includes(b.purpose)?b.purpose:'account_request';
+    if(!email||!/^\S+@\S+\.\S+$/.test(email))return json({error:'EMAIL_INVALID',message:'Địa chỉ email không hợp lệ.'},400,{'cache-control':'no-store'});
+    const ipRateKey=`otp-req-ip:${await sha256(clientHint(req))}`;
+    const emailRateKey=`otp-req-email:${await sha256(email+'|'+purpose)}`;
+    const ipState=await safeRateState(env,ipRateKey,10,15);
+    const emailState=await safeRateState(env,emailRateKey,5,15);
+    if(ipState.blocked||emailState.blocked)return json({error:'OTP_RATE_LIMITED',message:'Bạn đã yêu cầu gửi mã OTP quá giới hạn cho phép. Vui lòng thử lại sau 15 phút.'},429,{'retry-after':'900','cache-control':'no-store'});
+    const recent=await env.DB.prepare(`SELECT id,resend_count,created_at,CASE WHEN created_at>datetime('now','-60 seconds') THEN 1 ELSE 0 END cooldown FROM email_otp_tokens WHERE email=? AND purpose=? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1`).bind(email,purpose).first();
+    if(recent?.cooldown)return json({error:'OTP_RESEND_COOLDOWN',message:'Vui lòng đợi ít nhất 60 giây trước khi yêu cầu gửi lại mã OTP.'},429,{'retry-after':'60','cache-control':'no-store'});
+    await safeRateFail(env,ipRateKey,10,15);
+    await safeRateFail(env,emailRateKey,5,15);
+    const digits=new Uint32Array(1);crypto.getRandomValues(digits);
+    const rawOtp=String(100000+(digits[0]%900000));
+    const otpHash=await sha256(`${email}|${purpose}|${rawOtp}`);
+    const otpId=uid('otp');
+    const resendCount=recent?Number(recent.resend_count||0)+1:0;
+    await env.DB.prepare(`UPDATE email_otp_tokens SET expires_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE email=? AND purpose=? AND used_at IS NULL AND verified_at IS NULL`).bind(email,purpose).run();
+    await env.DB.prepare(`INSERT INTO email_otp_tokens(id,email,purpose,otp_hash,attempts,max_attempts,resend_count,expires_at,ip_hint,user_agent) VALUES(?,?,?,?,0,5,?,datetime('now','+10 minutes'),?,?)`).bind(otpId,email,purpose,otpHash,resendCount,clientHint(req),clean(req.headers.get('user-agent'),500)).run();
+    const appUrl=env.APP_URL||DEFAULT_SYSTEM_IDENTITY.appUrl;
+    const mail=await sendMemberEmail(env,{
+      to:email,
+      subject:`[Sky First] Mã xác minh OTP của bạn`,
+      templateCode:'email_otp_verification',
+      entityType:'email_otp',
+      entityId:otpId,
+      senderMode:'noreply',
+      html:memberEmailHtml({
+        title:'Xác minh địa chỉ email',
+        name:clean(b.full_name,160)||email,
+        intro:'Bạn vừa yêu cầu mã xác minh một lần (OTP) tại Trung tâm Nghiệp vụ Số Sky First.',
+        code:rawOtp,
+        codeLabel:'MÃ XÁC MINH OTP (HIỆU LỰC 10 PHÚT)',
+        status:'XÁC MINH EMAIL',
+        processing:'Hết hạn sau 10 phút · Chỉ dùng 1 lần',
+        body:'Tuyệt đối không chia sẻ mã OTP này cho bất kỳ ai. Việc xác minh OTP chỉ xác nhận quyền kiểm soát hộp thư điện tử, không mặc nhiên thay thế chữ ký điện tử hoặc sự đồng ý cho mọi mục đích xử lý dữ liệu.',
+        ctaUrl:`${appUrl}/register`,
+        ctaLabel:'Quay lại Trung tâm Nghiệp vụ Số Sky First'
+      })
+    });
+    await safeSecurityEvent(env,null,'email_otp_requested',req,{otp_id:otpId,purpose,email_sent:mail.sent===true});
+    return json({
+      ok:true,
+      otp_id:otpId,
+      email_sent:mail.sent===true,
+      delivery_status:mail.sent===true?'sent':(mail.reason==='EMAIL_NOT_CONFIGURED'?'provider_not_configured':'provider_failed'),
+      expires_in_seconds:600,
+      message:mail.sent===true?'Mã xác minh OTP đã được nhà cung cấp dịch vụ email tiếp nhận gửi tới hộp thư của bạn.':'Dịch vụ gửi email chưa được cấu hình hoặc tạm thời lỗi; trạng thái đã được ghi nhận trung thực.'
+    },mail.sent===true?200:202,{'cache-control':'no-store'});
+  }
+
+  if(url.pathname==='/api/public/email-otp/verify'&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const email=clean(b.email,200).toLowerCase();
+    const rawOtp=clean(b.otp,12);
+    const purpose=['account_request','email_change','security_verify'].includes(b.purpose)?b.purpose:'account_request';
+    if(!email||!/^\S+@\S+\.\S+$/.test(email))return json({error:'EMAIL_INVALID',message:'Địa chỉ email không hợp lệ.'},400,{'cache-control':'no-store'});
+    if(!/^\d{6}$/.test(rawOtp))return json({error:'OTP_FORMAT_INVALID',message:'Mã OTP phải gồm đúng 6 chữ số.'},400,{'cache-control':'no-store'});
+    const verifyRateKey=`otp-verify:${await sha256(clientHint(req)+'|'+email)}`;
+    const vr=await safeRateState(env,verifyRateKey,10,15);
+    if(vr.blocked)return json({error:'OTP_TOO_MANY_ATTEMPTS',message:'Bạn đã thử sai quá nhiều lần. Vui lòng đợi 15 phút hoặc yêu cầu mã mới.'},429,{'retry-after':'900','cache-control':'no-store'});
+    const row=await env.DB.prepare(`SELECT *,CASE WHEN expires_at<=CURRENT_TIMESTAMP THEN 1 ELSE 0 END is_expired FROM email_otp_tokens WHERE email=? AND purpose=? ORDER BY created_at DESC LIMIT 1`).bind(email,purpose).first();
+    if(!row)return json({error:'OTP_NOT_FOUND',message:'Không tìm thấy yêu cầu OTP cho email này.'},404,{'cache-control':'no-store'});
+    if(row.used_at)return json({error:'OTP_ALREADY_USED',message:'Mã OTP này đã được sử dụng.'},409,{'cache-control':'no-store'});
+    if(Number(row.attempts||0)>=Number(row.max_attempts||5))return json({error:'OTP_MAX_ATTEMPTS_EXCEEDED',message:'Mã OTP đã vượt quá số lần thử cho phép (5 lần). Vui lòng yêu cầu mã mới.'},429,{'cache-control':'no-store'});
+    if(row.is_expired)return json({error:'OTP_EXPIRED',message:'Mã OTP đã hết hạn. Vui lòng yêu cầu gửi mã mới.'},410,{'cache-control':'no-store'});
+    const expectedHash=await sha256(`${email}|${purpose}|${rawOtp}`);
+    if(!safeEq(expectedHash,row.otp_hash)){
+      await env.DB.prepare(`UPDATE email_otp_tokens SET attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(row.id).run();
+      await safeRateFail(env,verifyRateKey,10,15);
+      const nextAttempts=Number(row.attempts||0)+1;
+      if(nextAttempts>=Number(row.max_attempts||5)){
+        return json({error:'OTP_MAX_ATTEMPTS_EXCEEDED',message:'Bạn đã nhập sai quá số lần quy định. Mã OTP đã bị vô hiệu hóa.'},429,{'cache-control':'no-store'});
+      }
+      return json({error:'OTP_INVALID',remaining_attempts:Math.max(0,Number(row.max_attempts||5)-nextAttempts),message:'Mã OTP không chính xác.'},400,{'cache-control':'no-store'});
+    }
+    await safeRateClear(env,verifyRateKey);
+    const verifyToken=token();
+    const verifyTokenHash=await sha256(verifyToken);
+    await env.DB.prepare(`UPDATE email_otp_tokens SET verified_at=CURRENT_TIMESTAMP,verify_token_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(verifyTokenHash,row.id).run();
+    await safeSecurityEvent(env,null,'email_otp_verified',req,{otp_id:row.id,purpose});
+    return json({ok:true,verified:true,otp_verification_token:verifyToken,message:'Đã xác minh email thành công.'},200,{'cache-control':'no-store'});
+  }
 
 if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   const requestRateKey=`account-request:${await sha256(clientHint(req))}`;
@@ -1074,8 +1246,15 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   if(String(b.privacy_consent)!=='1'){
     return json({
-      error:'PRIVACY_CONSENT_REQUIRED'
+      error:'PRIVACY_CONSENT_REQUIRED',
+      message:'Bạn cần xác nhận đồng ý xử lý dữ liệu cá nhân theo mục đích xét duyệt và quản lý hồ sơ.'
     },400);
+  }
+  if(b.terms_accepted!==undefined&&String(b.terms_accepted)!=='1'){
+    return json({error:'TERMS_ACCEPTANCE_REQUIRED',message:'Bạn cần chấp thuận Điều khoản sử dụng của hệ thống.'},400);
+  }
+  if(b.read_acknowledged!==undefined&&String(b.read_acknowledged)!=='1'){
+    return json({error:'READ_ACKNOWLEDGEMENT_REQUIRED',message:'Bạn cần xác nhận đã đọc thông báo bảo mật và quyền riêng tư.'},400);
   }
 
   const educationType=
@@ -1247,6 +1426,22 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   await ensureAccountRequestProfiles(env);
   await ensureAccountRequestExtended(env);
+  await ensureGovernanceTables(env);
+
+  let verifiedOtpId=null,emailVerifiedFlag=0;
+  const suppliedOtpToken=clean(b.otp_verification_token,512);
+  const secCfgRow=await env.DB.prepare("SELECT value_json FROM system_settings WHERE key='security'").first();
+  let secCfg={};try{secCfg=JSON.parse(secCfgRow?.value_json||'{}')}catch{}
+  if(suppliedOtpToken){
+    const th=await sha256(suppliedOtpToken);
+    const otpRow=await env.DB.prepare(`SELECT id,used_at,verified_at,CASE WHEN expires_at<=CURRENT_TIMESTAMP THEN 1 ELSE 0 END is_expired FROM email_otp_tokens WHERE verify_token_hash=? AND lower(email)=? AND purpose='account_request' LIMIT 1`).bind(th,email).first();
+    if(!otpRow||!otpRow.verified_at||otpRow.is_expired)return json({error:'OTP_VERIFICATION_TOKEN_INVALID',message:'Mã xác nhận OTP không hợp lệ hoặc đã hết hạn.'},400);
+    if(otpRow.used_at)return json({error:'OTP_ALREADY_USED',message:'Mã xác nhận OTP đã được sử dụng cho một yêu cầu khác.'},409);
+    await env.DB.prepare(`UPDATE email_otp_tokens SET used_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(otpRow.id).run();
+    verifiedOtpId=otpRow.id;emailVerifiedFlag=1;
+  }else if(secCfg.require_email_otp_on_register===true){
+    return json({error:'EMAIL_OTP_REQUIRED',message:'Hệ thống đang yêu cầu xác minh mã OTP email trước khi gửi hồ sơ đăng ký.'},400);
+  }
 
   await env.DB.batch([
     env.DB.prepare(`
@@ -1281,9 +1476,22 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     id,clean(b.school_name,240),clean(b.class_or_major,240),clean(b.employment_status,80),clean(b.workplace_name,240),clean(b.work_department,180),clean(b.job_title,180),age<18?clean(b.guardian_date_of_birth,20):null,age<18?clean(b.guardian_id_number,30):null
   ).run();
   await env.DB.batch(requestedOrgIds.map(oid=>env.DB.prepare(`INSERT OR IGNORE INTO account_request_orgs(request_id,org_node_id,is_primary) VALUES(?,?,?)`).bind(id,oid,oid===primaryOrgId?1:0)));
+  await env.DB.prepare(`INSERT INTO legal_consent_records(id,subject_type,subject_id,email,terms_version,privacy_version,read_acknowledged,terms_accepted,privacy_consent,accuracy_committed,is_minor,guardian_consent,email_verified,otp_token_id,purpose_scope,ip_hint,user_agent) VALUES(?,'account_request',?,?, '2026.10-SFN-TERMS','2026.10-SFN-PDPD',?,?,?,?,?,?,?,?, 'account_review_and_member_operations',?,?)`).bind(
+    uid('consent'),id,email,
+    String(b.read_acknowledged??'1')==='1'?1:0,
+    String(b.terms_accepted??'1')==='1'?1:0,
+    1,
+    String(b.accuracy_committed??'1')==='1'?1:0,
+    age<18?1:0,
+    age<18?(String(b.guardian_consent??'1')==='1'?1:0):0,
+    emailVerifiedFlag,
+    verifiedOtpId,
+    clientHint(req),
+    clean(req.headers.get('user-agent'),500)
+  ).run();
 
-  const trackingUrl=`${env.APP_URL||'https://member.skyfirst.io.vn'}/`;
-  const mail=await sendMemberEmail(env,{to:email,subject:`[Sky First Network] Đã tiếp nhận yêu cầu đăng ký thành viên – ${code}`,html:memberEmailHtml({title:'Đã tiếp nhận yêu cầu đăng ký thành viên',name:clean(b.full_name,160),intro:'Yêu cầu đăng ký của bạn đã được Trung Tâm Thành Viên Số Sky First tiếp nhận.',code,status:'Đã tiếp nhận',body:'Vui lòng lưu mã yêu cầu để tra cứu. Sky First Network sẽ gửi email tiếp theo khi hồ sơ được cập nhật trạng thái.',ctaUrl:trackingUrl,ctaLabel:'Tra cứu trạng thái hồ sơ'})});
+  const trackingUrl=`${env.APP_URL||'https://nghiepvu.skyfirst.io.vn'}/`;
+  const mail=await sendMemberEmail(env,{to:email,templateCode:'account_request_received',entityType:'account_request',entityId:id,subject:`[Sky First Network] Đã tiếp nhận yêu cầu đăng ký thành viên – ${code}`,html:memberEmailHtml({title:'Đã tiếp nhận yêu cầu của bạn',name:clean(b.full_name,160),intro:'Yêu cầu đăng ký của bạn đã được Trung tâm Nghiệp vụ Số Sky First tiếp nhận.',code,status:'ĐÃ TIẾP NHẬN',body:'Vui lòng lưu mã yêu cầu để tra cứu trạng thái. Hệ thống sẽ gửi thông báo tiếp theo khi trạng thái hồ sơ được cập nhật.',ctaUrl:trackingUrl,ctaLabel:'Mở Trung tâm Nghiệp vụ Số Sky First'})});
 
   return json({
     ok:true,
@@ -1298,7 +1506,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   });
 }
 
-  if(url.pathname==='/api/public/account-request/status'&&req.method==='GET')return json({error:'METHOD_NOT_ALLOWED',message:'Hãy tra cứu từ biểu mẫu bảo mật của Cổng Thành viên.'},405,{'cache-control':'no-store'});
+  if(url.pathname==='/api/public/account-request/status'&&req.method==='GET')return json({error:'METHOD_NOT_ALLOWED',message:'Hãy tra cứu từ biểu mẫu bảo mật của Trung tâm Nghiệp vụ Số Sky First.'},405,{'cache-control':'no-store'});
   if(url.pathname==='/api/public/account-request/status'&&req.method==='POST'){
     const b=await bodyJson(req),code=clean(b.code,100),email=clean(b.email,200).toLowerCase();
     const ipKey=`request-status-ip:${await sha256(clientHint(req))}`;
@@ -1374,7 +1582,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(scopeIds!==null&&!scopeIds.length)return json({items:[],today});
     const scopeSql=scopeIds===null?'':` AND c.org_node_id IN (${scopeIds.map(()=>'?').join(',')})`;
     const bind=[today,today,q,`%${q}%`,`%${q}%`,`%${q}%`,status,today,today,status,...(scopeIds||[]),limit];
-    const effectiveCardStatus=`CASE WHEN c.status='active' AND (date(c.issued_at) IS NULL OR date(c.issued_at)<>c.issued_at OR c.issued_at>?) THEN 'pending' WHEN c.status='active' AND c.expires_at IS NOT NULL AND (date(c.expires_at) IS NULL OR date(c.expires_at)<>c.expires_at) THEN 'pending' WHEN c.status='active' AND c.expires_at IS NOT NULL AND c.expires_at<? THEN 'expired' ELSE c.status END`;
+    const effectiveCardStatus=`CASE WHEN c.status='active' AND (date(c.issued_at) IS NULL OR date(c.issued_at)<>c.issued_at OR date(c.issued_at,'+0 days')<>c.issued_at OR c.issued_at>?) THEN 'pending' WHEN c.status='active' AND c.expires_at IS NOT NULL AND (date(c.expires_at) IS NULL OR date(c.expires_at)<>c.expires_at OR date(c.expires_at,'+0 days')<>c.expires_at) THEN 'pending' WHEN c.status='active' AND c.expires_at IS NOT NULL AND c.expires_at<? THEN 'expired' ELSE c.status END`;
     const r=await env.DB.prepare(`
       SELECT c.id,c.person_id,c.card_type_id,c.org_node_id,c.card_number,c.title_on_card,c.issued_at,c.expires_at,
         ${effectiveCardStatus} status,
@@ -1577,6 +1785,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     }
     const settings={...previous,stats,tagline:clean(b.tagline??previous.tagline??'Mỗi thành viên là một hành trình. Mỗi đóng góp tạo nên một Sky First lớn mạnh hơn.',190),brand,links};
     await env.DB.prepare("INSERT INTO system_settings(key,value_json,updated_at) VALUES('member_portal_v4',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP").bind(JSON.stringify(settings)).run();
+    await ensureGovernanceTables(env);
+    const verRow=await env.DB.prepare("SELECT COALESCE(MAX(version_no),0)+1 v FROM system_config_history WHERE config_key='member_portal_v4'").first();
+    await env.DB.prepare("INSERT INTO system_config_history(id,config_key,version_no,previous_value_json,new_value_json,change_reason,impact_summary_json,actor_account_id,approved_by_account_id) VALUES(?,?,?, ?,?,?,?, ?,?)").bind(uid('cfghist'),'member_portal_v4',Number(verRow?.v||1),JSON.stringify(previous),JSON.stringify(settings),clean(b.change_reason,300)||'Cập nhật cấu hình giao diện và liên kết từ Admin',JSON.stringify({affected:['public_pages','login_gate','brand_theme','ecosystem_links']}),s.account_id,s.account_id).run();
     await audit(env,s.account_id,'portal_config_updated','system_settings','member_portal_v4',null,{keys:stats.map(x=>x.key),brand_updated:true,links_updated:true});
     return json({ok:true,settings});
   }
@@ -1611,7 +1822,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       await audit(env,s.account_id,type==='ban'?'account_banned':'account_unbanned','account',target.id,null,{reason,ends_at:clean(b.ends_at,35)||null});
       let mail={sent:false,reason:'NOT_REQUESTED'};
       if(b.notify===true&&target.email){
-        mail=await sendMemberEmail(env,{to:target.email,subject:type==='ban'?'[Sky First] Thông báo giới hạn tài khoản':'[Sky First] Tài khoản đã được mở lại',html:memberEmailHtml({title:type==='ban'?'Thông báo giới hạn tài khoản':'Tài khoản được khôi phục',name:target.full_name,intro:type==='ban'?'Tài khoản hiện không thể đăng nhập theo quyết định quản trị.':'Quyền truy cập đã được khôi phục.',status:type==='ban'?'TẠM NGƯNG TRUY CẬP':'ĐƯỢC KHÔI PHỤC',body:type==='ban'?`Lý do: ${reason}. ${clean(b.ends_at,35)?'Thời hạn đến hết ngày '+clean(b.ends_at,35):'Không xác định thời hạn'}. Có thể liên hệ support@skyfirst.io.vn để yêu cầu xem xét.`:'Bạn có thể tiếp tục đăng nhập vào hệ thống.',ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Trung tâm thành viên số'})});
+        mail=await sendMemberEmail(env,{to:target.email,subject:type==='ban'?'[Sky First] Thông báo giới hạn tài khoản':'[Sky First] Tài khoản đã được mở lại',html:memberEmailHtml({title:type==='ban'?'Thông báo giới hạn tài khoản':'Tài khoản được khôi phục',name:target.full_name,intro:type==='ban'?'Tài khoản hiện không thể đăng nhập theo quyết định quản trị.':'Quyền truy cập đã được khôi phục.',status:type==='ban'?'TẠM NGƯNG TRUY CẬP':'ĐƯỢC KHÔI PHỤC',body:type==='ban'?`Lý do: ${reason}. ${clean(b.ends_at,35)?'Thời hạn đến hết ngày '+clean(b.ends_at,35):'Không xác định thời hạn'}. Có thể liên hệ support@skyfirst.io.vn để yêu cầu xem xét.`:'Bạn có thể tiếp tục đăng nhập vào hệ thống.',ctaUrl:env.APP_URL||'https://nghiepvu.skyfirst.io.vn',ctaLabel:'Mở Trung tâm Nghiệp vụ Số Sky First'})});
       }
       return json({ok:true,type,email_sent:mail.sent===true});
     }
@@ -2649,6 +2860,11 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   // SUPPORT
   // =========================================================
 
+  if(url.pathname==='/api/me/support'&&req.method==='GET'){
+    await ensureGovernanceTables(env);
+    const r=await env.DB.prepare(`SELECT st.*,sta.priority,sta.sla_due_at,sta.resolution_note,sta.closed_reason,sta.responded_at,sta.resolved_at FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE st.person_id=? ORDER BY st.created_at DESC LIMIT 100`).bind(s.person_id).all();
+    return json({items:r.results||[]});
+  }
   if(url.pathname==='/api/me/support'&&req.method==='POST'){
     const b=await bodyJson(req);
 
@@ -2736,7 +2952,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
     const id=uid('org');
     const parent=clean(b.parent_id,100)||'org_sfn';
-    if(b.node_type==='digital_member_center')b.name='Trung Tâm Thành Viên Số Sky First';
+    if(b.node_type==='digital_member_center')b.name='Trung tâm Nghiệp vụ Số Sky First';
     if(!Number.isFinite(Number(b.sort_order||0)))return json({error:'INVALID_SORT_ORDER'},400);
 
     if(
@@ -2803,7 +3019,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   const orgItem=url.pathname.match(/^\/api\/admin\/org\/([^/]+)$/);
   if(orgItem&&req.method==='PATCH'){
-    if(!(await hasPerm(env,s.account_id,'org.manage')))return json({error:'FORBIDDEN'},403);const id=decodeURIComponent(orgItem[1]);if(!(await canAccessOrg(env,s.account_id,id)))return json({error:'SCOPE_FORBIDDEN'},403);const b=await bodyJson(req),cur=await env.DB.prepare(`SELECT * FROM org_nodes WHERE id=?`).bind(id).first();if(!cur)return json({error:'NOT_FOUND'},404);const parent=clean(b.parent_id,100)||cur.parent_id;if(cur.deleted_at)return json({error:'NOT_FOUND'},404);if(id==='org_sfn'&&parent)return json({error:'ROOT_PARENT_FORBIDDEN'},409);if(parent){const p=await env.DB.prepare(`SELECT id FROM org_nodes WHERE id=? AND deleted_at IS NULL`).bind(parent).first();if(!p)return json({error:'INVALID_PARENT'},400);const cycle=await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (SELECT id FROM org_nodes WHERE id=? UNION SELECT o.id FROM org_nodes o JOIN descendants d ON o.parent_id=d.id) SELECT 1 FROM descendants WHERE id=?`).bind(id,parent).first();if(cycle)return json({error:'ORG_CYCLE_FORBIDDEN'},409)}if(b.node_type==='digital_member_center'||cur.node_type==='digital_member_center'){b.name='Trung Tâm Thành Viên Số Sky First';b.node_type='digital_member_center'}if(parent&&parent!==cur.parent_id&&!(await canAccessOrg(env,s.account_id,parent)))return json({error:'SCOPE_FORBIDDEN'},403);await env.DB.prepare(`UPDATE org_nodes SET parent_id=?,name=?,short_name=?,node_type=?,status=?,description=?,founded_at=?,term_label=?,responsible_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(parent,clean(b.name,200)||cur.name,clean(b.short_name,80)||null,clean(b.node_type,80)||cur.node_type,clean(b.status,30)||cur.status,clean(b.description,2000)||null,clean(b.founded_at,20)||null,clean(b.term_label,100)||null,clean(b.responsible_person_id,100)||null,id).run();await audit(env,s.account_id,'org_updated','org_node',id,parent,{before:{name:cur.name,parent_id:cur.parent_id,status:cur.status}});return json({ok:true})
+    if(!(await hasPerm(env,s.account_id,'org.manage')))return json({error:'FORBIDDEN'},403);const id=decodeURIComponent(orgItem[1]);if(!(await canAccessOrg(env,s.account_id,id)))return json({error:'SCOPE_FORBIDDEN'},403);const b=await bodyJson(req),cur=await env.DB.prepare(`SELECT * FROM org_nodes WHERE id=?`).bind(id).first();if(!cur)return json({error:'NOT_FOUND'},404);const parent=clean(b.parent_id,100)||cur.parent_id;if(cur.deleted_at)return json({error:'NOT_FOUND'},404);if(id==='org_sfn'&&parent)return json({error:'ROOT_PARENT_FORBIDDEN'},409);if(parent){const p=await env.DB.prepare(`SELECT id FROM org_nodes WHERE id=? AND deleted_at IS NULL`).bind(parent).first();if(!p)return json({error:'INVALID_PARENT'},400);const cycle=await env.DB.prepare(`WITH RECURSIVE descendants(id) AS (SELECT id FROM org_nodes WHERE id=? UNION SELECT o.id FROM org_nodes o JOIN descendants d ON o.parent_id=d.id) SELECT 1 FROM descendants WHERE id=?`).bind(id,parent).first();if(cycle)return json({error:'ORG_CYCLE_FORBIDDEN'},409)}if(b.node_type==='digital_member_center'||cur.node_type==='digital_member_center'){b.name='Trung tâm Nghiệp vụ Số Sky First';b.node_type='digital_member_center'}if(parent&&parent!==cur.parent_id&&!(await canAccessOrg(env,s.account_id,parent)))return json({error:'SCOPE_FORBIDDEN'},403);await env.DB.prepare(`UPDATE org_nodes SET parent_id=?,name=?,short_name=?,node_type=?,status=?,description=?,founded_at=?,term_label=?,responsible_person_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(parent,clean(b.name,200)||cur.name,clean(b.short_name,80)||null,clean(b.node_type,80)||cur.node_type,clean(b.status,30)||cur.status,clean(b.description,2000)||null,clean(b.founded_at,20)||null,clean(b.term_label,100)||null,clean(b.responsible_person_id,100)||null,id).run();await audit(env,s.account_id,'org_updated','org_node',id,parent,{before:{name:cur.name,parent_id:cur.parent_id,status:cur.status}});return json({ok:true})
   }
   if(orgItem&&req.method==='DELETE'){
     if(!(await hasPerm(env,s.account_id,'org.delete')))return json({error:'FORBIDDEN'},403);const id=decodeURIComponent(orgItem[1]);if(id==='org_sfn')return json({error:'ROOT_CANNOT_BE_DELETED'},409);if(!(await canAccessOrg(env,s.account_id,id)))return json({error:'SCOPE_FORBIDDEN'},403);const cur=await env.DB.prepare(`SELECT parent_id FROM org_nodes WHERE id=?`).bind(id).first();if(!cur)return json({error:'NOT_FOUND'},404);const children=await env.DB.prepare(`SELECT COUNT(*) n FROM org_nodes WHERE parent_id=? AND deleted_at IS NULL`).bind(id).first();if(children?.n)return json({error:'ORG_HAS_CHILDREN'},409);await env.DB.prepare(`UPDATE org_nodes SET status='archived',deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(id).run();await audit(env,s.account_id,'org_deleted','org_node',id,cur.parent_id);return json({ok:true})
@@ -4209,7 +4425,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
           `Chứng nhận "${clean(
             b.title,
             240
-          )}" đã được cấp trên Cổng Thành viên Sky First Network.`
+          )}" đã được cấp trên Trung tâm Nghiệp vụ Số Sky First.`
         )
       ]);
 
@@ -4874,7 +5090,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const r=await env.DB.prepare(`SELECT ar.id,ar.email,ar.full_name,ar.target_org_node_id,p.member_code,a.username FROM account_requests ar JOIN people p ON p.id=ar.approved_person_id JOIN accounts a ON a.person_id=p.id WHERE ar.id=? AND ar.status='approved'`).bind(rid).first();
     if(!r)return json({error:'APPROVED_REQUEST_NOT_FOUND'},404);
     if(!(await canAccessOrg(env,s.account_id,r.target_org_node_id)))return json({error:'SCOPE_FORBIDDEN'},403);
-    const mail=await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Thông tin tài khoản thành viên – ${r.member_code}`,html:memberEmailHtml({title:'Tài khoản đã được phê duyệt',name:r.full_name,intro:'Hồ sơ thành viên của bạn đã được phê duyệt tại Sky First Network.',status:'ĐÃ PHÊ DUYỆT',processing:'',body:`Mã thành viên: ${r.member_code}. Tên đăng nhập: ${r.username}. Nếu chưa có mật khẩu, hãy liên hệ bộ phận hỗ trợ để được hướng dẫn kích hoạt bảo mật.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đến Trung tâm Thành viên Số'})});
+    const mail=await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Thông tin tài khoản thành viên – ${r.member_code}`,html:memberEmailHtml({title:'Tài khoản đã được phê duyệt',name:r.full_name,intro:'Hồ sơ thành viên của bạn đã được phê duyệt tại Sky First Network.',status:'ĐÃ PHÊ DUYỆT',processing:'',body:`Mã thành viên: ${r.member_code}. Tên đăng nhập: ${r.username}. Nếu chưa có mật khẩu, hãy liên hệ bộ phận hỗ trợ để được hướng dẫn kích hoạt bảo mật.`,ctaUrl:env.APP_URL||'https://nghiepvu.skyfirst.io.vn',ctaLabel:'Mở Trung tâm Nghiệp vụ Số Sky First'})});
     await safeAudit(env,s.account_id,'approval_email_manual','account_request',rid,r.target_org_node_id,{sent:mail.sent===true});
     return json({ok:true,email_sent:mail.sent===true,email_error:mail.error||mail.reason||null});
   }
@@ -4893,7 +5109,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(op==='reject')await deletePendingRequestAvatar(env,r.avatar_url);
       await audit(env,s.account_id,op==='reject'?'account_request_rejected':'account_request_supplement_requested','account_request',rid,r.target_org_node_id,{note});
       const label=op==='reject'?'Chưa được phê duyệt':'Cần bổ sung hồ sơ';
-      await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] ${label} – ${r.request_code}`,html:memberEmailHtml({title:label,name:r.full_name,intro:op==='reject'?'Sky First Network đã hoàn tất xem xét yêu cầu đăng ký của bạn.':'Hồ sơ đăng ký của bạn cần bổ sung thêm thông tin trước khi tiếp tục xử lý.',code:r.request_code,status:label,processing:'',body:note,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Mở Trung Tâm Thành Viên Số Sky First'})});
+      await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] ${label} – ${r.request_code}`,html:memberEmailHtml({title:label,name:r.full_name,intro:op==='reject'?'Sky First Network đã hoàn tất xem xét yêu cầu đăng ký của bạn.':'Hồ sơ đăng ký của bạn cần bổ sung thêm thông tin trước khi tiếp tục xử lý.',code:r.request_code,status:label,processing:'',body:note,ctaUrl:env.APP_URL||'https://nghiepvu.skyfirst.io.vn',ctaLabel:'Mở Trung tâm Nghiệp vụ Số Sky First'})});
       return json({ok:true,status:next});
     }
     const requestedRows=await env.DB.prepare(`SELECT aro.org_node_id,aro.is_primary,o.status,o.deleted_at FROM account_request_orgs aro JOIN org_nodes o ON o.id=aro.org_node_id WHERE aro.request_id=? ORDER BY aro.is_primary DESC`).bind(rid).all();
@@ -4970,7 +5186,7 @@ env.DB.prepare(`
       throw err;
     }
     if(avatarPromotion.oldKey&&env.FILES?.delete){try{await env.FILES.delete(avatarPromotion.oldKey)}catch(err){console.error('OLD_REQUEST_AVATAR_DELETE_FAILED',String(err?.message||err))}}
-    await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code,org_node_ids:requestedOrgIds});const mail=b.send_email!==false?await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Tài khoản thành viên đã được phê duyệt – ${code}`,html:memberEmailHtml({title:'Tài khoản thành viên đã được phê duyệt',name:r.full_name,intro:'Hồ sơ của bạn đã được phê duyệt và tài khoản tại Trung Tâm Thành Viên Số Sky First đã được tạo.',code:r.request_code,status:'Đã phê duyệt',processing:'',body:`Mã thành viên: ${code}. Tên đăng nhập: ${username}. Vui lòng liên hệ bộ phận quản trị qua kênh hỗ trợ chính thức để nhận hướng dẫn kích hoạt tài khoản và thiết lập mật khẩu an toàn.`,ctaUrl:env.APP_URL||'https://member.skyfirst.io.vn',ctaLabel:'Đăng nhập Trung Tâm Thành Viên Số Sky First'})}):{sent:false,reason:'NOT_REQUESTED'};await safeAudit(env,s.account_id,'approval_email_status','account_request',rid,r.target_org_node_id,{requested:b.send_email!==false,sent:mail.sent===true});return json({ok:true,email_sent:mail.sent===true,member_code:code,username,temporary_password:temporaryPassword,approved_org_ids:requestedOrgIds,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
+    await audit(env,s.account_id,'account_request_approved','account_request',rid,r.target_org_node_id,{person_id:pid,member_code:code,org_node_ids:requestedOrgIds});const mail=b.send_email!==false?await sendMemberEmail(env,{to:r.email,subject:`[Sky First Network] Tài khoản thành viên đã được phê duyệt – ${code}`,html:memberEmailHtml({title:'Tài khoản thành viên đã được phê duyệt',name:r.full_name,intro:'Hồ sơ của bạn đã được phê duyệt và tài khoản tại Trung tâm Nghiệp vụ Số Sky First đã được tạo.',code:r.request_code,status:'Đã phê duyệt',processing:'',body:`Mã thành viên: ${code}. Tên đăng nhập: ${username}. Vui lòng liên hệ bộ phận quản trị qua kênh hỗ trợ chính thức để nhận hướng dẫn kích hoạt tài khoản và thiết lập mật khẩu an toàn.`,ctaUrl:env.APP_URL||'https://nghiepvu.skyfirst.io.vn',ctaLabel:'Đăng nhập Trung tâm Nghiệp vụ Số Sky First'})}):{sent:false,reason:'NOT_REQUESTED'};await safeAudit(env,s.account_id,'approval_email_status','account_request',rid,r.target_org_node_id,{requested:b.send_email!==false,sent:mail.sent===true});return json({ok:true,email_sent:mail.sent===true,member_code:code,username,temporary_password:temporaryPassword,approved_org_ids:requestedOrgIds,note:'Tài khoản đã được tạo; mật khẩu tạm chỉ được trả về trong lần phê duyệt này và phải đổi khi đăng nhập lần đầu.'});
   }
 
   // =========================================================
@@ -5021,6 +5237,7 @@ env.DB.prepare(`
   if(url.pathname==='/api/admin/system-health'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     const requiredSchemaVersion=16;
+    const targetSchemaVersion=17;
     const requiredColumns={
       schema_version:['version'],
       system_settings:['key','value_json'],
@@ -5084,10 +5301,17 @@ env.DB.prepare(`
     }
     // Do not send a test email from a health-check endpoint. A configured provider key is not delivery verification.
     const email_status=env.RESEND_API_KEY?'configured_delivery_not_tested':'not_configured';
+    let email_logs_summary={total:0,sent:0,failed:0,not_configured:0};
+    try{
+      await ensureGovernanceTables(env);
+      const el=await env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status='not_configured' THEN 1 ELSE 0 END) not_configured FROM email_delivery_logs`).first();
+      if(el)email_logs_summary={total:Number(el.total||0),sent:Number(el.sent||0),failed:Number(el.failed||0),not_configured:Number(el.not_configured||0)};
+    }catch{}
     return json({
-      database,schema_version,required_schema_version:requiredSchemaVersion,schema_status,missing_tables,missing_columns,
+      database,schema_version,required_schema_version:requiredSchemaVersion,target_schema_version:targetSchemaVersion,schema_status,missing_tables,missing_columns,
       r2_binding:!!env.FILES,r2_read_status,r2_write_status:'not_tested',
-      email_binding:!!env.RESEND_API_KEY,email_status,email_delivery_tested:false
+      email_binding:!!env.RESEND_API_KEY,email_status,email_delivery_tested:false,email_logs_summary,
+      system_identity:DEFAULT_SYSTEM_IDENTITY
     },200,{'cache-control':'no-store'});
   }
 
@@ -5234,6 +5458,213 @@ env.DB.prepare(`
 
     return json({
       items:r.results||[]
+    });
+  }
+
+  // =========================================================
+  // ADMIN SUPPORT TICKETS MANAGEMENT (P7.09, P7.17)
+  // =========================================================
+  if(url.pathname==='/api/admin/support-tickets'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const status=clean(url.searchParams.get('status'),30);
+    const r=await env.DB.prepare(`
+      SELECT st.*,p.full_name,p.member_code,p.email,
+        sta.org_node_id,sta.assigned_account_id,sta.priority,sta.sla_due_at,sta.resolution_note,sta.closed_reason,sta.responded_at,sta.resolved_at,
+        a.username assigned_username,o.name org_name
+      FROM support_tickets st
+      LEFT JOIN people p ON p.id=st.person_id
+      LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id
+      LEFT JOIN accounts a ON a.id=sta.assigned_account_id
+      LEFT JOIN org_nodes o ON o.id=sta.org_node_id
+      WHERE (?='' OR st.status=?)
+      ORDER BY st.created_at DESC LIMIT 250
+    `).bind(status,status).all();
+    return json({items:r.results||[]});
+  }
+  const supportTicketMatch=url.pathname.match(/^\/api\/admin\/support-tickets\/([^/]+)$/);
+  if(supportTicketMatch&&req.method==='PATCH'){
+    if(!(await hasPerm(env,s.account_id,'member.edit')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const tid=decodeURIComponent(supportTicketMatch[1]);
+    const ticket=await env.DB.prepare(`SELECT * FROM support_tickets WHERE id=?`).bind(tid).first();
+    if(!ticket)return json({error:'NOT_FOUND'},404);
+    const b=await bodyJson(req);
+    const nextStatus=['received','in_progress','responded','completed'].includes(b.status)?b.status:ticket.status;
+    const priority=['low','normal','high','urgent'].includes(b.priority)?b.priority:'normal';
+    const note=clean(b.resolution_note,2000)||null;
+    const closedReason=clean(b.closed_reason,500)||null;
+    if(nextStatus==='completed'&&!note&&!closedReason)return json({error:'RESOLUTION_REQUIRED',message:'Cần nhập kết quả xử lý hoặc lý do đóng yêu cầu hỗ trợ.'},400);
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE support_tickets SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextStatus,tid),
+      env.DB.prepare(`INSERT INTO support_ticket_assignments(ticket_id,org_node_id,assigned_account_id,priority,sla_due_at,resolution_note,closed_reason,responded_at,resolved_at,updated_by_account_id,updated_at) VALUES(?,?,?,?,?,?,?,CASE WHEN ? IN ('responded','completed') THEN CURRENT_TIMESTAMP ELSE NULL END,CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE NULL END,?,CURRENT_TIMESTAMP) ON CONFLICT(ticket_id) DO UPDATE SET org_node_id=COALESCE(excluded.org_node_id,support_ticket_assignments.org_node_id),assigned_account_id=COALESCE(excluded.assigned_account_id,support_ticket_assignments.assigned_account_id),priority=excluded.priority,sla_due_at=COALESCE(excluded.sla_due_at,support_ticket_assignments.sla_due_at),resolution_note=COALESCE(excluded.resolution_note,support_ticket_assignments.resolution_note),closed_reason=COALESCE(excluded.closed_reason,support_ticket_assignments.closed_reason),responded_at= COALESCE(support_ticket_assignments.responded_at,excluded.responded_at),resolved_at=COALESCE(support_ticket_assignments.resolved_at,excluded.resolved_at),updated_by_account_id=excluded.updated_by_account_id,updated_at=CURRENT_TIMESTAMP`).bind(tid,clean(b.org_node_id,100)||null,clean(b.assigned_account_id,100)||s.account_id,priority,clean(b.sla_due_at,30)||null,note,closedReason,nextStatus,nextStatus,s.account_id)
+    ]);
+    await audit(env,s.account_id,'support_ticket_updated','support_ticket',tid,clean(b.org_node_id,100)||null,{status:nextStatus,priority});
+    return json({ok:true,status:nextStatus});
+  }
+
+  // =========================================================
+  // ADMIN GOVERNANCE & P4-P7 UNIFIED CAPABILITY ENGINE
+  // =========================================================
+  if(url.pathname==='/api/admin/governance/overview'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [
+      regCounts,
+      consentStats,
+      otpStats,
+      emailStats,
+      anomalyStuckRequests,
+      anomalyMissingProfiles,
+      anomalyExpiredActiveCards,
+      sodSelfEval,
+      configHistory,
+      securityEventsCount
+    ]=await Promise.all([
+      env.DB.prepare(`SELECT domain_group,COUNT(*) n FROM governance_registry GROUP BY domain_group`).all(),
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN privacy_consent=1 AND terms_accepted=1 THEN 1 ELSE 0 END) full_consent,SUM(CASE WHEN is_minor=1 THEN 1 ELSE 0 END) minors,SUM(CASE WHEN email_verified=1 THEN 1 ELSE 0 END) email_verified FROM legal_consent_records`).first(),
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN verified_at IS NOT NULL THEN 1 ELSE 0 END) verified,SUM(CASE WHEN attempts>=max_attempts THEN 1 ELSE 0 END) locked_out FROM email_otp_tokens`).first(),
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status='not_configured' THEN 1 ELSE 0 END) not_configured FROM email_delivery_logs`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM account_requests WHERE status IN ('pending','supplement') AND created_at<=datetime('now','-48 hours')`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM people WHERE status='active' AND (email IS NULL OR trim(email)='' OR id_number IS NULL OR trim(id_number)='')`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at<date('now')`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_evaluations e JOIN accounts a ON a.id=e.evaluator_account_id WHERE a.person_id=e.person_id`).first(),
+      env.DB.prepare(`SELECT id,config_key,version_no,change_reason,created_at FROM system_config_history ORDER BY created_at DESC LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM security_events`).first()
+    ]);
+    return json({
+      identity:DEFAULT_SYSTEM_IDENTITY,
+      domain_counts:Object.fromEntries((regCounts.results||[]).map(x=>[x.domain_group,Number(x.n||0)])),
+      legal_consent:{
+        total:Number(consentStats?.total||0),
+        full_consent:Number(consentStats?.full_consent||0),
+        minors:Number(consentStats?.minors||0),
+        email_verified:Number(consentStats?.email_verified||0)
+      },
+      otp_center:{
+        total:Number(otpStats?.total||0),
+        verified:Number(otpStats?.verified||0),
+        locked_out:Number(otpStats?.locked_out||0)
+      },
+      email_center:{
+        provider:'resend',
+        api_key_configured:!!env.RESEND_API_KEY,
+        mailbox_provisioned_via_api:false,
+        dns_spf_dkim_verified:'unverified_external_dns',
+        total_logs:Number(emailStats?.total||0),
+        sent:Number(emailStats?.sent||0),
+        failed:Number(emailStats?.failed||0),
+        not_configured:Number(emailStats?.not_configured||0)
+      },
+      anomalies:{
+        stuck_requests_over_48h:Number(anomalyStuckRequests?.n||0),
+        incomplete_active_people:Number(anomalyMissingProfiles?.n||0),
+        expired_cards_still_marked_active:Number(anomalyExpiredActiveCards?.n||0),
+        sod_self_evaluation_conflicts:Number(sodSelfEval?.n||0)
+      },
+      security_events_total:Number(securityEventsCount?.n||0),
+      config_history:configHistory.results||[]
+    });
+  }
+
+  if(url.pathname==='/api/admin/governance/registry'&&['GET','POST'].includes(req.method)){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    if(req.method==='GET'){
+      const domain=clean(url.searchParams.get('domain'),60);
+      const q=clean(url.searchParams.get('q'),120);
+      const r=await env.DB.prepare(`
+        SELECT g.*,o.name org_name,u.username owner_username
+        FROM governance_registry g
+        LEFT JOIN org_nodes o ON o.id=g.org_node_id
+        LEFT JOIN accounts u ON u.id=g.owner_account_id
+        WHERE (?='' OR g.domain_group=?)
+          AND (?='' OR g.title LIKE ? OR g.code LIKE ? OR g.summary LIKE ?)
+        ORDER BY g.updated_at DESC LIMIT 300
+      `).bind(domain,domain,q,`%${q}%`,`%${q}%`,`%${q}%`).all();
+      return json({items:r.results||[]});
+    }
+    if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN',message:'Cần quyền Quản trị Mạng lưới hoặc Quản trị Hệ thống để cập nhật sổ đăng ký quản trị.'},403);
+    const b=await bodyJson(req);
+    const allowedDomains=new Set([
+      'workflow_def','workflow_change','workflow_exception','sod_rule',
+      'knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment',
+      'legal_obligation','privacy_dsar','background_job','backup_verify','tech_dependency','service_catalog','route_link','email_template','csr_program','esd_program','public_page','feature_flag','cost_record','tech_handover','archive_inspection',
+      'capability_map','case_lifecycle','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','ops_lesson','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio'
+    ]);
+    const domainGroup=clean(b.domain_group,60);
+    const code=clean(b.code,80).toUpperCase();
+    const title=clean(b.title,240);
+    if(!allowedDomains.has(domainGroup)||!code||!title)return json({error:'INVALID_GOVERNANCE_ENTRY',message:'Thiếu phân nhóm hợp lệ, mã định danh hoặc tiêu đề.'},400);
+    // SoD check (P4.03): proposer cannot self-approve a workflow change or exception if approver_account_id is explicitly set to self on restricted groups
+    if(['workflow_change','workflow_exception','decision_record'].includes(domainGroup)&&b.approver_account_id&&b.approver_account_id===s.account_id&&b.owner_account_id===s.account_id&&b.status==='approved'){
+      return json({error:'SOD_CONFLICT_DETECTED',message:'Xung đột phân tách nhiệm vụ (SoD): Người đề xuất không được tự phê duyệt trực tiếp mục này mà không có ngoại lệ được cấp thẩm quyền xác nhận.'},409);
+    }
+    const id=uid('gov');
+    const payload=typeof b.payload==='object'&&b.payload!==null?JSON.stringify(b.payload):clean(b.payload_json,4000)||'{}';
+    try{
+      await env.DB.prepare(`INSERT INTO governance_registry(id,domain_group,code,title,status,org_node_id,owner_account_id,reviewer_account_id,approver_account_id,related_entity_type,related_entity_id,version_label,summary,payload_json,evidence_ref,effective_from,effective_to) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+        id,domainGroup,code,title,clean(b.status,40)||'active',clean(b.org_node_id,100)||null,clean(b.owner_account_id,100)||s.account_id,clean(b.reviewer_account_id,100)||null,clean(b.approver_account_id,100)||null,clean(b.related_entity_type,80)||null,clean(b.related_entity_id,100)||null,clean(b.version_label,30)||'1.0',clean(b.summary,2000)||null,payload,clean(b.evidence_ref,500)||null,clean(b.effective_from,20)||dateInVietnam(),clean(b.effective_to,20)||null
+      ).run();
+    }catch(e){
+      if(String(e?.message||e).includes('UNIQUE'))return json({error:'GOVERNANCE_CODE_EXISTS',message:'Mã mục quản trị đã tồn tại.'},409);
+      throw e;
+    }
+    await audit(env,s.account_id,'governance_entry_created',domainGroup,id,clean(b.org_node_id,100)||null,{code,title});
+    return json({ok:true,id,code},201);
+  }
+
+  // P6.47 Safe Archive / ZIP Inspection Endpoint (inspects structure without executing code)
+  if(url.pathname==='/api/admin/archive-inspect'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const bytes=new Uint8Array(await req.arrayBuffer());
+    const report=inspectZipArchiveHeaders(bytes);
+    await ensureGovernanceTables(env);
+    const id=uid('zipchk');
+    await env.DB.prepare(`INSERT INTO governance_registry(id,domain_group,code,title,status,owner_account_id,version_label,summary,payload_json,effective_from) VALUES(?, 'archive_inspection', ?, 'Kiểm tra an toàn gói nén ZIP', ?, ?, '1.0', ?, ?, ?)`).bind(
+      id,`ZIP-${Date.now().toString().slice(-8)}`,report.valid?'passed':'blocked',s.account_id,`Tệp: ${report.file_count||0} · Giải nén: ${report.total_uncompressed_bytes||0} bytes · Kết quả: ${report.reason}`,JSON.stringify({file_count:report.file_count,compressed_bytes:report.compressed_bytes,total_uncompressed_bytes:report.total_uncompressed_bytes,max_compression_ratio:report.max_compression_ratio,max_depth:report.max_depth,risks:report.risks}),dateInVietnam()
+    ).run();
+    await audit(env,s.account_id,'archive_inspected','archive_inspection',id,null,{valid:report.valid,reason:report.reason,file_count:report.file_count});
+    return json(report,report.valid?200:400);
+  }
+
+  // P6.19 & P6.44 Admin Email & OTP Delivery Logs
+  if(url.pathname==='/api/admin/email-center'&&req.method==='GET'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [logs,otps]=await Promise.all([
+      env.DB.prepare(`SELECT id,template_code,recipient_email,sender_address,reply_to_address,subject,provider_name,provider_message_id,status,error_detail,retry_count,created_at FROM email_delivery_logs ORDER BY created_at DESC LIMIT 100`).all(),
+      env.DB.prepare(`SELECT id,email,purpose,attempts,max_attempts,resend_count,expires_at,verified_at,used_at,created_at FROM email_otp_tokens ORDER BY created_at DESC LIMIT 100`).all()
+    ]);
+    return json({
+      identity:DEFAULT_SYSTEM_IDENTITY,
+      provider_configured:!!env.RESEND_API_KEY,
+      mailbox_note:'Cấu hình địa chỉ gửi trong ứng dụng không đồng nghĩa với việc đã tạo hộp thư (mailbox/alias) hoặc xác thực SPF/DKIM/DMARC trên nhà cung cấp email.',
+      delivery_logs:logs.results||[],
+      otp_records:otps.results||[]
+    });
+  }
+
+  // P6.52 Pre-Release Readiness Gate
+  if(url.pathname==='/api/admin/release-readiness'&&req.method==='GET'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const verRow=await env.DB.prepare('SELECT MAX(version) v FROM schema_version').first();
+    const schemaVer=Number(verRow?.v||0);
+    const orgSetting=await env.DB.prepare("SELECT value_json FROM system_settings WHERE key='organization'").first();
+    const legalCount=await env.DB.prepare("SELECT COUNT(*) n FROM governance_registry WHERE domain_group='legal_obligation'").first();
+    const gates=[
+      {code:'SCHEMA_VERSION',title:'Phiên bản lược đồ cơ sở dữ liệu (yêu cầu ≥ 16, mục tiêu 17)',status:schemaVer>=16?'passed':'failed',detail:`Phiên bản hiện tại: ${schemaVer}`},
+      {code:'IDENTITY_UNIFIED',title:'Nhận diện Trung tâm Nghiệp vụ Số Sky First & nghiepvu.skyfirst.io.vn',status:orgSetting?.value_json?.includes('nghiepvu.skyfirst.io.vn')?'passed':'warning',detail:DEFAULT_SYSTEM_IDENTITY.appUrl},
+      {code:'LEGAL_GATE_91_2025',title:'Cổng pháp lý Luật BVDLCN 91/2025/QH15 & Nghị định 356/2025/NĐ-CP',status:Number(legalCount?.n||0)>=2?'passed':'failed',detail:'Đã tách bạch đồng ý điều khoản, dữ liệu cá nhân, người giám hộ; chờ phê duyệt pháp lý chuyên môn trước khi vận hành chính thức.'},
+      {code:'EMAIL_PROVIDER_SECRET',title:'Khóa dịch vụ gửi email thực tế (RESEND_API_KEY)',status:env.RESEND_API_KEY?'configured_untested':'blocked_external',detail:env.RESEND_API_KEY?'Đã khai báo secret nhưng chưa xác nhận gửi thực tế':'Chưa khai báo RESEND_API_KEY trong môi trường hiện tại'},
+      {code:'PRODUCTION_DEPLOYMENT',title:'Triển khai Cloudflare Production & DNS nghiepvu.skyfirst.io.vn',status:'blocked_external',detail:'Chưa triển khai lên Cloudflare production; cần người có thẩm quyền chạy migration từ xa và kiểm tra DNS/SPF/DKIM.'}
+    ];
+    const allMandatoryPassed=gates.filter(g=>['SCHEMA_VERSION','IDENTITY_UNIFIED','LEGAL_GATE_91_2025'].includes(g.code)).every(g=>g.status==='passed');
+    return json({
+      code_package_ready:allMandatoryPassed,
+      production_live_verified:false,
+      gates
     });
   }
 

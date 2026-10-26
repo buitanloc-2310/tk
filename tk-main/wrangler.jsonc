@@ -29,7 +29,12 @@
   ],
 
   "vars": {
-    "APP_NAME": "TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST",
-    "APP_URL": "https://member.skyfirst.io.vn"
+    "APP_NAME": "Trung tâm Nghiệp vụ Số Sky First",
+    "ORG_NAME": "Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First",
+    "APP_URL": "https://nghiepvu.skyfirst.io.vn",
+    "SYSTEM_EMAIL": "nghiepvu@skyfirst.io.vn",
+    "NOREPLY_EMAIL": "noreply@skyfirst.io.vn",
+    "SUPPORT_EMAIL": "support@skyfirst.io.vn",
+    "CONTACT_EMAIL": "lienhe@skyfirst.io.vn"
   }
 }

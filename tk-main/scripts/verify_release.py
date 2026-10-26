@@ -7,7 +7,7 @@ errors=[]
 def ok(name): print('[OK]',name)
 def fail(name,msg): errors.append(f'{name}: {msg}'); print('[FAIL]',name,msg)
 
-required=['public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql','migrations/0016_schema_health_baseline.sql','REMEDIATION_REPORT_2026-10-09_V11.md']
+required=['migrations/0017_skyfirst_operations_center_p1_p7.sql','public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql','migrations/0016_schema_health_baseline.sql','REMEDIATION_REPORT_2026-10-09_V11.md']
 for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
@@ -31,7 +31,8 @@ except Exception as e: fail('Cloudflare bindings',str(e))
 try:
     con=sqlite3.connect(':memory:')
     con.execute('PRAGMA foreign_keys=ON')
-    for f in sorted((ROOT/'migrations').glob('*.sql')):
+    mig_files = sorted(set((ROOT/'migrations').glob('*.sql')) | ({ROOT/'migrations/0017_skyfirst_operations_center_p1_p7.sql'} if (ROOT/'migrations/0017_skyfirst_operations_center_p1_p7.sql').exists() else set()))
+    for f in mig_files:
         con.executescript(f.read_text())
     ok('migrations apply from blank schema')
 except Exception as e:

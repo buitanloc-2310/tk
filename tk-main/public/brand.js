@@ -1,6 +1,6 @@
 (()=>{
   let currentLogo='/sfn-logo.png';
-  let currentName='Trung Tâm Thành Viên Số Sky First';
+  let currentName='Trung tâm Nghiệp vụ Số Sky First';
   const localImage=(value)=>{
     const p=String(value||'').trim();
     if(p==='/sfn-logo.png')return p;
@@ -27,7 +27,7 @@
     root.style.fontSize=Math.min(20,Math.max(14,Number(b.baseFontSize)||16))+'px';
     const fonts=['Arial','Verdana','Georgia','Tahoma','system'];const font=fonts.includes(b.fontFamily)?b.fontFamily:'system';
     root.style.fontFamily=font==='system'?'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif':font+',sans-serif';
-    currentName=String(b.siteName||'Trung Tâm Thành Viên Số Sky First').slice(0,100);
+    currentName=String(b.siteName||'Trung tâm Nghiệp vụ Số Sky First').slice(0,100);
     currentLogo=localImage(b.logoUrl);
     const titleBase=String(document.title||'').split(' · ')[0].trim();
     document.title=titleBase?`${titleBase} · ${currentName}`:currentName;

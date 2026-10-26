@@ -70,8 +70,8 @@ function applyPortalConfig(data){
   document.documentElement.style.fontSize=size+'px';
   document.documentElement.style.fontFamily=font==='system'?'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif':font+',sans-serif';
   logo=safeImageUrl(brand.logoUrl,'/sfn-logo.png');
-  document.title=String(brand.siteName||'Trung Tâm Thành Viên Số Sky First').slice(0,100);
-  document.querySelectorAll('[data-site-name]').forEach(el=>{el.textContent=brand.siteName||'Trung Tâm Thành Viên Số Sky First'});
+  document.title=String(brand.siteName||'Trung tâm Nghiệp vụ Số Sky First').slice(0,100);
+  document.querySelectorAll('[data-site-name]').forEach(el=>{el.textContent=brand.siteName||'Trung tâm Nghiệp vụ Số Sky First'});
   document.querySelectorAll('img[data-brand-logo],.side-logo,.gate-brand img,.auth-mobile-brand img,.standalone-header img,.standalone-panel>img').forEach(el=>{el.src=logo});
   if(Array.isArray(d.links)&&d.links.length===5){
     const links=d.links.map(x=>[String(x?.name||'').slice(0,100),allowedPortalUrl(x?.url)||'',String(x?.description||'').slice(0,140)]);
@@ -120,7 +120,7 @@ function maybeShowOnboarding(){
   if(!state.me?.is_member)return;
   const code=state.me.person?.member_code||state.me.person?.id||'member';const key='sfn:onboard:v1:'+code;
   if(safeStore.get(key))return;
-  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung Tâm Thành Viên Số Sky First',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
+  setTimeout(()=>{if($('#modal'))return;modal('Chào mừng đến Trung tâm Nghiệp vụ Số Sky First',`<div class="onboarding"><div class="onboarding-mark">SF</div><h3>Một nơi cho toàn bộ hành trình thành viên</h3><p class="muted">Bạn có thể hoàn thiện hồ sơ, quản lý thẻ và chứng nhận, theo dõi hoạt động, CV, lịch và bảo mật tài khoản tại đây.</p><div class="onboarding-grid"><button data-onboard="profile"><b>01 · Hồ sơ số</b><span>Hoàn thiện thông tin và ảnh đại diện</span></button><button data-onboard="cards"><b>02 · Thẻ thành viên</b><span>Xem thẻ và mã xác minh</span></button><button data-onboard="security"><b>03 · Bảo mật</b><span>Kiểm tra các phiên đang đăng nhập</span></button></div><button class="primary" id="finishOnboarding">Bắt đầu sử dụng</button></div>`);
     const finish=view=>{safeStore.set(key,'1');$('#modal')?.remove();if(view)goView(view)};$('#finishOnboarding').onclick=()=>finish();$$('[data-onboard]').forEach(b=>b.onclick=()=>finish(b.dataset.onboard));
   },250);
 }
@@ -253,14 +253,14 @@ function renderForcedPasswordChange(){
   $('#forcedPasswordForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),password=String(f.get('password')||''),confirm=String(f.get('confirm')||''),msg=$('#forcedPasswordMsg'),btn=e.target.querySelector('button');if(password!==confirm){msg.textContent='Mật khẩu nhập lại chưa khớp.';return}if(password.length<10){msg.textContent='Mật khẩu cần ít nhất 10 ký tự.';return}btn.disabled=true;msg.textContent='Đang cập nhật mật khẩu...';try{await api('/api/me/password',{method:'POST',body:JSON.stringify({current_password:'',new_password:password})});state.me=await api('/api/me');state.dashboard=await api('/api/dashboard');renderApp();toast('Đã đổi mật khẩu. Tài khoản của bạn đã sẵn sàng.')}catch(err){msg.textContent=err.data?.message||err.data?.detail||err.data?.error||err.message}finally{btn.disabled=false}};
 }
 function renderRegistrationStatus(){
-  $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung Tâm Thành Viên Số Sky First</span></a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">HỒ SƠ THÀNH VIÊN SKY FIRST</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
+  $('#app').innerHTML=`<main class="standalone"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung tâm Nghiệp vụ Số Sky First</span></a><a href="/register" data-public-path="/register">Đăng ký mới →</a></header><section class="standalone-panel lookup-panel"><div class="eyebrow">HỒ SƠ THÀNH VIÊN SKY FIRST</div><h1>Tra cứu hồ sơ đăng ký</h1><p class="muted">Nhập mã yêu cầu và email đã đăng ký để kiểm tra trạng thái xét duyệt.</p><form id="statusForm" class="modern-form"><label>Mã đăng ký<input name="code" required autocomplete="off" placeholder="Mã yêu cầu được cấp sau khi gửi"></label><label>Email đăng ký<input type="email" name="email" required autocomplete="email"></label><button class="primary">Tra cứu trạng thái →</button><div id="statusResult" role="status" aria-live="polite"></div></form><p class="muted">Cần hỗ trợ? <a href="mailto:support@skyfirst.io.vn">support@skyfirst.io.vn</a></p></section></main>`;
   wirePublicLinks();
   const qs=new URLSearchParams(location.search);if(qs.has('request'))$('#statusForm').elements.code.value=qs.get('request');if(qs.has('email'))$('#statusForm').elements.email.value=qs.get('email');if(qs.has('request')||qs.has('email'))history.replaceState({},'',location.pathname);
   $('#statusForm').onsubmit=async e=>{e.preventDefault();const dta=new FormData(e.target),out=$('#statusResult');out.textContent='Đang kiểm tra hồ sơ...';try{const d=await api('/api/public/account-request/status',{method:'POST',body:JSON.stringify({code:dta.get('code'),email:dta.get('email')})});out.innerHTML=`<div class="request-note"><b>${esc(d.request.request_code)}</b><br>Trạng thái: <strong>${esc(statusVi(d.request.status))}</strong>${d.request.admin_note?`<p>Phản hồi: ${esc(d.request.admin_note)}</p>`:''}</div>`}catch(err){out.textContent=err.status===429?'Bạn đã tra cứu quá nhiều lần. Vui lòng thử lại sau.':'Không tìm thấy hồ sơ phù hợp. Vui lòng kiểm tra lại mã và email.'}};
 }
 function wirePublicLinks(){document.querySelectorAll('[data-public-path]').forEach(a=>a.onclick=e=>{e.preventDefault();routePublic(a.dataset.publicPath)})}
 function showRegistrationPage(title,html){
-  $('#app').innerHTML=`<main class="standalone register-screen"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung Tâm Thành Viên Số Sky First</span></a><a href="/registration-status" data-public-path="/registration-status">Tra cứu đăng ký →</a></header><section class="standalone-panel register-panel"><div class="eyebrow">THAM GIA SKY FIRST NETWORK</div><h1>${esc(title)}</h1><p class="muted">Hoàn thành các bước bên dưới. Thông tin chỉ được xử lý để xét duyệt và quản lý hồ sơ theo chính sách của hệ thống.</p><div class="wizard-progress" id="wizardProgress" aria-live="polite"></div>${html}</section></main>`;
+  $('#app').innerHTML=`<main class="standalone register-screen"><header class="standalone-header"><a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung tâm Nghiệp vụ Số Sky First</span></a><a href="/registration-status" data-public-path="/registration-status">Tra cứu đăng ký →</a></header><section class="standalone-panel register-panel"><div class="eyebrow">THAM GIA SKY FIRST NETWORK</div><h1>${esc(title)}</h1><p class="muted">Hoàn thành các bước bên dưới. Thông tin chỉ được xử lý để xét duyệt và quản lý hồ sơ theo chính sách của hệ thống.</p><div class="wizard-progress" id="wizardProgress" aria-live="polite"></div>${html}</section></main>`;
   wirePublicLinks();
 }
 function initRegistrationWizard(form){
@@ -315,9 +315,9 @@ function renderLogin(){
   $('#app').innerHTML=`
     <main class="identity-gate">
       <section class="gate-story" aria-label="Sky First Network">
-        <div class="gate-brand"><img src="${logo}" alt="Sky First Network"><div><strong data-site-name>TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</strong><span>HỒ SƠ THÀNH VIÊN</span></div></div>
+        <div class="gate-brand"><img src="${logo}" alt="Sky First Network"><div><strong data-site-name>TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST</strong><span>HỒ SƠ THÀNH VIÊN</span></div></div>
         <div class="gate-copy">
-          <span class="gate-kicker">TRUNG TÂM THÀNH VIÊN SỐ </span>
+          <span class="gate-kicker">TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST</span>
           <h1>Một hồ sơ.<br>Mọi hành trình<br>tại Sky First.</h1>
           <p>Không gian định danh số dành cho thành viên: vai trò, đơn vị, hoạt động, hồ sơ, thành tích và những đóng góp được kết nối trong cùng một nơi.</p>
           <div class="impact-row"><span>GIÁO DỤC</span><span>CỘNG ĐỒNG</span><span>TÌNH NGUYỆN</span></div>
@@ -328,7 +328,7 @@ function renderLogin(){
       </section>
       <section class="gate-panel">
         <div class="auth-box">
-          <div class="auth-mobile-brand"><img src="${logo}" alt=""><b data-site-name>TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</b></div>
+          <div class="auth-mobile-brand"><img src="${logo}" alt=""><b data-site-name>TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST</b></div>
           <div class="auth-tabs"><button class="active" data-auth-tab="login">ĐĂNG NHẬP</button><button data-auth-tab="register">ĐĂNG KÝ</button></div>
           <div id="authLoginPane">
             <div class="auth-heading"><span>ĐĂNG NHẬP THÀNH VIÊN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng tài khoản thành viên Sky First của bạn.</p></div>
@@ -719,44 +719,40 @@ async function renderAccountRequest(){
       </div>
 
 
-      <!-- BẢO MẬT -->
+      <!-- XÁC MINH EMAIL OTP & CỔNG PHÁP LÝ BẢO VỆ DỮ LIỆU CÁ NHÂN -->
 
-      <div class="request-note full">
-
-        <b>
-          🔒 Bảo mật thông tin cá nhân:
-        </b>
-
-        Các thông tin được cung cấp trong biểu mẫu
-        được Sky First Network sử dụng phục vụ việc xác minh,
-        xét duyệt, quản lý tài khoản và hồ sơ thành viên.
-
-        Thông tin được giới hạn quyền truy cập
-        cho những cá nhân có thẩm quyền
-        theo phạm vi nhiệm vụ.
-
-        Sky First Network không cung cấp thông tin cá nhân
-        cho bên thứ ba ngoài mục đích đã thông báo,
-        trừ trường hợp có sự đồng ý phù hợp
-        hoặc theo yêu cầu, quy định của pháp luật.
-
+      <div class="card full" style="background:#f8fbff;border:1px solid #d7e8f6;padding:16px">
+        <h3 style="margin:0 0 8px">XÁC MINH EMAIL (OTP DÙNG MỘT LẦN)</h3>
+        <p class="muted" style="margin:0 0 12px;font-size:13px">Xác minh quyền kiểm soát hộp thư điện tử của bạn trước khi gửi hồ sơ. Mã OTP gồm 6 chữ số, có hiệu lực trong 10 phút và chỉ sử dụng một lần.</p>
+        <div class="toolbar" style="margin:0">
+          <button type="button" class="secondary" id="sendRegOtpBtn">Gửi mã OTP tới Email đăng ký</button>
+          <input name="email_otp_code" id="regOtpCodeInput" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" placeholder="Nhập 6 chữ số OTP" style="max-width:190px">
+          <button type="button" class="secondary" id="verifyRegOtpBtn">Xác nhận OTP</button>
+        </div>
+        <input type="hidden" name="otp_verification_token" id="regOtpVerifiedToken" value="">
+        <div id="regOtpMsg" class="meta" role="status" aria-live="polite" style="margin-top:8px"></div>
       </div>
 
+      <div class="request-note full">
+        <b>🔒 Thông báo Minh bạch &amp; Bảo vệ Dữ liệu Cá nhân (Luật số 91/2025/QH15 &amp; Nghị định 356/2025/NĐ-CP):</b><br>
+        1. <b>Mục đích thu thập &amp; xử lý:</b> Các thông tin trong biểu mẫu được Trung tâm Nghiệp vụ Số Sky First (thuộc Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First) thu thập tối thiểu để xác minh danh tính, xét duyệt cấp tài khoản, quản trị hồ sơ thành viên, cấp thẻ/chứng nhận và phân quyền công tác.<br>
+        2. <b>Phạm vi truy cập &amp; lưu trữ:</b> Giới hạn nghiêm ngặt cho bộ phận xét duyệt và quản trị đúng phạm vi đơn vị. Ảnh hồ sơ chờ duyệt được lưu riêng tư (private/no-store); thông tin định danh người giám hộ (nếu dưới 18 tuổi) được tự động ẩn/xóa sau khi hoàn tất phê duyệt.<br>
+        3. <b>Phân biệt pháp lý:</b> Xác nhận bên dưới là sự đồng ý tách bạch theo mục đích và chấp thuận điều khoản hệ thống; không mặc nhiên thay thế chữ ký điện tử chuyên dùng hoặc sự đồng ý cho các mục đích ngoài phạm vi đã nêu.
+      </div>
 
-      <label class="full">
+      <label class="full" style="display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" name="read_acknowledged" value="1" required style="width:auto;margin-top:4px">
+        <span><b>[1] Xác nhận đã đọc:</b> Tôi đã đọc và hiểu rõ Thông báo bảo mật dữ liệu cá nhân (<a href="/privacy.html" target="_blank" rel="noopener">Chính sách bảo mật</a>) và quyền của chủ thể dữ liệu. *</span>
+      </label>
 
-        <input
-          type="checkbox"
-          name="privacy_consent"
-          value="1"
-          required
-        >
+      <label class="full" style="display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" name="terms_accepted" value="1" required style="width:auto;margin-top:4px">
+        <span><b>[2] Chấp thuận Điều khoản dịch vụ:</b> Tôi đồng ý tuân thủ <a href="/terms.html" target="_blank" rel="noopener">Điều khoản sử dụng</a> của Trung tâm Nghiệp vụ Số Sky First. *</span>
+      </label>
 
-        Tôi xác nhận các thông tin đã cung cấp
-        là chính xác và đồng ý để Sky First Network xử lý
-        các thông tin này phục vụ việc xét duyệt,
-        quản lý tài khoản và hồ sơ thành viên. *
-
+      <label class="full" style="display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" name="privacy_consent" value="1" required style="width:auto;margin-top:4px">
+        <span><b>[3] Đồng ý xử lý dữ liệu cá nhân &amp; Cam kết chính xác:</b> Tôi cam kết thông tin đã khai báo là đúng sự thật và đồng ý cho phép Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First xử lý dữ liệu cá nhân cho mục đích xét duyệt, quản lý tài khoản và hồ sơ nghiệp vụ. *</span>
       </label>
 
 
@@ -882,6 +878,37 @@ async function renderAccountRequest(){
   syncGuardian();
 
   syncEducationFields();
+
+  const sendOtpBtn=$('#sendRegOtpBtn'),verifyOtpBtn=$('#verifyRegOtpBtn'),otpInput=$('#regOtpCodeInput'),otpTokenField=$('#regOtpVerifiedToken'),otpMsg=$('#regOtpMsg');
+  if(sendOtpBtn){
+    sendOtpBtn.onclick=async()=>{
+      const emailVal=String(form.elements.email?.value||'').trim();
+      const fullNameVal=String(form.elements.full_name?.value||'').trim();
+      if(!emailVal){otpMsg.textContent='Vui lòng nhập Email ở Bước 1 trước khi yêu cầu mã OTP.';return}
+      sendOtpBtn.disabled=true;otpMsg.textContent='Đang gửi yêu cầu mã OTP...';
+      try{
+        const res=await api('/api/public/email-otp/request',{method:'POST',body:JSON.stringify({email:emailVal,full_name:fullNameVal,purpose:'account_request'})});
+        otpMsg.textContent=res.message||'Đã xử lý yêu cầu OTP.';
+      }catch(err){
+        otpMsg.textContent=err.data?.message||err.message||'Không thể gửi OTP lúc này.';
+      }finally{sendOtpBtn.disabled=false}
+    };
+  }
+  if(verifyOtpBtn){
+    verifyOtpBtn.onclick=async()=>{
+      const emailVal=String(form.elements.email?.value||'').trim();
+      const otpVal=String(otpInput?.value||'').trim();
+      if(!emailVal||!/^\d{6}$/.test(otpVal)){otpMsg.textContent='Vui lòng nhập đúng email và mã OTP gồm 6 chữ số.';return}
+      verifyOtpBtn.disabled=true;otpMsg.textContent='Đang kiểm tra mã OTP...';
+      try{
+        const res=await api('/api/public/email-otp/verify',{method:'POST',body:JSON.stringify({email:emailVal,otp:otpVal,purpose:'account_request'})});
+        if(otpTokenField)otpTokenField.value=res.otp_verification_token||'';
+        otpMsg.innerHTML='<b class="status-ok">✓ Đã xác minh OTP email thành công.</b>';
+      }catch(err){
+        otpMsg.textContent=err.data?.message||err.message||'Mã OTP không hợp lệ.';
+      }finally{verifyOtpBtn.disabled=false}
+    };
+  }
 
 
   form.onsubmit=async e=>{
@@ -1072,6 +1099,11 @@ async function renderAccountRequest(){
         )
           ?'1'
           :'0';
+      body.read_acknowledged=fd.get('read_acknowledged')?'1':'0';
+      body.terms_accepted=fd.get('terms_accepted')?'1':'0';
+      body.accuracy_committed='1';
+      body.otp_verification_token=String(fd.get('otp_verification_token')||'');
+      delete body.email_otp_code;
 
 
       const d=
@@ -1152,7 +1184,7 @@ const VIEW_META={
   home:['Tổng quan','Không gian điều hành hành trình thành viên'],profile:['Hồ sơ của tôi','Định danh và thông tin thành viên'],journey:['Hành trình của tôi','Các cột mốc và đóng góp'],goals:['Mục tiêu & Tiến độ','Theo dõi mục tiêu cá nhân'],tasks:['Công việc','Nhiệm vụ và tiến độ'],activities:['Hoạt động','Các hoạt động đã tham gia'],certificates:['Chứng nhận','Kho chứng nhận đã xác minh'],achievements:['Thành tích & Ghi nhận','Những dấu mốc nổi bật'],evaluations:['Đánh giá của tôi','Kết quả và lịch sử đánh giá'],history:['Quá trình công tác','Vai trò và đơn vị theo thời gian'],documents:['Tài liệu của tôi','Tài liệu cá nhân và minh chứng'],cards:['Thẻ của tôi','Thẻ thành viên và xác minh QR'],cv:['CV / Hồ sơ năng lực','Hồ sơ năng lực một trang A4'],notifications:['Thông báo','Thông tin mới và việc cần chú ý'],calendar:['Lịch của tôi','Lịch hoạt động và lịch cá nhân'],security:['Bảo mật & Phiên đăng nhập','Thiết bị và phiên truy cập'],support:['Tài khoản & Hỗ trợ','Cài đặt và trung tâm hỗ trợ'],
   'admin-issuance':['Cấp phát & thẻ','QR xác minh, thẻ thành viên và lịch sử cấp phát'], 'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-work':['Trung tâm công việc','Việc đang chờ xử lý và cảnh báo'], 'admin-reports':['Báo cáo & thống kê','Số liệu vận hành từ dữ liệu thật'], 'admin-super':['Quản trị cấp cao','Quản lý quyền quản trị và kiểm soát hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Điều chỉnh nội dung và số liệu'], 'admin-system':['Cấu hình hệ thống','Bộ lọc, an toàn và tình trạng dịch vụ']
 };
-function currentViewMeta(){return VIEW_META[state.view]||['Trung tâm thành viên số','Không gian quản trị Sky First'];}
+function currentViewMeta(){return VIEW_META[state.view]||['Trung tâm Nghiệp vụ Số Sky First','Không gian quản trị Sky First'];}
 
 function hasP(code){
 
@@ -1215,7 +1247,7 @@ function renderApp(){
           <div>
 
             <div class="side-brand-title">
-              <span data-site-name>TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</span>
+              <span data-site-name>TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST</span>
             </div>
 
             <div class="side-brand-sub">
@@ -2769,7 +2801,7 @@ function printOnePageCV({p,memberships,activities,certificates,achievements}){
   <div class="intro"><div><b>Học tập / Công tác</b><br>${esc(p.school_or_workplace||'Chưa cập nhật')}<br><span class="note">${esc(p.class_or_major||'')}</span></div>${includeContact?`<div><b>Liên hệ</b><br>${esc(p.email||'')}<br>${esc(p.phone||'')}</div>`:'<div><b>Quyền riêng tư</b><br>Thông tin liên hệ được ẩn</div>'}</div>
   <main class="columns"><section><div class="group"><h2>VAI TRÒ & HÀNH TRÌNH</h2>${list(memberships,x=>`<div class="entry"><b>${esc(x.title||x.role_label||'Thành viên')}</b><span>${esc(x.org_name||'Sky First Network')}</span><br><small>${esc(x.started_at||'')} — ${esc(x.ended_at||'hiện tại')}</small></div>`,4)}</div><div class="group"><h2>THÀNH TÍCH & GHI NHẬN</h2>${list(achievements,x=>`<div class="entry"><b>${esc(x.title||'Ghi nhận')}</b><small>${esc(x.achieved_at||'')} · ${esc(x.issuer||'Sky First Network')}</small></div>`,3)}</div></section>
   <section><div class="group"><h2>HOẠT ĐỘNG TIÊU BIỂU</h2>${list(activities,x=>`<div class="entry"><b>${esc(x.name||'Hoạt động')}</b><small>${esc(x.role_label||'Thành viên')} · ${esc(x.starts_at||'')}</small></div>`,4)}</div><div class="group"><h2>CHỨNG NHẬN</h2>${list(certificates,x=>`<div class="entry"><b>${esc(x.title||'Chứng nhận')}</b><small>${esc(x.issuer||'Sky First Network')} · ${esc(x.issued_at||'')}</small></div>`,3)}</div></section></main>
-  <footer class="footer"><span>Hồ sơ do thành viên lựa chọn xuất từ Trung tâm Thành viên Số Sky First</span><span>member.skyfirst.io.vn</span></footer></div><script>addEventListener('load',()=>setTimeout(()=>window.print(),450));<\/script></body></html>`;
+  <footer class="footer"><span>Hồ sơ do thành viên lựa chọn xuất từ Trung tâm Nghiệp vụ Số Sky First</span><span>nghiepvu.skyfirst.io.vn</span></footer></div><script>addEventListener('load',()=>setTimeout(()=>window.print(),450));<\/script></body></html>`;
   w.document.write(html);w.document.close();
 }
 
@@ -3232,21 +3264,27 @@ function renderSupport(c){
           }
         );
 
-      alert(
-        'Đã ghi nhận yêu cầu: '+
-        d.ticket_code
-      );
-
+      toast('Đã ghi nhận yêu cầu hỗ trợ: '+d.ticket_code);
       e.target.reset();
-
+      await loadMyTickets();
     }catch(err){
-
-      alert(
-        err.data?.error||
-        err.message
-      );
+      alert(err.data?.error||err.message);
     }
   };
+  const ticketHistoryCard=document.createElement('div');
+  ticketHistoryCard.className='card';
+  ticketHistoryCard.style.marginTop='14px';
+  ticketHistoryCard.innerHTML='<h2>Lịch sử yêu cầu hỗ trợ của tôi</h2><div id="myTicketsBox" class="empty">Đang tải...</div>';
+  c.appendChild(ticketHistoryCard);
+  async function loadMyTickets(){
+    const box=$('#myTicketsBox');if(!box)return;
+    try{
+      const r=await api('/api/me/support');
+      const items=r.items||[];
+      box.outerHTML=`<div id="myTicketsBox">${items.length?`<div class="table-wrap"><table><thead><tr><th>Mã phiếu</th><th>Danh mục</th><th>Tiêu đề</th><th>Trạng thái</th><th>Phản hồi / Xử lý</th><th>Thời gian</th></tr></thead><tbody>${items.map(x=>`<tr><td><b>${esc(x.ticket_code)}</b></td><td>${esc(x.category)}</td><td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div></td><td><span class="badge ${x.status==='completed'?'ok':'warn'}">${esc(statusVi(x.status))}</span></td><td>${esc(x.resolution_note||x.closed_reason||'Đang chờ bộ phận phụ trách phản hồi')}</td><td>${esc(x.created_at)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Bạn chưa gửi yêu cầu hỗ trợ nào.</div>'}</div>`;
+    }catch{box.textContent='Chưa tải được lịch sử phiếu hỗ trợ.'}
+  }
+  loadMyTickets();
 }
 
 
@@ -6947,7 +6985,7 @@ if(tab==='membership'){
                     >
 
                     <div class="eyebrow">
-                      TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST
+                      TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST
                     </div>
 
                     <h3>
@@ -7960,7 +7998,7 @@ async function downloadCardPdf(x,t){
 }
 function openCardPrint(x,t){downloadCardPdf(x,t).catch(e=>toast(e.message||'Không thể tạo PDF thẻ.','warn'))}
 async function renderIssuanceStudio(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">TRUNG TÂM THÀNH VIÊN SỐ SKY FIRST</div><h1>Cấp phát & thẻ</h1><p class="muted">Tách riêng QR xác minh cho thẻ thiết kế bên ngoài, thẻ thành viên chính thức và nghiệp vụ cấp phát sự kiện.</p></div></div>
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST</div><h1>Cấp phát & thẻ</h1><p class="muted">Tách riêng QR xác minh cho thẻ thiết kế bên ngoài, thẻ thành viên chính thức và nghiệp vụ cấp phát sự kiện.</p></div></div>
   <section class="card issuance-panel"><div class="issuance-tabs issuance-nav-tabs" role="tablist" aria-label="Nhóm chức năng cấp phát">
     <button class="primary" data-issuance-tab="overview" role="tab" aria-selected="true">Tổng quan</button>
     <button class="secondary" data-issuance-tab="qr" role="tab" aria-selected="false">Tạo QR xác minh</button>
@@ -8024,7 +8062,7 @@ async function renderPortalStudio(c){
   c.innerHTML='<div class="section-title"><div><h1>Cấu hình giao diện & thống kê</h1><p class="muted">Chỉnh sửa diện mạo, tên gọi, các liên kết và số liệu công khai ngay tại đây.</p></div></div><div class="card">Đang tải cấu hình...</div>';
   try{
     const [saved,published]=await Promise.all([api('/api/admin/portal-config'),api('/api/public/portal-config')]);
-    const settings=saved.settings||{},brand={siteName:'Trung Tâm Thành Viên Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,...(settings.brand||{})};
+    const settings=saved.settings||{},brand={siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,...(settings.brand||{})};
     const links=Array.isArray(settings.links)&&settings.links.length===5?settings.links:PORTALS.map(([name,url,description])=>({name,url,description}));
     const fallbacks=[['members','Thành viên đang hoạt động'],['activities','Hoạt động đã tổ chức'],['units','Đơn vị trực thuộc'],['programs','Chương trình và dự án']];
     const byKey=new Map((settings.stats||[]).map(x=>[x.key,x]));
@@ -8087,7 +8125,7 @@ async function renderAdminOrg(c){
       </h1>
 
       <button
-        id="centerNew" class="secondary">Tạo Trung Tâm Thành Viên Số Sky First</button><button id="orgNew"
+        id="centerNew" class="secondary">Tạo Trung tâm Nghiệp vụ Số Sky First</button><button id="orgNew"
         class="primary"
       >
         Thêm bộ phận / đơn vị
@@ -8276,7 +8314,7 @@ async function renderAdminOrg(c){
                 Loại
 
                 <select name="node_type">
-                <option value="digital_member_center" ${x.node_type==='digital_member_center'?'selected':''}>Trung Tâm Thành Viên Số Sky First</option>
+                <option value="digital_member_center" ${x.node_type==='digital_member_center'?'selected':''}>Trung tâm Nghiệp vụ Số Sky First</option>
 
                   ${
                     [
@@ -8467,7 +8505,7 @@ async function renderAdminOrg(c){
 
 
         modal(
-          createCenter?'Tạo Trung Tâm Thành Viên Số Sky First':'Thêm bộ phận / đơn vị',
+          createCenter?'Tạo Trung tâm Nghiệp vụ Số Sky First':'Thêm bộ phận / đơn vị',
           `
           <form
             id="orgForm"
@@ -8481,7 +8519,7 @@ async function renderAdminOrg(c){
                 name="name"
                 required
                 maxlength="200"
-                value="${createCenter?'Trung Tâm Thành Viên Số Sky First':''}"
+                value="${createCenter?'Trung tâm Nghiệp vụ Số Sky First':''}"
                 ${createCenter?'readonly':''}
               >
             </label>
@@ -8509,7 +8547,7 @@ async function renderAdminOrg(c){
             <label>
               Loại
 
-              <select name="node_type"><option value="digital_member_center" ${createCenter?'selected':''}>Trung Tâm Thành Viên Số Sky First</option>
+              <select name="node_type"><option value="digital_member_center" ${createCenter?'selected':''}>Trung tâm Nghiệp vụ Số Sky First</option>
 
                 <option value="executive_board" ${createCenter?'':'selected'}>
                   BCH
@@ -8629,25 +8667,96 @@ async function renderAdminOrg(c){
    ADMIN - WORK CENTER / REPORTS / SYSTEM
    ========================================================= */
 async function renderAdminWork(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">ĐIỀU HÀNH</div><h1>Trung tâm công việc</h1><p class="muted">Một nơi để nhìn thấy việc cần xử lý mà không phải mở từng phân hệ.</p></div><button class="secondary" id="workRefresh">Làm mới</button></div><div id="workBox" class="card">Đang tải...</div>`;
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">ĐIỀU HÀNH NGHIỆP VỤ (P4–P7)</div><h1>Trung tâm công việc &amp; Điều phối nghiệp vụ</h1><p class="muted">Quản lý việc cần xử lý, phiếu hỗ trợ nghiệp vụ, quy trình, tri thức, SLA, chất lượng và rủi ro trong một trung tâm duy nhất.</p></div><button class="secondary" id="workRefresh">Làm mới</button></div>
+  <div class="tabs" id="workCenterTabs">
+    <button class="active" data-wtab="queue">Hàng đợi việc cần xử lý</button>
+    <button data-wtab="support">Yêu cầu hỗ trợ nghiệp vụ (P7.09)</button>
+    <button data-wtab="workflows">Quy trình &amp; Phân tách nhiệm vụ (P4)</button>
+    <button data-wtab="knowledge">Tri thức &amp; Hỗ trợ quyết định (P5)</button>
+    <button data-wtab="capabilities">Năng lực nghiệp vụ chuyên sâu (P7)</button>
+  </div>
+  <div id="workBox" class="card">Đang tải...</div>`;
+  let activeWTab='queue';
   const load=async()=>{
-    const d=await api('/api/admin/work-center');
-    const items=d.items||[];
-    $('#workBox').outerHTML=`<div id="workBox"><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${[['Yêu cầu chờ',d.counts.pending_requests],['Tài khoản cần chú ý',d.counts.account_attention],['Thẻ sắp hết hạn',d.counts.expiring_cards],['Hồ sơ thiếu thông tin',d.counts.incomplete_profiles]].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div><div class="card"><div class="section-title"><h2>Danh sách việc cần xử lý</h2></div>${items.length?`<div class="table-wrap"><table><thead><tr><th>Loại việc</th><th>Nội dung</th><th>Đối tượng</th><th>Thời gian</th><th></th></tr></thead><tbody>${items.map(x=>`<tr><td>${esc(x.kind_label)}</td><td><b>${esc(x.title)}</b><div class="meta">${esc(x.detail||'')}</div></td><td>${esc(x.target||'—')}</td><td>${esc(x.created_at||'')}</td><td><button class="secondary" data-work-view="${esc(x.target_view||'admin-members')}">Mở</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Hiện không có việc cần xử lý.</div>'}</div></div>`;
-    $$('[data-work-view]').forEach(b=>b.onclick=()=>navigate(b.dataset.workView));
+    const host=$('#workBox');if(!host)return;
+    host.innerHTML='<div class="empty">Đang tải dữ liệu thực tế...</div>';
+    if(activeWTab==='queue'){
+      const [d,gov]=await Promise.all([api('/api/admin/work-center'),api('/api/admin/governance/overview').catch(()=>null)]);
+      const items=d.items||[];
+      const anom=gov?.anomalies||{};
+      host.innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${[['Yêu cầu chờ',d.counts.pending_requests],['Tài khoản cần chú ý',d.counts.account_attention],['Thẻ sắp hết hạn',d.counts.expiring_cards],['Hồ sơ thiếu thông tin',d.counts.incomplete_profiles]].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div>
+      <div class="card" style="margin-bottom:14px"><h2>Phát hiện bất thường nghiệp vụ &amp; Xung đột trách nhiệm (P4.03, P4.05)</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="card stat"><span>Hồ sơ chờ &gt; 48h</span><strong>${Number(anom.stuck_requests_over_48h||0)}</strong></div><div class="card stat"><span>Thành viên thiếu CCCD/Email</span><strong>${Number(anom.incomplete_active_people||0)}</strong></div><div class="card stat"><span>Thẻ quá hạn cần đồng bộ</span><strong>${Number(anom.expired_cards_still_marked_active||0)}</strong></div><div class="card stat"><span>Xung đột tự đánh giá (SoD)</span><strong>${Number(anom.sod_self_evaluation_conflicts||0)}</strong></div></div></div>
+      <div class="card"><div class="section-title"><h2>Danh sách việc cần xử lý</h2></div>${items.length?`<div class="table-wrap"><table><thead><tr><th>Loại việc</th><th>Nội dung</th><th>Đối tượng</th><th>Thời gian</th><th></th></tr></thead><tbody>${items.map(x=>`<tr><td>${esc(x.kind_label)}</td><td><b>${esc(x.title)}</b><div class="meta">${esc(x.detail||'')}</div></td><td>${esc(x.target||'—')}</td><td>${esc(x.created_at||'')}</td><td><button class="secondary" data-work-view="${esc(x.target_view||'admin-members')}">Mở</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Hiện không có việc cần xử lý.</div>'}</div>`;
+      $$('[data-work-view]').forEach(b=>b.onclick=()=>goView(b.dataset.workView));
+    }else if(activeWTab==='support'){
+      const d=await api('/api/admin/support-tickets');
+      const rows=d.items||[];
+      host.innerHTML=`<div class="section-title"><div><h2>Tiếp nhận &amp; Xử lý Yêu cầu Hỗ trợ Nghiệp vụ (P7.09)</h2><p class="muted">Theo dõi trạng thái xử lý, người phụ trách và kết quả đóng yêu cầu trên dữ liệu thật.</p></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Mã phiếu</th><th>Người gửi</th><th>Danh mục</th><th>Nội dung</th><th>Trạng thái</th><th>Phản hồi / Kết quả</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.ticket_code)}</b></td><td>${esc(x.full_name||'—')}<div class="meta">${esc(x.member_code||x.email||'')}</div></td><td>${esc(x.category)}</td><td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div></td><td><span class="badge ${x.status==='completed'?'ok':'warn'}">${esc(statusVi(x.status))}</span></td><td>${esc(x.resolution_note||x.closed_reason||'—')}</td><td><button class="secondary" data-ticket-resolve="${esc(x.id)}">Cập nhật xử lý</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có yêu cầu hỗ trợ nào.</td></tr>'}</tbody></table></div>`;
+      $$('[data-ticket-resolve]').forEach(b=>b.onclick=()=>{
+        const row=rows.find(r=>r.id===b.dataset.ticketResolve);if(!row)return;
+        modal('Xử lý yêu cầu hỗ trợ · '+esc(row.ticket_code),`<form id="resolveTicketForm" class="form-grid"><label>Trạng thái<select name="status"><option value="in_progress" ${row.status==='in_progress'?'selected':''}>Đang xử lý</option><option value="responded" ${row.status==='responded'?'selected':''}>Đã phản hồi</option><option value="completed" ${row.status==='completed'?'selected':''}>Hoàn thành / Đóng phiếu</option></select></label><label>Mức ưu tiên<select name="priority"><option value="normal">Bình thường</option><option value="high">Cao</option><option value="urgent">Khẩn cấp</option></select></label><label>Nội dung phản hồi / Kết quả xử lý *<textarea name="resolution_note" rows="4" required>${esc(row.resolution_note||'')}</textarea></label><label>Lý do đóng yêu cầu<input name="closed_reason" value="${esc(row.closed_reason||'Đã giải quyết xong')}"></label><button class="primary">Lưu kết quả xử lý</button></form>`);
+        $('#resolveTicketForm').onsubmit=async e=>{e.preventDefault();const payload=Object.fromEntries(new FormData(e.target));await api('/api/admin/support-tickets/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify(payload)});$('#modal')?.remove();toast('Đã cập nhật phiếu hỗ trợ.');await load()};
+      });
+    }else if(activeWTab==='workflows'){
+      const d=await api('/api/admin/governance/registry');
+      const items=(d.items||[]).filter(x=>['workflow_def','workflow_change','workflow_exception','sod_rule'].includes(x.domain_group));
+      host.innerHTML=`<div class="section-title"><div><h2>Điều phối Quy trình, Phân tách nhiệm vụ (SoD) &amp; Ngoại lệ (P4.01–P4.08)</h2><p class="muted">Quản lý phiên bản quy trình, quy tắc phân tách người lập/người duyệt và lịch sử ngoại lệ có phê duyệt.</p></div><button class="primary" id="newWfEntry">Thêm mục quy trình / ngoại lệ</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Tóm tắt &amp; Bằng chứng</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">Nguồn: ${esc(x.evidence_ref||'—')}</div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có bản ghi quy trình.</td></tr>'}</tbody></table></div>`;
+      $('#newWfEntry').onclick=()=>openGovernanceModal(['workflow_def','workflow_change','workflow_exception','sod_rule'],load);
+    }else if(activeWTab==='knowledge'){
+      const d=await api('/api/admin/governance/registry');
+      const items=(d.items||[]).filter(x=>['knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment','ops_lesson'].includes(x.domain_group));
+      host.innerHTML=`<div class="section-title"><div><h2>Tri thức Tổ chức, Đồ thị Tri thức, Mô phỏng &amp; Quản trị AI (P5.01–P5.14)</h2><p class="muted">Lưu trữ hướng dẫn chính thức có nguồn xác minh, phân biệt rõ kịch bản mô phỏng với dữ liệu thực tế.</p></div><button class="primary" id="newKnEntry">Thêm tri thức / kịch bản mô phỏng</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Nội dung &amp; Dẫn nguồn</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">Căn cứ: ${esc(x.evidence_ref||'—')}</div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có mục tri thức nào.</td></tr>'}</tbody></table></div>`;
+      $('#newKnEntry').onclick=()=>openGovernanceModal(['knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment','ops_lesson'],load);
+    }else if(activeWTab==='capabilities'){
+      const d=await api('/api/admin/governance/registry');
+      const items=(d.items||[]).filter(x=>['capability_map','case_lifecycle','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio','csr_program','esd_program'].includes(x.domain_group));
+      host.innerHTML=`<div class="section-title"><div><h2>Năng lực Nghiệp vụ Chuyên sâu, SLA, Chất lượng, Rủi ro &amp; Danh mục CSR/ESD (P6.23–P6.24, P7.01–P7.20)</h2><p class="muted">Quản lý bản đồ năng lực, cam kết thời hạn (SLA), chất lượng đầu ra, căn cứ quyết định, danh mục rủi ro và chương trình sáng kiến.</p></div><button class="primary" id="newCapEntry">Thêm hồ sơ năng lực / rủi ro / sáng kiến</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Mô tả &amp; Bằng chứng</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">Tham chiếu: ${esc(x.evidence_ref||'—')}</div></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có dữ liệu.</td></tr>'}</tbody></table></div>`;
+      $('#newCapEntry').onclick=()=>openGovernanceModal(['capability_map','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio','csr_program','esd_program'],load);
+    }
   };
+  $$('#workCenterTabs [data-wtab]').forEach(b=>b.onclick=()=>{
+    $$('#workCenterTabs [data-wtab]').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');activeWTab=b.dataset.wtab;load();
+  });
   $('#workRefresh').onclick=load; await load();
 }
 
+function openGovernanceModal(domains,onDone){
+  modal('Thêm mục Sổ đăng ký Quản trị & Nghiệp vụ',`<form id="govCreateForm" class="form-grid"><label>Phân nhóm nghiệp vụ<select name="domain_group">${domains.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('')}</select></label><label>Mã định danh duy nhất *<input name="code" required placeholder="Ví dụ: SLA-2026-01"></label><label>Tiêu đề *<input name="title" required></label><label>Phiên bản<input name="version_label" value="1.0"></label><label>Trạng thái<select name="status"><option value="active">Đang hiệu lực (active)</option><option value="draft">Bản nháp (draft)</option><option value="pending_verification">Chờ xác minh (pending_verification)</option></select></label><label>Nguồn căn cứ / Bằng chứng<input name="evidence_ref" placeholder="URL hoặc mã văn bản/hồ sơ"></label><label style="grid-column:1/-1">Tóm tắt nội dung *<textarea name="summary" rows="3" required></textarea></label><button class="primary">Lưu vào sổ đăng ký</button></form>`);
+  $('#govCreateForm').onsubmit=async e=>{
+    e.preventDefault();
+    try{
+      await api('/api/admin/governance/registry',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+      $('#modal')?.remove();toast('Đã lưu mục quản trị mới.');if(onDone)await onDone();
+    }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+  };
+}
+
 async function renderAdminReports(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">DỮ LIỆU VẬN HÀNH</div><h1>Báo cáo & thống kê</h1><p class="muted">Số liệu được tính trực tiếp từ dữ liệu thành viên, tài khoản, đơn vị và thẻ.</p></div><button class="secondary" id="reportRefresh">Làm mới</button></div><div id="reportBox" class="card">Đang tải...</div>`;
-  const load=async()=>{const d=await api('/api/admin/reports');$('#reportBox').innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${Object.entries(d.summary||{}).map(([k,v])=>`<div class="card stat"><span>${esc(v.label)}</span><strong>${v.value}</strong></div>`).join('')}</div><div class="section-grid"><div class="card"><h2>Thành viên theo trạng thái</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.member_status||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div><div class="card"><h2>Thành viên theo đơn vị</h2><div class="table-wrap"><table><thead><tr><th>Đơn vị</th><th>Số lượng</th></tr></thead><tbody>${(d.orgs||[]).map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div></div><div class="card" style="margin-top:14px"><h2>Thẻ thành viên</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.cards||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div>`};
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">DỮ LIỆU VẬN HÀNH &amp; HỖ TRỢ QUYẾT ĐỊNH (P5.03, P5.13)</div><h1>Báo cáo &amp; thống kê</h1><p class="muted">Số liệu được tính trực tiếp từ dữ liệu thành viên, tài khoản, đơn vị, thẻ và nhật ký tuân thủ.</p></div><button class="secondary" id="reportRefresh">Làm mới</button></div><div id="reportBox" class="card">Đang tải...</div>`;
+  const load=async()=>{const [d,gov]=await Promise.all([api('/api/admin/reports'),api('/api/admin/governance/overview').catch(()=>null)]);$('#reportBox').innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${Object.entries(d.summary||{}).map(([k,v])=>`<div class="card stat"><span>${esc(v.label)}</span><strong>${v.value}</strong></div>`).join('')}</div>${gov?`<div class="card" style="margin-bottom:14px"><h2>Chỉ số Pháp lý, OTP &amp; Email thực tế (P6.10, P6.19, P6.44)</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="card stat"><span>Bản ghi đồng ý pháp lý</span><strong>${gov.legal_consent.total}</strong></div><div class="card stat"><span>Đã xác minh OTP Email</span><strong>${gov.otp_center.verified}/${gov.otp_center.total}</strong></div><div class="card stat"><span>Email đã gửi thành công</span><strong>${gov.email_center.sent}/${gov.email_center.total_logs}</strong></div><div class="card stat"><span>Sự kiện bảo mật ghi nhận</span><strong>${gov.security_events_total}</strong></div></div><p class="muted" style="margin-top:10px;font-size:12px">Ghi chú giải thích (P5.13): Toàn bộ số liệu trên được truy vấn trực tiếp từ cơ sở dữ liệu D1 hiện tại; không sử dụng dữ liệu mẫu. Trạng thái gửi email phụ thuộc vào cấu hình khóa <code>RESEND_API_KEY</code> trên môi trường vận hành.</p></div>`:''}<div class="section-grid"><div class="card"><h2>Thành viên theo trạng thái</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.member_status||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div><div class="card"><h2>Thành viên theo đơn vị</h2><div class="table-wrap"><table><thead><tr><th>Đơn vị</th><th>Số lượng</th></tr></thead><tbody>${(d.orgs||[]).map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div></div><div class="card" style="margin-top:14px"><h2>Thẻ thành viên</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.cards||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div>`};
   $('#reportRefresh').onclick=load; await load();
 }
 
 async function renderAdminSystem(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ CẤP CAO</div><h1>Cấu hình hệ thống</h1><p class="muted">Các thiết lập vận hành, bộ lọc đã lưu và tình trạng dịch vụ.</p></div></div><div class="section-grid"><div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu bộ lọc quản trị để không phải chọn lại mỗi lần.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div><div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div></div>`;
-  const refresh=async()=>{let f={items:[]},h={database:'unknown',schema_version:null,required_schema_version:16,schema_status:'unknown',missing_tables:[],missing_columns:[],r2_binding:false,r2_read_status:'not_configured',r2_write_status:'not_tested',email_binding:false,email_status:'not_configured'};let filterError='',healthError='';try{f=await api('/api/admin/saved-filters')}catch(e){filterError=e.message}try{h=await api('/api/admin/system-health')}catch(e){healthError=e.message}$('#savedFilters').innerHTML=(f.items||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div class="meta">${esc(x.view)} · ${esc(x.query||'Không có điều kiện')}</div></div><button class="danger" data-filter-del="${esc(x.id)}">Xóa</button></div>`).join('')||(filterError?`<div class="service-warning">Không tải được bộ lọc: ${esc(filterError)}</div>`:'<div class="empty">Chưa có bộ lọc đã lưu.</div>');const version=Number(h.schema_version||0),required=Number(h.required_schema_version||16),missing=Array.isArray(h.missing_tables)?h.missing_tables:[],missingColumns=Array.isArray(h.missing_columns)?h.missing_columns:[],migrationBehind=h.schema_status==='outdated'||version<required||missing.length>0||missingColumns.length>0;const dbLabel=h.database==='ok'?'Kết nối đã kiểm tra':h.database==='error'?'Không kết nối được':'Chưa xác minh';const r2Label=h.r2_read_status==='read_ok'?'Đọc danh sách được · chưa thử tải lên/xóa':h.r2_read_status==='read_failed'?'Không đọc được kho tệp':h.r2_read_status==='binding_present_test_unavailable'?'Binding có sẵn · chưa kiểm tra đọc/ghi':'Chưa được kiểm tra';const emailLabel=h.email_status==='configured_delivery_not_tested'?'Đã khai báo khóa · chưa kiểm tra gửi thực tế':'Chưa cấu hình';$('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b class="${h.database==='ok'?'status-ok':'status-bad'}">${dbLabel}</b></div><div class="list-row"><span>Phiên bản lược đồ ghi nhận</span><b>${esc(h.schema_version??'Chưa xác định')}</b></div><div class="list-row"><span>Phiên bản yêu cầu</span><b>${required}</b></div><div class="list-row"><span>Đối chiếu cấu trúc bảng</span><b class="${migrationBehind?'status-bad':'status-ok'}">${migrationBehind?'Chưa đạt yêu cầu':'Đã đối chiếu bảng bắt buộc'}</b></div>${missing.length?`<div class="service-warning"><b>Thiếu ${missing.length} bảng bắt buộc:</b><div class="health-table-list">${missing.map(esc).join(' · ')}</div></div>`:''}${missingColumns.length?`<div class="service-warning"><b>Thiếu ${missingColumns.length} cột bắt buộc:</b><div class="health-table-list">${missingColumns.map(esc).join(' · ')}</div></div>`:''}<div class="list-row"><span>Kho tệp R2</span><b>${esc(r2Label)}</b></div><div class="list-row"><span>Email</span><b>${esc(emailLabel)}</b></div>${migrationBehind?'<div class="service-warning"><b>Cần cập nhật cơ sở dữ liệu.</b> Một số bảng hoặc migration còn thiếu. Hãy sao lưu D1, đối chiếu lịch sử migration và áp dụng migration theo thứ tự trước khi sử dụng QR, thẻ hoặc lịch sử cấp phát.</div>':''}${healthError?`<div class="service-warning">Không đọc được tình trạng hệ thống: ${esc(healthError)}</div>`:''}<div class="meta health-footnote">Trạng thái đọc R2 không chứng minh tải lên/xóa hoạt động; trạng thái email chỉ phản ánh cấu hình, không phải email đã gửi thành công.</div>`;$$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()})}
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ TỔNG THỂ &amp; BỀN VỮNG (P6.01–P6.52)</div><h1>Cấu hình hệ thống &amp; Trung tâm Kiểm soát P6</h1><p class="muted">Quản trị tình trạng dịch vụ, Trung tâm Email/OTP, Sổ đăng ký nghĩa vụ pháp lý, Kiểm tra gói ZIP và Cổng kiểm tra trước phát hành.</p></div></div>
+  <div class="section-grid">
+    <div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu bộ lọc quản trị để không phải chọn lại mỗi lần.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div>
+    <div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div>
+  </div>
+  <div class="card" style="margin-top:14px"><h2>Cổng Kiểm tra Trước Khi Phát hành (P6.52) &amp; Trung tâm Email/OTP (P6.19, P6.44)</h2><div id="releaseGateBox">Đang tải...</div></div>
+  <div class="card" style="margin-top:14px"><h2>Sổ đăng ký Nghĩa vụ Pháp lý &amp; Danh mục Cổng Dịch vụ (P6.04, P6.15)</h2><div id="legalAndServiceBox">Đang tải...</div></div>`;
+  const refresh=async()=>{let f={items:[]},h={database:'unknown',schema_version:null,required_schema_version:16,schema_status:'unknown',missing_tables:[],missing_columns:[],r2_binding:false,r2_read_status:'not_configured',r2_write_status:'not_tested',email_binding:false,email_status:'not_configured'};let filterError='',healthError='';try{f=await api('/api/admin/saved-filters')}catch(e){filterError=e.message}try{h=await api('/api/admin/system-health')}catch(e){healthError=e.message}$('#savedFilters').innerHTML=(f.items||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div class="meta">${esc(x.view)} · ${esc(x.query||'Không có điều kiện')}</div></div><button class="danger" data-filter-del="${esc(x.id)}">Xóa</button></div>`).join('')||(filterError?`<div class="service-warning">Không tải được bộ lọc: ${esc(filterError)}</div>`:'<div class="empty">Chưa có bộ lọc đã lưu.</div>');const version=Number(h.schema_version||0),required=Number(h.required_schema_version||16),missing=Array.isArray(h.missing_tables)?h.missing_tables:[],missingColumns=Array.isArray(h.missing_columns)?h.missing_columns:[],migrationBehind=h.schema_status==='outdated'||version<required||missing.length>0||missingColumns.length>0;const dbLabel=h.database==='ok'?'Kết nối đã kiểm tra':h.database==='error'?'Không kết nối được':'Chưa xác minh';const r2Label=h.r2_read_status==='read_ok'?'Đọc danh sách được · chưa thử tải lên/xóa':h.r2_read_status==='read_failed'?'Không đọc được kho tệp':h.r2_read_status==='binding_present_test_unavailable'?'Binding có sẵn · chưa kiểm tra đọc/ghi':'Chưa được kiểm tra';const emailLabel=h.email_status==='configured_delivery_not_tested'?'Đã khai báo khóa · chưa kiểm tra gửi thực tế':'Chưa cấu hình';$('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b class="${h.database==='ok'?'status-ok':'status-bad'}">${dbLabel}</b></div><div class="list-row"><span>Phiên bản lược đồ ghi nhận</span><b>${esc(h.schema_version??'Chưa xác định')}</b></div><div class="list-row"><span>Phiên bản yêu cầu</span><b>${required}</b></div><div class="list-row"><span>Đối chiếu cấu trúc bảng</span><b class="${migrationBehind?'status-bad':'status-ok'}">${migrationBehind?'Chưa đạt yêu cầu':'Đã đối chiếu bảng bắt buộc'}</b></div>${missing.length?`<div class="service-warning"><b>Thiếu ${missing.length} bảng bắt buộc:</b><div class="health-table-list">${missing.map(esc).join(' · ')}</div></div>`:''}${missingColumns.length?`<div class="service-warning"><b>Thiếu ${missingColumns.length} cột bắt buộc:</b><div class="health-table-list">${missingColumns.map(esc).join(' · ')}</div></div>`:''}<div class="list-row"><span>Kho tệp R2</span><b>${esc(r2Label)}</b></div><div class="list-row"><span>Email</span><b>${esc(emailLabel)}</b></div>${migrationBehind?'<div class="service-warning"><b>Cần cập nhật cơ sở dữ liệu.</b> Một số bảng hoặc migration còn thiếu. Hãy sao lưu D1, đối chiếu lịch sử migration và áp dụng migration theo thứ tự trước khi sử dụng QR, thẻ hoặc lịch sử cấp phát.</div>':''}${healthError?`<div class="service-warning">Không đọc được tình trạng hệ thống: ${esc(healthError)}</div>`:''}<div class="meta health-footnote">Trạng thái đọc R2 không chứng minh tải lên/xóa hoạt động; trạng thái email chỉ phản ánh cấu hình, không phải email đã gửi thành công.</div>`;$$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()});
+  try{
+    const [rel,em,reg]=await Promise.all([api('/api/admin/release-readiness'),api('/api/admin/email-center'),api('/api/admin/governance/registry')]);
+    $('#releaseGateBox').innerHTML=`<div class="stack-list">${(rel.gates||[]).map(g=>`<div class="list-row"><span><b>${esc(g.title)}</b><div class="meta">${esc(g.detail)}</div></span><b class="${g.status==='passed'?'status-ok':'status-bad'}">${esc(g.status)}</b></div>`).join('')}</div><p class="meta" style="margin-top:10px">${esc(em.mailbox_note||'')}</p>`;
+    const legals=(reg.items||[]).filter(x=>['legal_obligation','service_catalog'].includes(x.domain_group));
+    $('#legalAndServiceBox').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Nhóm</th><th>Mã</th><th>Tên mục / Văn bản</th><th>Trạng thái</th><th>Chi tiết &amp; Nguồn</th></tr></thead><tbody>${legals.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">${esc(x.evidence_ref||'')}</div></td></tr>`).join('')}</tbody></table></div>`;
+  }catch{}}
   $('#savedFilterForm').onsubmit=async e=>{e.preventDefault();const x=Object.fromEntries(new FormData(e.target));await api('/api/admin/saved-filters',{method:'POST',body:JSON.stringify(x)});e.target.reset();toast('Đã lưu bộ lọc.');await refresh()}; await refresh();
 }
 
