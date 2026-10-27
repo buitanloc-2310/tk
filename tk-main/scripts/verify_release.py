@@ -287,6 +287,34 @@ for marker, name in [
         fail(name, 'deep operational marker missing')
 
 
+
+# Supplement I-VIII, SK Events & GFI Chat/Community contract checks
+for marker, name in [
+    ('account_type_configs', 'account types & duration config table'),
+    ('account_lifecycle', 'account lifecycle & expiration tracking table'),
+    ('/api/public/trial-register', 'trial 24h/48h OTP-verified activation endpoint'),
+    ('/api/admin/accounts-center', 'admin account lifecycle management endpoint'),
+    ('/api/admin/forms', 'dynamic registration form builder endpoint'),
+    ('/api/admin/submissions', 'centralized registration submissions endpoint'),
+    ('signature_records', 'electronic signature & hash evidence table'),
+    ('data_policies', 'versioned data privacy & terms policy table'),
+    ('/api/admin/sk-events', 'SK event lifecycle & 3-decision separation endpoint'),
+    ('SOD_SELF_APPROVAL_FORBIDDEN', 'SK event self-approval SoD block'),
+    ('/api/sk-attendance/checkin', 'SK event QR session check-in endpoint'),
+    ('/api/chat/conversations', 'GFI internal 1-1 & group messaging endpoint'),
+    ('/api/community/posts', 'GFI internal community & moderated announcement endpoint'),
+]:
+    if marker in front + back + (ROOT/'migrations/0017_skyfirst_operations_center_p1_p7.sql').read_text(encoding='utf-8'):
+        ok(name)
+    else:
+        fail(name, 'supplement/SK/GFI marker missing')
+
+# Verify zero voice/video call or WebRTC APIs in active codebase
+if re.search(r'RTCPeerConnection|navigator\.mediaDevices\.getUserMedia', front + back):
+    fail('no voice/video calls or WebRTC', 'WebRTC/call API detected')
+else:
+    ok('no voice/video calls or WebRTC in messaging module')
+
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')
     for e in errors: print('-',e)

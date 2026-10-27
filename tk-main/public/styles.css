@@ -385,3 +385,5 @@ button{line-height:1.35;white-space:normal}
 .tabs button:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #60a5fa;outline-offset:2px}
 .tabs button:disabled,button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:640px){.tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}.tabs button{font-size:12.5px;padding:8px 12px}}
+
+.badge{white-space:nowrap}

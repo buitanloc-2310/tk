@@ -1,0 +1,48 @@
+{
+  "appId": "vn.io.skyfirst.nghiepvu.desktop",
+  "productName": "Trung tam Nghiep vu So Sky First",
+  "copyright": "Copyright © 2026 Sky First Network",
+  "directories": {
+    "output": "dist-desktop"
+  },
+  "files": [
+    "desktop/**/*",
+    "public/sfn-logo.png",
+    "public/index.html",
+    "public/styles.css",
+    "public/app.js",
+    "public/brand.js"
+  ],
+  "extraMetadata": {
+    "main": "desktop/main.cjs"
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/sfn-logo.png",
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  },
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["x64", "arm64"]
+      }
+    ],
+    "category": "public.app-category.business",
+    "icon": "public/sfn-logo.png",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false
+  }
+}

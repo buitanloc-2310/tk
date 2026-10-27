@@ -9,7 +9,7 @@ import readline from 'node:readline';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 
 // Dual-engine SQLite harness: uses built-in node:sqlite on Node >= 22.13, or persistent in-memory Python sqlite3 process on Node 18/20.
-let dbExec, dbGet, dbAll, dbRun, closeDb=()=>{};
+let dbExec, dbGet, dbAll, dbRun, dbBatch, closeDb=()=>{};
 let nativeSqlite=null;
 try{nativeSqlite=await import('node:sqlite')}catch{}
 if(nativeSqlite?.DatabaseSync){
@@ -21,6 +21,7 @@ if(nativeSqlite?.DatabaseSync){
   dbGet=async(sql,...args)=>{const r=getStmt(sql).get(...normArgs(args));return r?{...r}:null;};
   dbAll=async(sql,...args)=>getStmt(sql).all(...normArgs(args)).map(r=>({...r}));
   dbRun=async(sql,...args)=>getStmt(sql).run(...normArgs(args));
+  dbBatch=async(items)=>items.map(x=>getStmt(x.__sql).run(...normArgs(x.__args)));
 }else{
   const proc=spawn('python3',['-u','-c',`
 import sqlite3, sys, json
@@ -48,6 +49,13 @@ for line in sys.stdin:
             cur = con.execute(sql, args)
             con.commit()
             print(json.dumps({'ok': True, 'changes': cur.rowcount, 'lastInsertRowid': cur.lastrowid}), flush=True)
+        elif op == 'batch':
+            out = []
+            for item in req.get('items', []):
+                cur = con.execute(item['sql'], item.get('args', []))
+                out.append({'changes': cur.rowcount, 'lastInsertRowid': cur.lastrowid})
+            con.commit()
+            print(json.dumps({'ok': True, 'results': out}), flush=True)
     except Exception as e:
         print(json.dumps({'ok': False, 'error': str(e)}), flush=True)
 `]);
@@ -63,17 +71,18 @@ for line in sys.stdin:
   dbGet=async(sql,...args)=>(await send({op:'get',sql,args:args.map(x=>x===undefined?null:x)})).data;
   dbAll=async(sql,...args)=>(await send({op:'all',sql,args:args.map(x=>x===undefined?null:x)})).data;
   dbRun=async(sql,...args)=>await send({op:'run',sql,args:args.map(x=>x===undefined?null:x)});
+  dbBatch=async(items)=>(await send({op:'batch',items:items.map(x=>({sql:x.__sql,args:x.__args.map(v=>v===undefined?null:v)}))})).results;
 }
 
 const migFiles=[...new Set([...readdirSync('migrations').filter(x=>x.endsWith('.sql')),...(existsSync('migrations/0017_skyfirst_operations_center_p1_p7.sql')?['0017_skyfirst_operations_center_p1_p7.sql']:[])])].sort();
 for(const f of migFiles)await dbExec(readFileSync('migrations/'+f,'utf8'));
 
-const DB={prepare(sql){let args=[];const q={bind(...a){args=a;return q},async first(){return await dbGet(sql,...args)},async all(){return {results:await dbAll(sql,...args)}},async run(){return await dbRun(sql,...args)}};return q},async batch(q){const out=[];for(const x of q)out.push(await x.run());return out}};
+const DB={prepare(sql){let args=[];const q={__sql:sql,__args:args,bind(...a){args=a;q.__args=a;return q},async first(){return await dbGet(sql,...args)},async all(){return {results:await dbAll(sql,...args)}},async run(){return await dbRun(sql,...args)}};return q},async batch(q){return await dbBatch(q)}};
 
 await dbExec(`INSERT INTO people(id,member_code,full_name) VALUES('p','T','Test'); INSERT INTO accounts(id,person_id,username,password_hash,password_salt,force_password_change) VALUES('a','p','test','x','x',0); INSERT INTO account_scopes(id,account_id,role_id,org_node_id) VALUES('scope','a','role_super_admin','org_sfn');`);
 await dbRun("INSERT INTO sessions(id,account_id,token_hash,expires_at) VALUES('s','a',?,datetime('now','+1 day'))",createHash('sha256').update('test').digest('hex'));
 const src=readFileSync('src/index.js','utf8');const {default:Worker,api}=await import('../src/index.js');
-let checks=0;async function call(path,method='GET',b,env={DB}){const req=new Request('https://nghiepvu.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=test','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const r=await api(req,env,new URL(req.url));return {status:r.status,...await r.json()}}
+let checks=0;async function call(path,method='GET',b,env={DB}){const req=new Request('https://nghiepvu.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=test','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const r=await api(req,env,new URL(req.url));const j=await r.json();return {httpStatus:r.status,status:r.status,...j}}
 
 // 1. Existing Organization & RBAC checks (84 baseline checks)
 let r=await call('/api/admin/org','POST',{code:'SF-DMC',name:'Wrong',node_type:'digital_member_center'});assert.equal(r.status,200);const id=r.id;assert.equal((await dbGet('SELECT name FROM org_nodes WHERE id=?',id)).name,'Trung tâm Nghiệp vụ Số Sky First');checks++;
@@ -562,6 +571,348 @@ function buildTestZip(entries){
 
   const dc=await call('/api/admin/data-consistency','GET');
   assert.equal(dc.status,200);assert.equal(dc.ok,true);assert.equal(dc.checks.length,5);checks+=3;
+}
+
+
+// =========================================================
+// 10. SUPPLEMENT I–VIII: ACCOUNT LIFECYCLE (24h, 48h, 12m/1y), DYNAMIC FORMS, SUBMISSIONS, ATTACHMENTS, SIGNATURES & POLICIES
+// =========================================================
+{
+  // 10.1 Account types & equivalence of 12 months / 1 year
+  const at=await call('/api/public/account-types','GET');
+  assert.equal(at.status,200);assert(at.items.length>=4);
+  assert(at.items.some(x=>x.code==='trial_24h'&&x.duration_hours===24));
+  assert(at.items.some(x=>x.code==='trial_48h'&&x.duration_hours===48));
+  assert(at.items.some(x=>x.code==='annual_12m_1y'&&x.duration_months===12));
+  assert(at.equivalence_note.includes('12 tháng')&&at.equivalence_note.includes('1 năm'));
+  checks+=5;
+
+  // 10.2 Trial 24h account registration after OTP verification -> activated with exact 24h expiry, NO Admin access
+  const trialEmail='trial24h@skyfirst.io.vn';
+  const trialOtp='112233';
+  const trialHash=createHash('sha256').update(trialEmail+'|account_request|'+trialOtp).digest('hex');
+  await dbRun("INSERT INTO email_otp_tokens(id,email,purpose,otp_hash,attempts,max_attempts,expires_at) VALUES('otp_t24',?,'account_request',?,0,5,datetime('now','+10 minutes'))",trialEmail,trialHash);
+  const vRes=await call('/api/public/email-otp/verify','POST',{email:trialEmail,otp:trialOtp,purpose:'account_request'});
+  assert.equal(vRes.status,200);const t24OtpToken=vRes.otp_verification_token;checks++;
+
+  // Missing consent rejected
+  r=await call('/api/public/trial-register','POST',{full_name:'Trial User 24h',email:trialEmail,phone:'0901112233',password:'TrialPass2026!',account_type_code:'trial_24h',otp_verification_token:t24OtpToken,read_acknowledged:'1',terms_accepted:'1',privacy_consent:'0'});
+  assert.equal(r.httpStatus,400);assert.equal(r.error,'CONSENT_REQUIRED');checks+=2;
+
+  // Valid trial 24h activation
+  const t24=await call('/api/public/trial-register','POST',{full_name:'Trial User 24h',email:trialEmail,phone:'0901112233',password:'TrialPass2026!',account_type_code:'trial_24h',otp_verification_token:t24OtpToken,read_acknowledged:'1',terms_accepted:'1',privacy_consent:'1'});
+  assert.equal(t24.status,201);assert.equal(t24.account_type_code,'trial_24h');assert.equal(t24.admin_access_granted,false);assert(t24.activated_at&&t24.expires_at);checks+=4;
+
+  // Create a session for the 24h user and verify they can call /api/me but CANNOT access Admin (/api/admin/accounts-center -> 403)
+  await dbRun("INSERT INTO sessions(id,account_id,token_hash,expires_at) VALUES('ses_t24',?,?,datetime('now','+1 day'))",t24.account_id,createHash('sha256').update('t24_token').digest('hex'));
+  const callAsT24=async(path,method='GET',b)=>{const rq=new Request('https://nghiepvu.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=t24_token','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const rs=await api(rq,{DB,FILES},new URL(rq.url));const j=await rs.json();return {httpStatus:rs.status,status:rs.status,...j}};
+  const t24Me=await callAsT24('/api/me');
+  assert.equal(t24Me.status,200);assert.equal(t24Me.is_super,false);checks+=2;
+  const t24Admin=await callAsT24('/api/admin/accounts-center');
+  assert.equal(t24Admin.status,403);checks++;
+
+  // Expire the 24h account via Admin lifecycle API -> verify backend immediately blocks /api/me (401) AND /api/auth/login (403 ACCOUNT_EXPIRED)
+  r=await call(`/api/admin/accounts-center/${encodeURIComponent(t24.account_id)}/lifecycle`,'PATCH',{action:'expire',reason:'Kiểm thử hết hạn 24 giờ'});
+  assert.equal(r.httpStatus,200);assert.equal(r.lifecycle.lifecycle_status,'expired');checks+=2;
+  const t24AfterExp=await callAsT24('/api/me');
+  assert.equal(t24AfterExp.status,401);checks++;
+  const t24LoginAfterExp=await call('/api/auth/login','POST',{login:t24.username,password:'TrialPass2026!'});
+  assert.equal(t24LoginAfterExp.status,403);assert.equal(t24LoginAfterExp.error,'ACCOUNT_EXPIRED');checks+=2;
+
+  // Admin renews the expired account to 48h -> user can access again
+  r=await call(`/api/admin/accounts-center/${encodeURIComponent(t24.account_id)}/lifecycle`,'PATCH',{action:'renew',account_type_code:'trial_48h',reason:'Gia hạn lên gói 48 giờ'});
+  assert.equal(r.httpStatus,200);assert.equal(r.lifecycle.account_type_code,'trial_48h');assert.equal(r.lifecycle.lifecycle_status,'active');checks+=3;
+
+  // 10.3 Dynamic Form Builder: Admin creates a new form without editing code
+  const fCreate=await call('/api/admin/forms','POST',{
+    code:'FORM-TECH-2026',
+    slug:'tuyen-ban-cong-nghe-2026',
+    title:'Biểu mẫu Tuyển Cộng tác viên Ban Công nghệ Số',
+    description:'Biểu mẫu động có đính kèm tệp và chữ ký xác nhận.',
+    status:'published',
+    require_attachment:true,
+    require_signature:true,
+    fields:[
+      {code:'full_name',label:'Họ và tên',type:'text',required:true},
+      {code:'email',label:'Email liên hệ',type:'email',required:true},
+      {code:'github_or_portfolio',label:'Liên kết dự án / kinh nghiệm',type:'textarea',required:true}
+    ]
+  });
+  assert.equal(fCreate.httpStatus,201);assert.equal(fCreate.status,'published');assert.equal(fCreate.version,1);const dynFormId=fCreate.id;checks+=2;
+
+  // 10.4 Public user opens form, uploads attachment (valid & invalid), signs, consents, and submits with idempotency
+  const badUploadRes=await api(new Request(`https://nghiepvu.skyfirst.io.vn/api/public/forms/${encodeURIComponent(dynFormId)}/upload`,{method:'POST',headers:{origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/pdf','x-file-name':'fake.pdf'},body:new Uint8Array([1,2,3,4])}),{DB,FILES},new URL(`https://nghiepvu.skyfirst.io.vn/api/public/forms/${encodeURIComponent(dynFormId)}/upload`));
+  assert.equal(badUploadRes.status,400);checks++;
+
+  const validPdfBytes=new Uint8Array(Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF','utf8'));
+  const okUploadRes=await api(new Request(`https://nghiepvu.skyfirst.io.vn/api/public/forms/${encodeURIComponent(dynFormId)}/upload`,{method:'POST',headers:{origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/pdf','x-file-name':'ho-so-nang-luc.pdf'},body:validPdfBytes}),{DB,FILES},new URL(`https://nghiepvu.skyfirst.io.vn/api/public/forms/${encodeURIComponent(dynFormId)}/upload`));
+  const okUploadBody=await okUploadRes.json();
+  assert.equal(okUploadRes.status,201);assert.equal(okUploadBody.check_status,'verified_header');checks+=2;
+
+  // Missing mandatory consent rejected
+  r=await call(`/api/public/forms/${encodeURIComponent(dynFormId)}/submit`,'POST',{
+    applicant_name:'Lê Văn Ứng Viên',
+    applicant_email:'ungvien@skyfirst.io.vn',
+    answers:{full_name:'Lê Văn Ứng Viên',email:'ungvien@skyfirst.io.vn',github_or_portfolio:'5 năm phát triển hệ thống số'},
+    attachments:[okUploadBody],
+    signature:{signature_type:'drawn_canvas',signature_data_url:'data:image/svg+xml;utf8,<svg></svg>',confirmed:'1'},
+    consents:{'SFN-PDPD-NOTICE':'1','SFN-TERMS-USE':'0'}
+  },{DB,FILES});
+  assert.equal(r.httpStatus,400);assert.equal(r.error,'MANDATORY_POLICY_CONSENT_MISSING');checks+=2;
+
+  // Valid submission with idempotency key
+  const subRes=await call(`/api/public/forms/${encodeURIComponent(dynFormId)}/submit`,'POST',{
+    idempotency_key:'idem-test-001',
+    applicant_name:'Lê Văn Ứng Viên',
+    applicant_email:'ungvien@skyfirst.io.vn',
+    answers:{full_name:'Lê Văn Ứng Viên',email:'ungvien@skyfirst.io.vn',github_or_portfolio:'5 năm phát triển hệ thống số'},
+    attachments:[okUploadBody],
+    signature:{signature_type:'drawn_canvas',signature_data_url:'data:image/svg+xml;utf8,<svg></svg>',confirmed:'1'},
+    consents:{'SFN-PDPD-NOTICE':'1','SFN-TERMS-USE':'1','SFN-OPT-NEWS':'0'}
+  },{DB,FILES});
+  assert.equal(subRes.httpStatus,201);assert.equal(subRes.status,'submitted');assert.equal(subRes.form_version,1);assert(subRes.submission_code&&subRes.signature_id&&subRes.content_version_hash);
+  const subId=subRes.submission_id;checks+=3;
+
+  // Retry with same idempotency_key does NOT create duplicate submission
+  const subRetry=await call(`/api/public/forms/${encodeURIComponent(dynFormId)}/submit`,'POST',{
+    idempotency_key:'idem-test-001',
+    applicant_name:'Lê Văn Ứng Viên',
+    applicant_email:'ungvien@skyfirst.io.vn',
+    answers:{full_name:'Lê Văn Ứng Viên',email:'ungvien@skyfirst.io.vn',github_or_portfolio:'5 năm phát triển hệ thống số'},
+    attachments:[okUploadBody],
+    signature:{signature_type:'drawn_canvas',signature_data_url:'data:image/svg+xml;utf8,<svg></svg>',confirmed:'1'},
+    consents:{'SFN-PDPD-NOTICE':'1','SFN-TERMS-USE':'1'}
+  },{DB,FILES});
+  assert.equal(subRetry.httpStatus,200);assert.equal(subRetry.deduplicated,true);assert.equal(subRetry.submission_id,subId);checks+=3;
+
+  // 10.5 Admin edits the form -> form version becomes v2, while old submission keeps v1 snapshot intact!
+  const fEdit=await call(`/api/admin/forms/${encodeURIComponent(dynFormId)}`,'PATCH',{
+    title:'Biểu mẫu Tuyển CTV Ban Công nghệ Số (Đã nâng cấp v2)',
+    fields:[
+      {code:'full_name',label:'Họ và tên đầy đủ',type:'text',required:true},
+      {code:'email',label:'Email',type:'email',required:true},
+      {code:'new_v2_field',label:'Trường mới ở v2',type:'text',required:true}
+    ]
+  });
+  assert.equal(fEdit.httpStatus,200);assert.equal(fEdit.version,2);checks+=2;
+
+  const subDet1=await call(`/api/admin/submissions/${encodeURIComponent(subId)}`,'GET');
+  assert.equal(subDet1.status,200);assert.equal(subDet1.submission.form_version,1);
+  assert.equal(subDet1.submission.answers.github_or_portfolio,'5 năm phát triển hệ thống số');
+  assert.equal(subDet1.signatures.length,1);assert.equal(subDet1.files.length,1);checks+=5;
+
+  // 10.6 Admin requests supplement -> Applicant submits supplement -> History preserves original answers without overwriting evidence
+  r=await call(`/api/admin/submissions/${encodeURIComponent(subId)}`,'PATCH',{status:'waiting_supplement',supplement_request_note:'Vui lòng bổ sung chứng chỉ chuyên môn.'});
+  assert.equal(r.status,'waiting_supplement');checks++;
+
+  r=await call(`/api/public/submissions/${encodeURIComponent(subRes.submission_code)}/supplement`,'POST',{
+    email:'ungvien@skyfirst.io.vn',
+    answers:{cert_link:'https://nghiepvu.skyfirst.io.vn/verify?code=CERT01'},
+    note:'Đã bổ sung liên kết chứng chỉ'
+  });
+  assert.equal(r.status,'supplement_submitted');assert(r.history_count>=3);checks+=2;
+
+  // Admin approves submission
+  r=await call(`/api/admin/submissions/${encodeURIComponent(subId)}`,'PATCH',{status:'approved',decision_reason:'Hồ sơ đạt yêu cầu sau khi bổ sung'});
+  assert.equal(r.status,'approved');checks++;
+
+  // Close form -> new submissions rejected
+  await call(`/api/admin/forms/${encodeURIComponent(dynFormId)}/close`,'POST',{});
+  r=await call(`/api/public/forms/${encodeURIComponent(dynFormId)}/submit`,'POST',{applicant_name:'Late User',applicant_email:'late@skyfirst.io.vn',answers:{}});
+  assert.equal(r.httpStatus,403);assert.equal(r.error,'FORM_CLOSED_OR_INACTIVE');checks+=2;
+
+  // Unauthorized user cannot view submissions or download private submission attachment
+  await dbRun("INSERT INTO sessions(id,account_id,token_hash,expires_at) VALUES('ses_t24_active',?,?,datetime('now','+1 day'))",t24.account_id,createHash('sha256').update('t24_active_tok').digest('hex'));
+  const unauthSubReq=new Request(`https://nghiepvu.skyfirst.io.vn/api/admin/submissions/${encodeURIComponent(subId)}`,{headers:{cookie:'sfn_session=t24_active_tok',origin:'https://nghiepvu.skyfirst.io.vn'}});
+  assert.equal((await api(unauthSubReq,{DB,FILES},new URL(unauthSubReq.url))).status,403);checks++;
+  const unauthFileReq=new Request(`https://nghiepvu.skyfirst.io.vn${okUploadBody.file_url}`,{headers:{cookie:'sfn_session=t24_active_tok'}});
+  assert.equal((await Worker.fetch(unauthFileReq,{DB,FILES})).status,403);checks++;
+
+  // Policy versioning & Consent withdrawal
+  r=await call('/api/admin/policies','POST',{policy_code:'SFN-PDPD-NOTICE',version_label:'2026.10-SFN-PDPD',title:'Duplicate version',content_summary:'S',content_body:'B'});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'POLICY_VERSION_IMMUTABLE');checks+=2;
+  r=await call('/api/admin/policies','POST',{policy_code:'SFN-PDPD-NOTICE',version_label:'2026.12-SFN-PDPD',title:'Updated Privacy Policy',content_summary:'Cập nhật mục đích mới',content_body:'Nội dung cập nhật',requires_reconsent:true});
+  assert.equal(r.httpStatus,201);checks++;
+  r=await call('/api/public/consent/withdraw','POST',{email:'ungvien@skyfirst.io.vn',policy_code:'SFN-OPT-NEWS',reason:'Không còn nhu cầu nhận bản tin mở rộng'});
+  assert.equal(r.httpStatus,201);assert.equal(r.status,'received');checks+=2;
+}
+
+// =========================================================
+// 11. SUPPLEMENT SK: EVENT MANAGEMENT LIFECYCLE, 3-DECISION SEPARATION, SOD & QR ATTENDANCE
+// =========================================================
+{
+  // 11.1 Mandatory fields check on event draft creation
+  r=await call('/api/admin/sk-events','POST',{name:'Sự kiện thiếu trường'});
+  assert.equal(r.httpStatus,400);assert.equal(r.error,'EVENT_MANDATORY_FIELDS_MISSING');checks+=2;
+
+  // Create valid SK event draft (owned/proposed by 'a')
+  const evCreate=await call('/api/admin/sk-events','POST',{
+    name:'Hội nghị Thường niên Mạng lưới Giáo dục Sky First 2026',
+    purpose:'Tổng kết hoạt động giáo dục cộng đồng và triển khai kế hoạch năm mới',
+    starts_at:'2026-12-01 08:00:00',
+    ends_at:'2026-12-01 17:00:00',
+    location_or_platform:'Trung tâm Hội nghị TP. Hồ Chí Minh',
+    expected_participants:200,
+    max_registrations:250
+  });
+  assert.equal(evCreate.httpStatus,201);assert.equal(evCreate.status,'draft');const skEvId=evCreate.id;checks+=2;
+
+  // Draft event MUST NOT appear on public portal (/api/public/sk-events)
+  let pubEvs=await call('/api/public/sk-events','GET');
+  assert(!pubEvs.items.some(x=>x.id===skEvId));checks++;
+
+  // Unapproved event CANNOT be published or open registration via direct API call
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'PUBLISH_REQUIRES_APPROVAL');checks+=2;
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'open_registration'});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'OPEN_REG_REQUIRES_PUBLISHED');checks+=2;
+
+  // Unapproved event CANNOT issue active QR session
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/qr-sessions`,'POST',{session_name:'Phiên sáng'});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'QR_ISSUANCE_EVENT_NOT_ELIGIBLE');checks+=2;
+
+  // Submit -> Appraise
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'submit'});
+  assert.equal(r.status,'pending_appraisal');checks++;
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'appraise',note:'Hồ sơ đầy đủ, khả thi'});
+  assert.equal(r.status,'pending_approval');checks++;
+
+  // Proposer 'a' attempting to self-approve their own event is BLOCKED by SoD!
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve'});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'SOD_SELF_APPROVAL_FORBIDDEN');checks+=2;
+
+  // Independent approver ('a_rev' created earlier) approves the event
+  const callAsRev=async(path,method='GET',b)=>{const rq=new Request('https://nghiepvu.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=rev_session_token','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const rs=await api(rq,{DB,FILES},new URL(rq.url));const j=await rs.json();return {httpStatus:rs.status,status:rs.status,...j}};
+  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve',note:'Phê duyệt chủ trương tổ chức'});
+  assert.equal(r.status,'approved');assert.equal(r.registration_state,'closed');checks+=2;
+
+  // Approved event STILL does not appear on public portal until explicitly published! (Separation of Approve vs Publish)
+  pubEvs=await call('/api/public/sk-events','GET');
+  assert(!pubEvs.items.some(x=>x.id===skEvId));checks++;
+
+  // Publish event -> Now appears on public portal, but registration is still closed (Separation of Publish vs Open Registration)
+  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
+  assert.equal(r.status,'published');assert.equal(r.registration_state,'closed');checks+=2;
+  pubEvs=await call('/api/public/sk-events','GET');
+  assert(pubEvs.items.some(x=>x.id===skEvId));checks++;
+  r=await call(`/api/public/sk-events/${encodeURIComponent(skEvId)}/register`,'POST',{full_name:'Người Tham Gia 1',email:'pt1@skyfirst.io.vn'});
+  assert.equal(r.httpStatus,403);assert.equal(r.error,'EVENT_REGISTRATION_NOT_OPEN');checks+=2;
+
+  // Open registration -> Participant registers -> Admin approves registration
+  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'open_registration'});
+  assert.equal(r.status,'registration_open');assert.equal(r.registration_state,'open');checks+=2;
+  const pReg=await call(`/api/public/sk-events/${encodeURIComponent(skEvId)}/register`,'POST',{full_name:'Nguyễn Tham Gia',email:'nguyentg@skyfirst.io.vn',phone:'0909998888'});
+  assert.equal(pReg.httpStatus,201);const evRegId=pReg.id;checks++;
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/registrations/${encodeURIComponent(evRegId)}`,'PATCH',{status:'approved'});
+  assert.equal(r.status,'approved');checks++;
+
+  // Tasks, Logistics conflict detection & Budget SoD check
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/tasks`,'POST',{title:'Chuẩn bị hội trường',weight:2,status:'completed'});
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/tasks`,'POST',{title:'Đón tiếp đại biểu',weight:2,status:'not_started'});
+  const budCreate=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/budgets`,'POST',{category:'Âm thanh ánh sáng',description:'Thuê hệ thống âm thanh',estimated_amount:5000000});
+  assert.equal(budCreate.httpStatus,201);
+  // Self-approval of budget item blocked by SoD
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/budgets/${encodeURIComponent(budCreate.id)}`,'PATCH',{status:'approved',approved_amount:5000000});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'SOD_BUDGET_SELF_APPROVAL_FORBIDDEN');checks+=2;
+  // Independent approver approves budget item
+  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/budgets/${encodeURIComponent(budCreate.id)}`,'PATCH',{status:'approved',approved_amount:5000000});
+  assert.equal(r.status,'approved');checks++;
+
+  // Issue QR session -> Check-in valid participant -> Block duplicate check-in -> Manual override requires reason -> Revoked QR blocked
+  const qrSes=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/qr-sessions`,'POST',{session_name:'Phiên Khai mạc'});
+  assert.equal(qrSes.httpStatus,201);assert(qrSes.qr_token);checks+=2;
+
+  // Unapproved/unregistered participant blocked from QR check-in
+  r=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes.qr_token,email:'stranger@skyfirst.io.vn',full_name:'Người Lạ'});
+  assert.equal(r.httpStatus,403);assert.equal(r.error,'PARTICIPANT_NOT_ELIGIBLE');checks+=2;
+
+  // Approved participant checks in via QR
+  r=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes.qr_token,email:'nguyentg@skyfirst.io.vn',full_name:'Nguyễn Tham Gia'});
+  assert.equal(r.httpStatus,201);assert.equal(r.attendance_status,'checked_in');checks+=2;
+
+  // Duplicate check-in in same session is blocked!
+  r=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes.qr_token,email:'nguyentg@skyfirst.io.vn',full_name:'Nguyễn Tham Gia'});
+  assert.equal(r.httpStatus,409);assert.equal(r.error,'DUPLICATE_CHECKIN_BLOCKED');checks+=2;
+
+  // Manual attendance adjustment without reason is rejected (400)
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/attendance/manual`,'POST',{session_id:qrSes.id,email:'manual@skyfirst.io.vn',full_name:'Khách Mời',attendance_status:'manual_present',reason:''});
+  assert.equal(r.httpStatus,400);assert.equal(r.error,'MANUAL_REASON_REQUIRED');checks+=2;
+
+  // Manual attendance adjustment with mandatory reason succeeds and logs operator
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/attendance/manual`,'POST',{session_id:qrSes.id,email:'manual@skyfirst.io.vn',full_name:'Khách Mời',attendance_status:'manual_present',reason:'Xác nhận có mặt trực tiếp tại bàn lễ tân'});
+  assert.equal(r.httpStatus,200);assert.equal(r.attendance_status,'manual_present');checks+=2;
+
+  // Revoke QR session -> subsequent scans rejected with 410 QR_REVOKED
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/qr-sessions/${encodeURIComponent(qrSes.id)}/revoke`,'POST',{reason:'Kết thúc phiên điểm danh'});
+  r=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes.qr_token,email:'nguyentg@skyfirst.io.vn'});
+  assert.equal(r.httpStatus,410);assert.equal(r.error,'QR_REVOKED');checks+=2;
+
+  // Major change after approval (changing location_or_platform) automatically triggers re-approval!
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}`,'PATCH',{location_or_platform:'Địa điểm mới thay đổi trọng yếu'});
+  assert.equal(r.status,'pending_approval');assert.equal(r.triggered_reapproval,true);assert.equal(r.registration_state,'closed');checks+=3;
+
+  // Re-approve, publish, complete, submit summary report grounded in real DB counts, and close event
+  await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve'});
+  await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
+  await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'complete'});
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'submit_summary',note:'Đã hoàn thành hội nghị tốt đẹp'});
+  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve_summary_and_close'});
+  assert.equal(r.status,'closed');assert.equal(r.summary_report_state,'approved');checks+=2;
+
+  const evFinal=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}`,'GET');
+  assert.equal(evFinal.event.progress_pct,50);
+  assert.equal(evFinal.event.summary_report.actual_metrics_from_db.total_registered,1);
+  assert.equal(evFinal.event.summary_report.actual_metrics_from_db.total_attended,2);
+  checks+=3;
+}
+
+// =========================================================
+// 12. GFI II & III: INTERNAL MESSAGING (1-1 & GROUP, NO CALLS) & COMMUNITY FEED
+// =========================================================
+{
+  // Create group conversation between 'a' and 'a_rev'
+  const conv=await call('/api/chat/conversations','POST',{conv_type:'group',title:'Ban Điều phối Sự kiện Sky First',participant_account_ids:['a_rev']});
+  assert.equal(conv.httpStatus,201);assert.equal(conv.participant_count,2);const cid=conv.id;checks+=2;
+
+  // Send message, pin message, edit message, recall message
+  const m1=await call(`/api/chat/conversations/${encodeURIComponent(cid)}/messages`,'POST',{body:'Xin chào nhóm điều phối!',linked_entity_type:'sk_event'});
+  assert.equal(m1.httpStatus,201);const mid=m1.id;checks++;
+
+  r=await call(`/api/chat/messages/${encodeURIComponent(mid)}`,'PATCH',{action:'pin'});
+  assert.equal(r.httpStatus,200);assert.equal(r.is_pinned,true);checks+=2;
+
+  r=await call(`/api/chat/messages/${encodeURIComponent(mid)}`,'PATCH',{action:'edit',body:'Xin chào nhóm điều phối (đã cập nhật)!'});
+  assert.equal(r.httpStatus,200);checks++;
+
+  // Non-participant 't24' cannot read conversation messages (403)
+  const unauthChatReq=new Request(`https://nghiepvu.skyfirst.io.vn/api/chat/conversations/${encodeURIComponent(cid)}/messages`,{headers:{cookie:'sfn_session=t24_active_tok',origin:'https://nghiepvu.skyfirst.io.vn'}});
+  assert.equal((await api(unauthChatReq,{DB,FILES},new URL(unauthChatReq.url))).status,403);checks++;
+
+  // Recall message -> returns '[Tin nhắn đã được thu hồi]'
+  r=await call(`/api/chat/messages/${encodeURIComponent(mid)}`,'PATCH',{action:'recall'});
+  assert.equal(r.status,'recalled');
+  const msgsAfter=await call(`/api/chat/conversations/${encodeURIComponent(cid)}/messages`,'GET');
+  assert.equal(msgsAfter.messages.find(x=>x.id===mid).body,'[Tin nhắn đã được thu hồi]');checks+=2;
+
+  // Community Feed: Regular user posting to 1-way announcement channel is blocked (403)
+  const unauthPostReq=new Request('https://nghiepvu.skyfirst.io.vn/api/community/posts',{method:'POST',headers:{cookie:'sfn_session=t24_active_tok','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:JSON.stringify({group_id:'grp_official_bch',post_kind:'official_announcement',title:'Fake Official',body:'Should be blocked'})});
+  assert.equal((await api(unauthPostReq,{DB,FILES},new URL(unauthPostReq.url))).status,403);checks++;
+
+  // Regular user proposing an official_announcement in general group goes to 'pending_approval', NOT auto-published!
+  const propPostReq=new Request('https://nghiepvu.skyfirst.io.vn/api/community/posts',{method:'POST',headers:{cookie:'sfn_session=t24_active_tok','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:JSON.stringify({group_id:'grp_general_community',post_kind:'official_announcement',title:'Đề xuất thông báo',body:'Nội dung chờ duyệt'})});
+  const propPostRes=await api(propPostReq,{DB,FILES},new URL(propPostReq.url));
+  const propPostBody=await propPostRes.json();
+  assert.equal(propPostRes.status,201);assert.equal(propPostBody.moderation_status,'pending_approval');checks+=2;
+
+  // Moderator approves and publishes the post, reacts, comments, and handles report
+  r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/moderate`,'POST',{action:'publish'});
+  assert.equal(r.httpStatus,200);assert.equal(r.moderation_status,'published');checks+=2;
+
+  r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/react`,'POST',{reaction_type:'like'});
+  assert.equal(r.httpStatus,200);assert.equal(r.reaction_count,1);checks+=2;
+
+  r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/comments`,'POST',{body:'Bình luận xác nhận thông báo.'});
+  assert.equal(r.httpStatus,201);checks++;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);
