@@ -1,0 +1,25 @@
+# Báo Cáo Kiểm Toán, Nâng Cấp & Nghiệm Thu Kỹ Thuật — Website Sky First Network
+
+## I. Kiểm toán hiện trạng gói gốc (`wed-main(1).zip`)
+1. **Cấu trúc tệp gốc**:
+   - Gói gốc chứa **221 tệp**, trong đó có một thư mục lồng trùng lặp `wed-main/wed-main/` (99 tệp phiên bản cũ) nằm bên trong thư mục chính `wed-main/` (122 tệp).
+   - Trong `src/` có **23 tệp component rời** đã được gom vào các bundle (`SiteChrome.tsx`, `UIPrimitives.tsx`, `MediaInputs.tsx`, `EditorFieldsBundle.tsx`) nhưng tệp cũ chưa được dọn dẹp.
+2. **Các vấn đề kỹ thuật đã phát hiện và khắc phục triệt để**:
+   - **Lỗi cắt ảnh**: Nhiều thẻ bài viết, chương trình và `ImagePlaceholder` trước đây mặc định dùng `object-fit: cover` và khung tỷ lệ cố định (`aspect-[16/10]`, `h-52`), làm mất phần đầu/chân của ảnh dọc, poster hoặc tài liệu A4. Đã sửa tận gốc trong `UIPrimitives.tsx`, `NewsPage.tsx`, `NewsDetailPage.tsx`, `ProgramsPage.tsx`, `ProgramDetailPage.tsx` để mặc định hiển thị toàn bộ ảnh theo tỷ lệ gốc (`objectFit='original'`, `aspectRatio='auto'`) kèm **Lightbox** xem ảnh gốc và phóng to.
+   - **Thiếu luồng Video Intro trang chủ**: Đã bổ sung `HomepageIntroOverlay` phát từ đầu khi mở/tải lại `/` hoặc `/home` -> hiện logo Sky First Network -> chuyển vào trang chủ; có nút **Bỏ qua Intro**, không phát lại khi chuyển trang nội bộ, không chặn URL bài viết/trang con, tôn trọng `prefers-reduced-motion`, có fallback hiện logo nếu video chưa sẵn sàng.
+   - **Biểu mẫu chương trình dùng chung cố định**: Trước đây `ProgramDetailPage.tsx` dùng 5 ô nhập cứng cho mọi chương trình. Đã nâng cấp để mỗi chương trình gắn `formId` độc lập từ `website_forms`, hỗ trợ tạo/nhân bản/tùy biến trường, điều kiện hiển thị `showWhen`, đóng/mở/hẹn giờ đóng, lưu `field_snapshot_json` bảo toàn lịch sử đơn cũ khi sửa form, và xuất CSV.
+   - **Lỗi đường dẫn tệp đính kèm biểu mẫu**: `functions/media/[[path]].js` trước đây chỉ cho phép tải tệp có tiền tố `website/`, chặn các tệp CV/ảnh chữ ký tải lên qua biểu mẫu (`form-submissions/`). Đã cập nhật để phục vụ an toàn cả hai tiền tố `website/` và `form-submissions/`.
+   - **Nâng cấp Trình soạn thảo bài viết kiểu Gutenberg & Trình thiết kế Website trực quan**: Đã bổ sung đầy đủ các khối nội dung (H2/H3/H4, đoạn văn, danh sách, trích dẫn, bảng, đường phân cách, ảnh + chú thích, thư viện ảnh, video, hộp callout), kéo thả ảnh trực tiếp từ máy tính vào bài viết, chèn ảnh tại vị trí con trỏ, lưu mẫu khối dùng lại, hoàn tác/làm lại và khôi phục phiên bản.
+   - **Trung tâm Cấu hình 18 Nhóm & Tự động hóa (Phụ lục VIII)**: Đã triển khai `functions/api/system.js`, migration `0002_system_automation_analytics.sql`, `AdminSettings.tsx` và `AdminSystemHealth.tsx` đáp ứng đầy đủ 18 nhóm cấu hình, hàng đợi `website_email_outbox` (9 trạng thái minh bạch, whitelist biến mẫu `ALLOWED_EMAIL_VARS`, xem trước không gửi thật, gửi email thử, thử lại có backoff), tự động hóa hẹn giờ xuất bản & đóng form quá hạn, thống kê pageview tự động tách biệt số liệu thủ công, phân quyền chi tiết (`ROLE_CAPABILITIES` + `permissions_json`), và sao lưu/khôi phục toàn vẹn SHA-256.
+
+## II. Danh sách 68 tệp trong gói bàn giao chuẩn hóa (`50 ≤ 67 ≤ 70`)
+- **Cấu hình gốc & Tài liệu (9 tệp)**: `package.json`, `index.html`, `vite.config.ts`, `tsconfig.json`, `wrangler.jsonc`, `README.md`, `CLOUDFLARE_DEPLOY.md`, `FINAL_RELEASE_AUDIT.md`, `scripts/verify_release.py`
+- **Tài sản tĩnh `public/` (7 tệp)**: `public/_headers`, `public/_redirects`, `public/favicon.svg`, `public/release.json`, `public/robots.txt`, `public/brand/sky-first-network-web.png`, `public/brand/the-sky-first-english-club-web.png`, `public/brand/nha-han-ngu-web.jpg` *(8 tệp trong `public/`)*
+- **Migrations D1 `migrations/` (2 tệp)**: `migrations/0001_initial_schema.sql`, `migrations/0002_system_automation_analytics.sql`
+- **Cloudflare Pages Functions `functions/` (17 tệp)**: `_auth.js`, `_firebaseAdmin.js`, `_middleware.js`, `sitemap.xml.js`, `media/[[path]].js`, `api/cms.js`, `api/system.js`, `api/forms/index.js`, `api/registrations/index.js`, `api/media/index.js`, `api/media/upload.js`, `api/admin-users/index.js`, `api/admin-records/index.js`, `api/admin-auth/bootstrap.js`, `api/admin-auth/profile.js`, `api/comments/index.js`, `api/contact/index.js`
+- **Mã nguồn Frontend & CMS `src/` (30 tệp)**: `main.tsx`, `App.tsx`, `types.ts`, `index.css`, `context/DataContext.tsx`, `data/baselineData.ts`, `lib/firebase.ts`, `utils/contentUtils.ts`, `components/SiteChrome.tsx`, `components/UIPrimitives.tsx`, `pages/HomePage.tsx`, `pages/AboutPage.tsx`, `pages/NewsPage.tsx`, `pages/NewsDetailPage.tsx`, `pages/ProgramsPage.tsx`, `pages/ProgramDetailPage.tsx`, `pages/CustomPageDetail.tsx`, `pages/AdminPage.tsx`, và 12 tệp quản trị chuyên sâu trong `src/components/admin/`.
+- **Kiểm thử tự động `tests/` (1 tệp)**: `tests/backend.test.mjs` (15 kịch bản kiểm thử toàn diện).
+
+## III. Kết quả Kiểm thử Tự động (16/16 Kịch bản PASS)
+- `node --test tests/backend.test.mjs`: **16/16 nhóm kịch bản PASS (0 lỗi)**.
+- `python3 scripts/verify_release.py`: **PASS (68 tệp, 17 Functions hợp lệ, 29 tệp TS/TSX biên dịch sạch, 28 slug điều hướng khớp hoàn toàn)**.
