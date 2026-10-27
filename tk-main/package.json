@@ -7,9 +7,11 @@
     "deploy": "npm run build && wrangler deploy",
     "db:migrate:remote": "wrangler d1 migrations apply tk --remote",
     "db:migrate:local": "wrangler d1 migrations apply tk --local",
-    "check": "node --check src/index.js && node --check src/local-qr.js && node --check src/qr-code/index.js && node --check public/app.js && node --check public/brand.js",
-    "build": "npm run check",
-    "test": "node scripts/verify-release.mjs && node scripts/validate-center.mjs"
+    "check": "node scripts/fast-check.mjs",
+    "build": "node scripts/verify-release.mjs",
+    "test": "node scripts/verify-release.mjs && node scripts/validate-center.mjs",
+    "verify": "node scripts/verify-release.mjs",
+    "validate": "node scripts/validate-center.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.30.0"

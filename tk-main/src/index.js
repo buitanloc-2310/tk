@@ -199,16 +199,21 @@ async function ensureEvaluations(env){
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_member_evaluations_org ON member_evaluations(org_node_id,created_at DESC)`).run();
 }
 
+let _govTablesEnsured=false;
 async function ensureGovernanceTables(env){
+  if(_govTablesEnsured&&env.__schema17Ready)return;
   const ddl=[
     "CREATE TABLE IF NOT EXISTS email_otp_tokens(id TEXT PRIMARY KEY,email TEXT NOT NULL,purpose TEXT NOT NULL DEFAULT 'account_request',otp_hash TEXT NOT NULL,verify_token_hash TEXT UNIQUE,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 5,resend_count INTEGER NOT NULL DEFAULT 0,expires_at TEXT NOT NULL,verified_at TEXT,used_at TEXT,ip_hint TEXT,user_agent TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS email_delivery_logs(id TEXT PRIMARY KEY,template_code TEXT NOT NULL DEFAULT 'master_notification',recipient_email TEXT NOT NULL,sender_address TEXT NOT NULL,reply_to_address TEXT,subject TEXT NOT NULL,provider_name TEXT NOT NULL DEFAULT 'resend',provider_message_id TEXT,status TEXT NOT NULL DEFAULT 'pending',error_detail TEXT,retry_count INTEGER NOT NULL DEFAULT 0,related_entity_type TEXT,related_entity_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS legal_consent_records(id TEXT PRIMARY KEY,subject_type TEXT NOT NULL,subject_id TEXT NOT NULL,email TEXT NOT NULL,terms_version TEXT NOT NULL DEFAULT '2026.10-SFN-TERMS',privacy_version TEXT NOT NULL DEFAULT '2026.10-SFN-PDPD',read_acknowledged INTEGER NOT NULL DEFAULT 0,terms_accepted INTEGER NOT NULL DEFAULT 0,privacy_consent INTEGER NOT NULL DEFAULT 0,accuracy_committed INTEGER NOT NULL DEFAULT 0,is_minor INTEGER NOT NULL DEFAULT 0,guardian_consent INTEGER NOT NULL DEFAULT 0,email_verified INTEGER NOT NULL DEFAULT 0,otp_token_id TEXT,purpose_scope TEXT NOT NULL DEFAULT 'account_review_and_member_operations',ip_hint TEXT,user_agent TEXT,consented_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS system_config_history(id TEXT PRIMARY KEY,config_key TEXT NOT NULL,version_no INTEGER NOT NULL DEFAULT 1,previous_value_json TEXT,new_value_json TEXT NOT NULL,change_reason TEXT,impact_summary_json TEXT NOT NULL DEFAULT '{}',actor_account_id TEXT,approved_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS support_ticket_assignments(ticket_id TEXT PRIMARY KEY,org_node_id TEXT,assigned_account_id TEXT,priority TEXT NOT NULL DEFAULT 'normal',sla_due_at TEXT,resolution_note TEXT,closed_reason TEXT,responded_at TEXT,resolved_at TEXT,updated_by_account_id TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS support_ticket_assignments(ticket_id TEXT PRIMARY KEY,org_node_id TEXT,assigned_account_id TEXT,priority TEXT NOT NULL DEFAULT 'normal',impact_level TEXT NOT NULL DEFAULT 'medium',attachment_url TEXT,duplicate_of_ticket_id TEXT,escalated_to_account_id TEXT,escalation_reason TEXT,reopen_reason TEXT,reopened_at TEXT,satisfaction_score INTEGER,feedback_comment TEXT,sla_response_due_at TEXT,sla_due_at TEXT,sla_breached INTEGER NOT NULL DEFAULT 0,resolution_note TEXT,closed_reason TEXT,responded_at TEXT,resolved_at TEXT,updated_by_account_id TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS support_ticket_messages(id TEXT PRIMARY KEY,ticket_id TEXT NOT NULL,sender_account_id TEXT,visibility TEXT NOT NULL DEFAULT 'public',message_type TEXT NOT NULL DEFAULT 'reply',body TEXT NOT NULL,attachment_url TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS work_queue_states(item_key TEXT PRIMARY KEY,source_type TEXT NOT NULL,source_id TEXT NOT NULL,org_node_id TEXT,assigned_account_id TEXT,collaborator_ids_json TEXT NOT NULL DEFAULT '[]',dependency_keys_json TEXT NOT NULL DEFAULT '[]',priority TEXT NOT NULL DEFAULT 'normal',workflow_state TEXT NOT NULL DEFAULT 'open',blocked_reason TEXT,blocked_missing_condition TEXT,blocked_coordination_party TEXT,blocked_resolution_plan TEXT,due_at TEXT,last_reminder_at TEXT,reminder_count INTEGER NOT NULL DEFAULT 0,handover_note TEXT,updated_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS governance_registry(id TEXT PRIMARY KEY,domain_group TEXT NOT NULL,code TEXT NOT NULL UNIQUE,title TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',org_node_id TEXT,owner_account_id TEXT,reviewer_account_id TEXT,approver_account_id TEXT,related_entity_type TEXT,related_entity_id TEXT,version_label TEXT NOT NULL DEFAULT '1.0',summary TEXT,payload_json TEXT NOT NULL DEFAULT '{}',evidence_ref TEXT,effective_from TEXT,effective_to TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
   ];
   for(const sql of ddl)await env.DB.prepare(sql).run();
+  _govTablesEnsured=true;env.__schema17Ready=true;
 }
 function inspectZipArchiveHeaders(input){
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input||[]);
@@ -493,12 +498,10 @@ function withSecurityHeaders(response){
   headers.set('content-security-policy',"default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:");
   return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
 }
+const RETIRED_OR_EXTERNAL_HOST_RE=/^(?:tnv|slc|mail|sfec)\.skyfirst\.io\.vn$/i;
 const DEFAULT_PORTAL_LINKS=[
   {name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức của Sky First'},
-  {name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin, chương trình và tiện ích số'},
-  {name:'Trung Tâm Tình Nguyện Viên Sky First',url:'https://tnv.skyfirst.io.vn/',description:'Hoạt động tình nguyện và cộng đồng'},
-  {name:'Trung Tâm Học Tập Số Sky First',url:'https://slc.skyfirst.io.vn/',description:'Học tập và lớp học trực tuyến'},
-  {name:'Trung Tâm Thư Điện Tử Sky First',url:'https://mail.skyfirst.io.vn/',description:'Dịch vụ thư điện tử'}
+  {name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin, chương trình và tiện ích số'}
 ];
 const DEFAULT_SYSTEM_IDENTITY={
   siteName:'Trung tâm Nghiệp vụ Số Sky First',
@@ -510,9 +513,9 @@ const DEFAULT_SYSTEM_IDENTITY={
   contactEmail:'lienhe@skyfirst.io.vn'
 };
 const DEFAULT_PORTAL_BRAND={siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,cornerRadius:18,contentMaxWidth:1500};
-function safeSkyFirstUrl(value){try{const u=new URL(String(value||''));return u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='skyfirst.io.vn'||u.hostname.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}}
+function safeSkyFirstUrl(value){try{const u=new URL(String(value||''));const h=u.hostname.toLowerCase();if(RETIRED_OR_EXTERNAL_HOST_RE.test(h))return null;return u.protocol==='https:'&&!u.username&&!u.password&&(h==='skyfirst.io.vn'||h.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}}
 function portalLinksFromSettings(candidates){
-  if(!Array.isArray(candidates)||candidates.length!==DEFAULT_PORTAL_LINKS.length)return DEFAULT_PORTAL_LINKS.map(x=>({...x}));
+  if(!Array.isArray(candidates)||!candidates.length)return DEFAULT_PORTAL_LINKS.map(x=>({...x}));
   const oldNames=new Set(['cổng chính sky first network','cổng thông tin','cổng sfn','cổng sfec','lớp học trực tuyến','cổng tình nguyện viên','cổng thư điện tử']);
   return DEFAULT_PORTAL_LINKS.map(fallback=>{
     const item=candidates.find(x=>{const u=safeSkyFirstUrl(x?.url);if(!u)return false;try{return new URL(u).hostname===new URL(fallback.url).hostname}catch{return false}});
@@ -1103,7 +1106,7 @@ async function sendMemberEmail(env,{to,subject,html,templateCode='master_notific
 }
 
   // =========================================================
-  // PUBLIC EMAIL OTP VERIFICATION (P6.44, Mục 13.2)
+  // PUBLIC EMAIL OTP VERIFICATION (, Mục 13.2)
   // =========================================================
   if(url.pathname==='/api/public/email-otp/request'&&req.method==='POST'){
     await ensureGovernanceTables(env);
@@ -1774,7 +1777,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(rawBrand.logoUrl!==undefined&&String(rawBrand.logoUrl)!=='/sfn-logo.png'&&!/^\/files\/site-assets\/[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\.(?:png|jpg|webp)$/i.test(String(rawBrand.logoUrl)))return json({error:'INVALID_LOGO_PATH',message:'Logo phải là ảnh đã tải lên hệ thống.'},400);
     let links=Array.isArray(previous.links)?previous.links:DEFAULT_PORTAL_LINKS;
     if(b.links!==undefined){
-      if(!Array.isArray(b.links)||b.links.length!==5)return json({error:'INVALID_PORTAL_LINKS',message:'Cần khai báo đủ 5 nền tảng Sky First.'},400);
+      if(!Array.isArray(b.links)||b.links.length!==DEFAULT_PORTAL_LINKS.length)return json({error:'INVALID_PORTAL_LINKS',message:`Cần khai báo đúng ${DEFAULT_PORTAL_LINKS.length} cổng dịch vụ đang hoạt động của Sky First.`},400);
       links=[];
       for(const [i,x] of b.links.entries()){
         const u=safeSkyFirstUrl(x?.url),name=clean(x?.name,100),description=clean(x?.description,140);
@@ -2881,54 +2884,91 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
 
   if(url.pathname==='/api/me/support'&&req.method==='GET'){
     await ensureGovernanceTables(env);
-    const r=await env.DB.prepare(`SELECT st.*,sta.priority,sta.sla_due_at,sta.resolution_note,sta.closed_reason,sta.responded_at,sta.resolved_at FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE st.person_id=? ORDER BY st.created_at DESC LIMIT 100`).bind(s.person_id).all();
-    return json({items:r.results||[]});
+    const [r,msgs]=await Promise.all([
+      env.DB.prepare(`SELECT st.*,sta.priority,sta.impact_level,sta.attachment_url,sta.duplicate_of_ticket_id,sta.reopen_reason,sta.reopened_at,sta.satisfaction_score,sta.feedback_comment,sta.sla_response_due_at,sta.sla_due_at,sta.sla_breached,sta.resolution_note,sta.closed_reason,sta.responded_at,sta.resolved_at FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE st.person_id=? ORDER BY st.created_at DESC LIMIT 100`).bind(s.person_id).all(),
+      env.DB.prepare(`SELECT m.id,m.ticket_id,m.visibility,m.message_type,m.body,m.attachment_url,m.created_at,a.username sender_username FROM support_ticket_messages m JOIN support_tickets st ON st.id=m.ticket_id LEFT JOIN accounts a ON a.id=m.sender_account_id WHERE st.person_id=? AND m.visibility='public' ORDER BY m.created_at ASC`).bind(s.person_id).all()
+    ]);
+    const msgMap=new Map();
+    for(const m of (msgs.results||[])){
+      if(!msgMap.has(m.ticket_id))msgMap.set(m.ticket_id,[]);
+      msgMap.get(m.ticket_id).push(m);
+    }
+    const items=(r.results||[]).map(x=>({...x,messages:msgMap.get(x.id)||[]}));
+    return json({items});
   }
   if(url.pathname==='/api/me/support'&&req.method==='POST'){
+    await ensureGovernanceTables(env);
     const b=await bodyJson(req);
-
     const id=uid('ticket');
-
-    const code=
-      `SP-${new Date().getUTCFullYear()}-`+
-      `${String(Date.now()).slice(-6)}`;
-
-    if(
-      !clean(b.subject,200)||
-      !clean(b.body,3000)
-    ){
-      return json({
-        error:'INVALID_DATA'
-      },400);
+    const code=`SP-${new Date().getUTCFullYear()}-${String(Date.now()).slice(-6)}-${crypto.randomUUID().slice(0,3).toUpperCase()}`;
+    const subject=clean(b.subject,200);
+    const body=clean(b.body,3000);
+    if(!subject||!body)return json({error:'INVALID_DATA',message:'Vui lòng nhập đầy đủ tiêu đề và nội dung yêu cầu hỗ trợ.'},400);
+    const category=clean(b.category,80)||'other';
+    const impact=['low','medium','high','critical'].includes(b.impact_level)?b.impact_level:'medium';
+    const priority=impact==='critical'?'urgent':impact==='high'?'high':impact==='low'?'low':'normal';
+    const attach=clean(b.attachment_url,500)||null;
+    if(attach&&(!/^(?:\/api\/files\/|\/files\/|https:\/\/nghiepvu\.skyfirst\.io\.vn\/)[A-Za-z0-9._/-]+\.(?:pdf|png|jpe?g|webp)$/i.test(attach)||attach.includes('..')||attach.includes('\\'))){
+      return json({error:'INVALID_ATTACHMENT_URL',message:'Tệp đính kèm không hợp lệ hoặc không thuộc kho lưu trữ an toàn.'},400);
     }
-
-    await env.DB.prepare(`
-      INSERT INTO support_tickets(
-        id,
-        ticket_code,
-        person_id,
-        category,
-        subject,
-        body,
-        status
-      )
-      VALUES(
-        ?,?,?,?,?,?,
-        'received'
-      )
-    `).bind(
-      id,
-      code,
-      s.person_id,
-      clean(b.category,80)||'other',
-      clean(b.subject,200),
-      clean(b.body,3000)
-    ).run();
-
+    const dupRow=await env.DB.prepare(`SELECT id,ticket_code FROM support_tickets WHERE person_id=? AND lower(subject)=? AND status NOT IN ('completed','closed') ORDER BY created_at DESC LIMIT 1`).bind(s.person_id,subject.toLowerCase()).first();
+    const slaHours=priority==='urgent'?4:priority==='high'?12:priority==='normal'?24:48;
+    const slaDue=new Date(Date.now()+slaHours*3600000).toISOString().replace('T',' ').slice(0,19);
+    const slaRespDue=new Date(Date.now()+Math.max(1,Math.floor(slaHours/3))*3600000).toISOString().replace('T',' ').slice(0,19);
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO support_tickets(id,ticket_code,person_id,category,subject,body,status) VALUES(?,?,?,?,?,?,'received')`).bind(id,code,s.person_id,category,subject,body),
+      env.DB.prepare(`INSERT INTO support_ticket_assignments(ticket_id,priority,impact_level,attachment_url,duplicate_of_ticket_id,sla_response_due_at,sla_due_at,updated_by_account_id) VALUES(?,?,?,?,?,?,?,?)`).bind(id,priority,impact,attach,dupRow?.id||null,slaRespDue,slaDue,s.account_id)
+    ]);
+    await audit(env,s.account_id,'support_ticket_created','support_ticket',id,null,{ticket_code:code,category,impact_level:impact,potential_duplicate:dupRow?.ticket_code||null});
     return json({
       ok:true,
-      ticket_code:code
+      id,
+      ticket_code:code,
+      priority,
+      impact_level:impact,
+      sla_due_at:slaDue,
+      sla_resolution_due_at:slaDue,
+      potential_duplicate_ticket_code:dupRow?.ticket_code||null
     });
+  }
+  const meSupportActionMatch=url.pathname.match(/^\/api\/me\/support\/([^/]+)\/(reply|reopen|feedback)$/);
+  if(meSupportActionMatch&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const tid=decodeURIComponent(meSupportActionMatch[1]);
+    const act=meSupportActionMatch[2];
+    const ticket=await env.DB.prepare(`SELECT * FROM support_tickets WHERE id=? AND person_id=?`).bind(tid,s.person_id).first();
+    if(!ticket)return json({error:'NOT_FOUND',message:'Không tìm thấy phiếu hỗ trợ thuộc quyền truy cập của bạn.'},404);
+    const b=await bodyJson(req);
+    if(act==='reply'){
+      const msgBody=clean(b.body,2000);
+      if(!msgBody)return json({error:'MESSAGE_REQUIRED',message:'Vui lòng nhập nội dung trao đổi.'},400);
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO support_ticket_messages(id,ticket_id,sender_account_id,visibility,message_type,body) VALUES(?,?,?,'public','reply',?)`).bind(uid('tmsg'),tid,s.account_id,msgBody),
+        env.DB.prepare(`UPDATE support_tickets SET status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tid)
+      ]);
+      await audit(env,s.account_id,'support_ticket_replied','support_ticket',tid,null,{by:'member'});
+      return json({ok:true},201);
+    }
+    if(act==='reopen'){
+      const reason=clean(b.reopen_reason||b.reason,500);
+      if(!reason)return json({error:'REOPEN_REASON_REQUIRED',message:'Vui lòng nhập lý do mở lại yêu cầu hỗ trợ.'},400);
+      if(!['completed','closed','responded'].includes(ticket.status))return json({error:'INVALID_TICKET_STATE',message:'Chỉ có thể mở lại yêu cầu đã giải quyết hoặc đã đóng.'},409);
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE support_tickets SET status='in_progress',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(tid),
+        env.DB.prepare(`UPDATE support_ticket_assignments SET reopen_reason=?,reopened_at=CURRENT_TIMESTAMP,updated_by_account_id=?,updated_at=CURRENT_TIMESTAMP WHERE ticket_id=?`).bind(reason,s.account_id,tid),
+        env.DB.prepare(`INSERT INTO support_ticket_messages(id,ticket_id,sender_account_id,visibility,message_type,body) VALUES(?,?,?,'public','reopen',?)`).bind(uid('tmsg'),tid,s.account_id,`Mở lại yêu cầu: ${reason}`)
+      ]);
+      await audit(env,s.account_id,'support_ticket_reopened','support_ticket',tid,null,{reason});
+      return json({ok:true,ticket_status:'reopened'});
+    }
+    if(act==='feedback'){
+      const score=Number(b.satisfaction_score??b.score);
+      if(!Number.isInteger(score)||score<1||score>5)return json({error:'INVALID_SATISFACTION_SCORE',message:'Điểm đánh giá phải từ 1 đến 5.'},400);
+      const comment=clean(b.feedback_comment??b.comment,1000)||null;
+      await env.DB.prepare(`UPDATE support_ticket_assignments SET satisfaction_score=?,feedback_comment=?,updated_at=CURRENT_TIMESTAMP WHERE ticket_id=?`).bind(score,comment,tid).run();
+      await audit(env,s.account_id,'support_ticket_feedback','support_ticket',tid,null,{score});
+      return json({ok:true,satisfaction_score:score,score});
+    }
   }
 
   // =========================================================
@@ -5227,18 +5267,220 @@ env.DB.prepare(`
   // =========================================================
   if(url.pathname==='/api/admin/work-center'&&req.method==='GET'){
     if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
-    const [pending,attention,expiring,incomplete]=await Promise.all([
+    await ensureGovernanceTables(env);
+    const visOrgs=await visibleOrgs(env,s.account_id);
+    const visOrgIds=new Set(visOrgs.map(o=>o.id));
+    const netElevated=await isNetworkAdmin(env,s.account_id);
+    const [pending,attention,expiring,incomplete,reqRows,ticketRows,cardRows,profileRows,queueStates]=await Promise.all([
       env.DB.prepare("SELECT COUNT(*) n FROM account_requests WHERE status IN ('pending','supplement')").first(),
       env.DB.prepare("SELECT COUNT(*) n FROM accounts a LEFT JOIN account_restrictions r ON r.account_id=a.id WHERE a.is_locked=1 OR (r.account_id IS NOT NULL AND (r.ends_at IS NULL OR r.ends_at>datetime('now')))").first(),
       env.DB.prepare("SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at<=datetime('now','+30 day')").first(),
-      env.DB.prepare("SELECT COUNT(*) n FROM people WHERE status='active' AND (email IS NULL OR trim(email)='' OR avatar_url IS NULL OR trim(avatar_url)='')").first()
+      env.DB.prepare("SELECT COUNT(*) n FROM people WHERE status='active' AND (email IS NULL OR trim(email)='' OR avatar_url IS NULL OR trim(avatar_url)='')").first(),
+      env.DB.prepare(`SELECT r.id,r.request_code,r.full_name,r.email,r.status,r.target_org_node_id,r.created_at,o.name org_name,CASE WHEN r.created_at<=datetime('now','-48 hours') THEN 1 ELSE 0 END is_overdue FROM account_requests r LEFT JOIN org_nodes o ON o.id=r.target_org_node_id WHERE r.status IN ('pending','supplement') ORDER BY r.created_at ASC LIMIT 80`).all(),
+      env.DB.prepare(`SELECT st.id,st.ticket_code,st.category,st.subject,st.status,st.created_at,p.full_name,sta.org_node_id,sta.assigned_account_id,sta.priority,sta.impact_level,sta.sla_due_at,CASE WHEN sta.sla_due_at IS NOT NULL AND sta.sla_due_at<datetime('now') AND st.status NOT IN ('completed','closed') THEN 1 ELSE 0 END is_overdue FROM support_tickets st LEFT JOIN people p ON p.id=st.person_id LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE st.status NOT IN ('completed','closed') ORDER BY st.created_at ASC LIMIT 80`).all(),
+      env.DB.prepare(`SELECT c.id,c.card_number,c.person_id,c.org_node_id,c.expires_at,c.created_at,p.full_name,o.name org_name,CASE WHEN c.expires_at<date('now') THEN 1 ELSE 0 END is_overdue FROM member_cards c JOIN people p ON p.id=c.person_id LEFT JOIN org_nodes o ON o.id=c.org_node_id WHERE c.status='active' AND c.expires_at IS NOT NULL AND c.expires_at<=date('now','+30 day') ORDER BY c.expires_at ASC LIMIT 60`).all(),
+      env.DB.prepare(`SELECT p.id,p.member_code,p.full_name,p.email,p.id_number,p.updated_at FROM people p WHERE p.status='active' AND (p.email IS NULL OR trim(p.email)='' OR p.id_number IS NULL OR trim(p.id_number)='') LIMIT 60`).all(),
+      env.DB.prepare(`SELECT w.*,a.username assigned_username FROM work_queue_states w LEFT JOIN accounts a ON a.id=w.assigned_account_id`).all()
     ]);
-    const items=[];
-    if(Number(pending?.n||0)) items.push({kind_label:'Yêu cầu',title:'Yêu cầu cấp tài khoản đang chờ',detail:`${pending.n} yêu cầu cần xem xét`,target:String(pending.n),target_view:'admin-requests',created_at:new Date().toISOString()});
-    if(Number(attention?.n||0)) items.push({kind_label:'Tài khoản',title:'Tài khoản cần chú ý',detail:`${attention.n} tài khoản đang khóa hoặc bị hạn chế`,target:String(attention.n),target_view:'admin-members',created_at:new Date().toISOString()});
-    if(Number(expiring?.n||0)) items.push({kind_label:'Thẻ',title:'Thẻ sắp hết hạn',detail:`${expiring.n} thẻ còn trong 30 ngày`,target:String(expiring.n),target_view:'admin-members',created_at:new Date().toISOString()});
-    if(Number(incomplete?.n||0)) items.push({kind_label:'Hồ sơ',title:'Hồ sơ còn thiếu thông tin',detail:`${incomplete.n} thành viên cần bổ sung`,target:String(incomplete.n),target_view:'admin-members',created_at:new Date().toISOString()});
-    return json({counts:{pending_requests:Number(pending?.n||0),account_attention:Number(attention?.n||0),expiring_cards:Number(expiring?.n||0),incomplete_profiles:Number(incomplete?.n||0)},items});
+    const qMap=new Map((queueStates.results||[]).map(w=>[w.item_key,w]));
+    const rawItems=[];
+    for(const r of (reqRows.results||[])){
+      if(!netElevated&&r.target_org_node_id&&!visOrgIds.has(r.target_org_node_id))continue;
+      const itemKey=`req:${r.id}`;
+      const qs=qMap.get(itemKey);
+      const isOverdue=Boolean(r.is_overdue)||(qs?.due_at&&qs.due_at<new Date().toISOString().slice(0,19));
+      const prio=qs?.priority||(isOverdue?'urgent':'high');
+      const wfState=qs?.workflow_state||(r.status==='supplement'?'paused':'open');
+      const prioScore=(wfState==='blocked'?95:0)+(isOverdue?90:0)+(prio==='urgent'?80:prio==='high'?60:prio==='normal'?40:20);
+      const prioReason=wfState==='blocked'?`Đang bị chặn: ${qs?.blocked_reason||'Chờ tháo gỡ điều kiện'}`:isOverdue?'Quá hạn SLA xét duyệt (> 48 giờ)':r.status==='supplement'?'Đang chờ người đăng ký bổ sung hồ sơ':'Hồ sơ đăng ký mới cần phân loại và xét duyệt';
+      rawItems.push({
+        item_key:itemKey,source_type:'account_request',source_id:r.id,code:r.request_code,
+        kind_label:'Xét duyệt tài khoản',title:`Duyệt hồ sơ: ${r.full_name} (${r.request_code})`,
+        detail:`Đơn vị: ${r.org_name||'Mạng lưới'} · Trạng thái: ${r.status}`,
+        target:r.request_code,target_view:'admin-requests',
+        org_node_id:qs?.org_node_id||r.target_org_node_id||null,org_name:r.org_name||'Sky First Network',
+        assigned_account_id:qs?.assigned_account_id||null,assigned_username:qs?.assigned_username||null,
+        priority:prio,priority_score:prioScore,priority_reason:prioReason,
+        workflow_state:wfState,is_overdue:isOverdue,
+        blocked_reason:qs?.blocked_reason||null,blocked_missing_condition:qs?.blocked_missing_condition||null,
+        blocked_coordination_party:qs?.blocked_coordination_party||null,blocked_resolution_plan:qs?.blocked_resolution_plan||null,
+        due_at:qs?.due_at||null,reminder_count:Number(qs?.reminder_count||0),
+        collaborators:(()=>{try{return JSON.parse(qs?.collaborator_ids_json||'[]')}catch{return []}})(),
+        dependencies:(()=>{try{return JSON.parse(qs?.dependency_keys_json||'[]')}catch{return []}})(),
+        created_at:r.created_at
+      });
+    }
+    for(const t of (ticketRows.results||[])){
+      if(!netElevated&&t.org_node_id&&!visOrgIds.has(t.org_node_id))continue;
+      const itemKey=`ticket:${t.id}`;
+      const qs=qMap.get(itemKey);
+      const isOverdue=Boolean(t.is_overdue);
+      const prio=qs?.priority||t.priority||'normal';
+      const wfState=qs?.workflow_state||(t.status==='in_progress'?'in_progress':t.status==='waiting_supplement'?'paused':t.status==='escalated'?'escalated':'open');
+      const prioScore=(wfState==='blocked'?95:0)+(isOverdue?88:0)+(prio==='urgent'?82:prio==='high'?62:prio==='normal'?42:22);
+      const prioReason=wfState==='blocked'?`Đang bị chặn: ${qs?.blocked_reason||'Chờ phối hợp'}`:isOverdue?'Quá hạn mục tiêu phản hồi/xử lý SLA':t.impact_level==='critical'?'Mức ảnh hưởng nghiêm trọng tới nghiệp vụ':`Yêu cầu hỗ trợ danh mục ${t.category}`;
+      rawItems.push({
+        item_key:itemKey,source_type:'support_ticket',source_id:t.id,code:t.ticket_code,
+        kind_label:'Hỗ trợ nghiệp vụ',title:`Phiếu hỗ trợ ${t.ticket_code}: ${t.subject}`,
+        detail:`Người gửi: ${t.full_name||'Thành viên'} · Mức ảnh hưởng: ${t.impact_level||'medium'}`,
+        target:t.ticket_code,target_view:'admin-work',
+        org_node_id:qs?.org_node_id||t.org_node_id||null,org_name:'Trung tâm Hỗ trợ',
+        assigned_account_id:qs?.assigned_account_id||t.assigned_account_id||null,assigned_username:qs?.assigned_username||null,
+        priority:prio,priority_score:prioScore,priority_reason:prioReason,
+        workflow_state:wfState,is_overdue:isOverdue,
+        blocked_reason:qs?.blocked_reason||null,blocked_missing_condition:qs?.blocked_missing_condition||null,
+        blocked_coordination_party:qs?.blocked_coordination_party||null,blocked_resolution_plan:qs?.blocked_resolution_plan||null,
+        due_at:qs?.due_at||t.sla_due_at||null,reminder_count:Number(qs?.reminder_count||0),
+        collaborators:(()=>{try{return JSON.parse(qs?.collaborator_ids_json||'[]')}catch{return []}})(),
+        dependencies:(()=>{try{return JSON.parse(qs?.dependency_keys_json||'[]')}catch{return []}})(),
+        created_at:t.created_at
+      });
+    }
+    for(const c of (cardRows.results||[])){
+      if(!netElevated&&c.org_node_id&&!visOrgIds.has(c.org_node_id))continue;
+      const itemKey=`card:${c.id}`;
+      const qs=qMap.get(itemKey);
+      const isOverdue=Boolean(c.is_overdue);
+      const prio=qs?.priority||(isOverdue?'high':'normal');
+      const wfState=qs?.workflow_state||'open';
+      const prioScore=(isOverdue?75:45)+(prio==='urgent'?30:0);
+      rawItems.push({
+        item_key:itemKey,source_type:'member_card',source_id:c.id,code:c.card_number,
+        kind_label:'Thẻ thành viên',title:`Gia hạn / đồng bộ thẻ ${c.card_number} (${c.full_name})`,
+        detail:`Hạn thẻ: ${c.expires_at} · Đơn vị: ${c.org_name||'Sky First'}`,
+        target:c.card_number,target_view:'admin-issuance',
+        org_node_id:c.org_node_id||null,org_name:c.org_name||'Sky First Network',
+        assigned_account_id:qs?.assigned_account_id||null,assigned_username:qs?.assigned_username||null,
+        priority:prio,priority_score:prioScore,priority_reason:isOverdue?'Thẻ đã quá hạn nhưng vẫn đánh dấu active':'Thẻ sắp hết hạn trong vòng 30 ngày',
+        workflow_state:wfState,is_overdue:isOverdue,
+        blocked_reason:qs?.blocked_reason||null,due_at:c.expires_at,reminder_count:Number(qs?.reminder_count||0),
+        collaborators:[],dependencies:[],created_at:c.created_at
+      });
+    }
+    for(const p of (profileRows.results||[])){
+      const itemKey=`profile:${p.id}`;
+      const qs=qMap.get(itemKey);
+      const wfState=qs?.workflow_state||'open';
+      rawItems.push({
+        item_key:itemKey,source_type:'person_profile',source_id:p.id,code:p.member_code,
+        kind_label:'Hồ sơ thiếu dữ liệu',title:`Bổ sung định danh/email cho ${p.full_name} (${p.member_code})`,
+        detail:`Thiếu: ${!p.email?'Email ':''}${!p.id_number?'CCCD':''}`.trim(),
+        target:p.member_code,target_view:'admin-members',
+        org_node_id:qs?.org_node_id||null,org_name:'Quản lý Hồ sơ',
+        assigned_account_id:qs?.assigned_account_id||null,assigned_username:qs?.assigned_username||null,
+        priority:qs?.priority||'low',priority_score:30,priority_reason:'Hồ sơ đang hoạt động nhưng thiếu trường định danh chuẩn',
+        workflow_state:wfState,is_overdue:false,
+        blocked_reason:qs?.blocked_reason||null,due_at:qs?.due_at||null,reminder_count:Number(qs?.reminder_count||0),
+        collaborators:[],dependencies:[],created_at:p.updated_at
+      });
+    }
+    const qFilter=clean(url.searchParams.get('q'),120).toLowerCase();
+    const kindFilter=clean(url.searchParams.get('kind'),40);
+    const stateFilter=clean(url.searchParams.get('workflow_state'),40);
+    const prioFilter=clean(url.searchParams.get('priority'),30);
+    const assigneeFilter=clean(url.searchParams.get('assigned_account_id'),100);
+    let filtered=rawItems.filter(x=>{
+      if(qFilter&&![x.title,x.detail,x.code,x.kind_label,x.priority_reason,x.assigned_username].some(v=>String(v||'').toLowerCase().includes(qFilter)))return false;
+      if(kindFilter&&x.source_type!==kindFilter)return false;
+      if(stateFilter&&x.workflow_state!==stateFilter)return false;
+      if(prioFilter&&x.priority!==prioFilter)return false;
+      if(assigneeFilter&&(assigneeFilter==='unassigned'?Boolean(x.assigned_account_id):x.assigned_account_id!==assigneeFilter))return false;
+      return true;
+    });
+    filtered.sort((a,b)=>b.priority_score-a.priority_score||String(a.created_at||'').localeCompare(String(b.created_at||'')));
+    const queueSummary={
+      total:rawItems.length,
+      overdue:rawItems.filter(x=>x.is_overdue).length,
+      blocked:rawItems.filter(x=>x.workflow_state==='blocked').length,
+      in_progress:rawItems.filter(x=>x.workflow_state==='in_progress').length,
+      unassigned:rawItems.filter(x=>!x.assigned_account_id).length
+    };
+    return json({
+      counts:{pending_requests:Number(pending?.n||0),account_attention:Number(attention?.n||0),expiring_cards:Number(expiring?.n||0),incomplete_profiles:Number(incomplete?.n||0)},
+      queue_summary:queueSummary,
+      items:filtered
+    });
+  }
+  if(url.pathname==='/api/admin/work-center/bulk'&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'member.edit')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const keys=Array.isArray(b.item_keys)?b.item_keys.map(k=>clean(k,120)).filter(Boolean).slice(0,50):[];
+    const action=clean(b.action,40);
+    if(!keys.length||!['claim','assign','set_priority','start','complete','set_status'].includes(action))return json({error:'INVALID_BULK_WORK_ACTION',message:'Danh sách công việc hoặc thao tác hàng loạt không hợp lệ.'},400);
+    const results=[];
+    for(const key of keys){
+      const [srcType,srcId]=key.split(':');
+      if(!srcType||!srcId){results.push({item_key:key,ok:false,error:'INVALID_ITEM_KEY'});continue;}
+      const nextAssignee=action==='claim'?s.account_id:(action==='assign'?clean(b.assigned_account_id,100)||s.account_id:null);
+      const nextPrio=['low','normal','high','urgent','critical'].includes(b.priority)?b.priority:'normal';
+      const nextState=action==='set_status'&&['open','in_progress','paused','completed','escalated'].includes(b.status)?b.status:(action==='start'?'in_progress':action==='complete'?'completed':'open');
+      await env.DB.prepare(`INSERT INTO work_queue_states(item_key,source_type,source_id,assigned_account_id,priority,workflow_state,updated_by_account_id,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(item_key) DO UPDATE SET assigned_account_id=COALESCE(excluded.assigned_account_id,work_queue_states.assigned_account_id),priority=CASE WHEN ?='set_priority' THEN excluded.priority ELSE work_queue_states.priority END,workflow_state=CASE WHEN ? IN ('start','complete','set_status') THEN excluded.workflow_state ELSE work_queue_states.workflow_state END,updated_by_account_id=excluded.updated_by_account_id,updated_at=CURRENT_TIMESTAMP`).bind(
+        key,srcType,srcId,nextAssignee,nextPrio,nextState,s.account_id,action,action
+      ).run();
+      results.push({item_key:key,ok:true,action});
+    }
+    await audit(env,s.account_id,'work_queue_bulk_updated','work_queue',action,null,{count:results.length,action});
+    const okCount=results.filter(x=>x.ok).length;
+    return json({ok:true,processed:keys.length,success:okCount,updated_count:okCount,results});
+  }
+  const workItemMatch=url.pathname.match(/^\/api\/admin\/work-center\/([^/]+)$/);
+  if(workItemMatch&&['GET','PATCH'].includes(req.method)){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const itemKey=decodeURIComponent(workItemMatch[1]);
+    const [srcType,srcId]=itemKey.split(':');
+    if(!srcType||!srcId)return json({error:'INVALID_ITEM_KEY'},400);
+    if(req.method==='GET'){
+      const [qs,history]=await Promise.all([
+        env.DB.prepare(`SELECT w.*,a.username assigned_username FROM work_queue_states w LEFT JOIN accounts a ON a.id=w.assigned_account_id WHERE w.item_key=?`).bind(itemKey).first(),
+        env.DB.prepare(`SELECT l.*,a.username FROM audit_log l LEFT JOIN accounts a ON a.id=l.actor_account_id WHERE (l.entity_id=? OR l.entity_id=?) ORDER BY l.id DESC LIMIT 30`).bind(itemKey,srcId).all()
+      ]);
+      return json({
+        item_key:itemKey,
+        source_type:srcType,
+        source_id:srcId,
+        state:qs?{...qs,status:qs.workflow_state}:{workflow_state:'open',status:'open',priority:'normal'},
+        history:history.results||[],
+        next_steps:[
+          'Kiểm tra tính hợp lệ và quyền đơn vị của hồ sơ nguồn',
+          'Cập nhật trạng thái xử lý hoặc ghi rõ nguyên nhân bị chặn nếu cần phối hợp',
+          'Xác nhận hoàn tất tại hồ sơ nghiệp vụ gốc để đồng bộ toàn hệ thống'
+        ]
+      });
+    }
+    if(!(await hasPerm(env,s.account_id,'member.edit')))return json({error:'FORBIDDEN'},403);
+    const b=await bodyJson(req);
+    const existing=await env.DB.prepare(`SELECT * FROM work_queue_states WHERE item_key=?`).bind(itemKey).first();
+    const act=clean(b.action,40);
+    if(act==='remind'){
+      const recentRemind=await env.DB.prepare(`SELECT CASE WHEN last_reminder_at IS NOT NULL AND last_reminder_at>datetime('now','-60 minutes') THEN 1 ELSE 0 END cooldown,reminder_count FROM work_queue_states WHERE item_key=?`).bind(itemKey).first();
+      if(recentRemind?.cooldown)return json({error:'REMINDER_COOLDOWN_ACTIVE',message:'Đã gửi nhắc hạn gần đây. Hệ thống chặn gửi nhắc hạn lặp liên tục trong vòng 60 phút.'},429);
+      const nextCount=Number(recentRemind?.reminder_count||0)+1;
+      await env.DB.prepare(`INSERT INTO work_queue_states(item_key,source_type,source_id,last_reminder_at,reminder_count,updated_by_account_id,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP,?,?,CURRENT_TIMESTAMP) ON CONFLICT(item_key) DO UPDATE SET last_reminder_at=CURRENT_TIMESTAMP,reminder_count=excluded.reminder_count,updated_by_account_id=excluded.updated_by_account_id,updated_at=CURRENT_TIMESTAMP`).bind(itemKey,srcType,srcId,nextCount,s.account_id).run();
+      await audit(env,s.account_id,'work_item_reminded','work_queue',itemKey,null,{reminder_count:nextCount});
+      return json({ok:true,reminder_count:nextCount,message:'Đã ghi nhận nhắc hạn công việc.'});
+    }
+    const reqState=b.workflow_state||b.status;
+    const nextState=['open','in_progress','paused','blocked','completed','escalated'].includes(reqState)?reqState:(act==='start'||act==='resume'?'in_progress':act==='pause'?'paused':act==='block'?'blocked':act==='complete'?'completed':existing?.workflow_state||'open');
+    const nextPrio=['low','normal','high','urgent','critical'].includes(b.priority)?b.priority:(existing?.priority||'normal');
+    const nextAssignee=act==='claim'?s.account_id:(b.assigned_account_id!==undefined?(clean(b.assigned_account_id,100)||null):(existing?.assigned_account_id||null));
+    const bReason=b.blocked_reason!==undefined?clean(b.blocked_reason,500):(existing?.blocked_reason||null);
+    const bMissing=b.blocked_missing_condition!==undefined?clean(b.blocked_missing_condition,500):(existing?.blocked_missing_condition||null);
+    const bParty=b.blocked_coordination_party!==undefined?clean(b.blocked_coordination_party,240):(existing?.blocked_coordination_party||null);
+    const bPlan=b.blocked_resolution_plan!==undefined?clean(b.blocked_resolution_plan,500):(existing?.blocked_resolution_plan||null);
+    if(nextState==='blocked'&&(!bReason||!bMissing||!bParty)){
+      return json({error:'BLOCKED_DETAILS_REQUIRED',message:'Khi đánh dấu công việc bị chặn, bắt buộc nêu rõ nguyên nhân, điều kiện còn thiếu và bên cần phối hợp.'},400);
+    }
+    const collabs=Array.isArray(b.collaborators)?JSON.stringify(b.collaborators.map(x=>clean(x,100)).filter(Boolean)):(existing?.collaborator_ids_json||'[]');
+    const deps=Array.isArray(b.dependencies)?JSON.stringify(b.dependencies.map(x=>clean(x,120)).filter(Boolean)):(existing?.dependency_keys_json||'[]');
+    const handover=b.handover_note!==undefined?clean(b.handover_note,500):(existing?.handover_note||null);
+    const dueAt=b.due_at!==undefined?(clean(b.due_at,30)||null):(existing?.due_at||null);
+    await env.DB.prepare(`INSERT INTO work_queue_states(item_key,source_type,source_id,org_node_id,assigned_account_id,collaborator_ids_json,dependency_keys_json,priority,workflow_state,blocked_reason,blocked_missing_condition,blocked_coordination_party,blocked_resolution_plan,due_at,handover_note,updated_by_account_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(item_key) DO UPDATE SET org_node_id=COALESCE(excluded.org_node_id,work_queue_states.org_node_id),assigned_account_id=excluded.assigned_account_id,collaborator_ids_json=excluded.collaborator_ids_json,dependency_keys_json=excluded.dependency_keys_json,priority=excluded.priority,workflow_state=excluded.workflow_state,blocked_reason=excluded.blocked_reason,blocked_missing_condition=excluded.blocked_missing_condition,blocked_coordination_party=excluded.blocked_coordination_party,blocked_resolution_plan=excluded.blocked_resolution_plan,due_at=excluded.due_at,handover_note=excluded.handover_note,updated_by_account_id=excluded.updated_by_account_id,updated_at=CURRENT_TIMESTAMP`).bind(
+      itemKey,srcType,srcId,clean(b.org_node_id,100)||existing?.org_node_id||null,nextAssignee,collabs,deps,nextPrio,nextState,bReason,bMissing,bParty,bPlan,dueAt,handover,s.account_id
+    ).run();
+    await audit(env,s.account_id,'work_item_updated','work_queue',itemKey,null,{workflow_state:nextState,priority:nextPrio,assigned_account_id:nextAssignee});
+    return json({ok:true,item_key:itemKey,workflow_state:nextState,priority:nextPrio,assigned_account_id:nextAssignee});
   }
 
   if(url.pathname==='/api/admin/reports'&&req.method==='GET'){
@@ -5481,49 +5723,101 @@ env.DB.prepare(`
   }
 
   // =========================================================
-  // ADMIN SUPPORT TICKETS MANAGEMENT (P7.09, P7.17)
+  // ADMIN SUPPORT TICKETS MANAGEMENT (, )
   // =========================================================
   if(url.pathname==='/api/admin/support-tickets'&&req.method==='GET'){
     if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);
     const status=clean(url.searchParams.get('status'),30);
+    const priority=clean(url.searchParams.get('priority'),30);
+    const q=clean(url.searchParams.get('q'),120);
     const r=await env.DB.prepare(`
       SELECT st.*,p.full_name,p.member_code,p.email,
-        sta.org_node_id,sta.assigned_account_id,sta.priority,sta.sla_due_at,sta.resolution_note,sta.closed_reason,sta.responded_at,sta.resolved_at,
-        a.username assigned_username,o.name org_name
+        sta.org_node_id,sta.assigned_account_id,sta.priority,sta.impact_level,sta.attachment_url,sta.duplicate_of_ticket_id,sta.escalated_to_account_id,sta.escalation_reason,sta.reopen_reason,sta.reopened_at,sta.satisfaction_score,sta.feedback_comment,sta.sla_response_due_at,sta.sla_due_at,sta.sla_breached,sta.resolution_note,sta.closed_reason,sta.responded_at,sta.resolved_at,
+        a.username assigned_username,o.name org_name,
+        CASE WHEN sta.sla_due_at IS NOT NULL AND sta.sla_due_at<datetime('now') AND st.status NOT IN ('completed','closed') THEN 1 ELSE 0 END is_sla_breached
       FROM support_tickets st
       LEFT JOIN people p ON p.id=st.person_id
       LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id
       LEFT JOIN accounts a ON a.id=sta.assigned_account_id
       LEFT JOIN org_nodes o ON o.id=sta.org_node_id
       WHERE (?='' OR st.status=?)
+        AND (?='' OR COALESCE(sta.priority,'normal')=?)
+        AND (?='' OR st.ticket_code LIKE ? OR st.subject LIKE ? OR COALESCE(p.full_name,'') LIKE ?)
       ORDER BY st.created_at DESC LIMIT 250
-    `).bind(status,status).all();
-    return json({items:r.results||[]});
+    `).bind(status,status,priority,priority,q,`%${q}%`,`%${q}%`,`%${q}%`).all();
+    const items=r.results||[];
+    return json({
+      items,
+      stats:{
+        total:items.length,
+        open:items.filter(x=>!['completed','closed'].includes(x.status)).length,
+        completed:items.filter(x=>['completed','closed'].includes(x.status)).length,
+        sla_breached:items.filter(x=>x.is_sla_breached||x.sla_breached).length
+      }
+    });
+  }
+  const supportTicketMsgMatch=url.pathname.match(/^\/api\/admin\/support-tickets\/([^/]+)\/messages$/);
+  if(supportTicketMsgMatch&&['GET','POST'].includes(req.method)){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const tid=decodeURIComponent(supportTicketMsgMatch[1]);
+    const ticket=await env.DB.prepare(`SELECT * FROM support_tickets WHERE id=?`).bind(tid).first();
+    if(!ticket)return json({error:'NOT_FOUND'},404);
+    if(req.method==='GET'){
+      const msgs=await env.DB.prepare(`SELECT m.*,a.username sender_username FROM support_ticket_messages m LEFT JOIN accounts a ON a.id=m.sender_account_id WHERE m.ticket_id=? ORDER BY m.created_at ASC`).bind(tid).all();
+      return json({items:msgs.results||[],messages:msgs.results||[]});
+    }
+    if(!(await hasPerm(env,s.account_id,'member.edit')))return json({error:'FORBIDDEN'},403);
+    const b=await bodyJson(req);
+    const bodyText=clean(b.body,2000);
+    if(!bodyText)return json({error:'MESSAGE_REQUIRED',message:'Nội dung phản hồi không được để trống.'},400);
+    const vis=['public','internal'].includes(b.visibility)?b.visibility:'public';
+    const msgType=['reply','supplement_request','escalation','system'].includes(b.message_type)?b.message_type:'reply';
+    const mid=uid('tmsg');
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO support_ticket_messages(id,ticket_id,sender_account_id,visibility,message_type,body) VALUES(?,?,?,?,?,?)`).bind(mid,tid,s.account_id,vis,msgType,bodyText),
+      env.DB.prepare(`UPDATE support_tickets SET status=CASE WHEN ?='supplement_request' THEN 'waiting_supplement' WHEN status='received' AND ?='public' THEN 'responded' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(msgType,vis,tid)
+    ]);
+    await audit(env,s.account_id,'support_ticket_message_added','support_ticket',tid,null,{visibility:vis,message_type:msgType});
+    return json({ok:true,id:mid,visibility:vis},201);
   }
   const supportTicketMatch=url.pathname.match(/^\/api\/admin\/support-tickets\/([^/]+)$/);
   if(supportTicketMatch&&req.method==='PATCH'){
     if(!(await hasPerm(env,s.account_id,'member.edit')))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);
     const tid=decodeURIComponent(supportTicketMatch[1]);
-    const ticket=await env.DB.prepare(`SELECT * FROM support_tickets WHERE id=?`).bind(tid).first();
+    const ticket=await env.DB.prepare(`SELECT st.*,p.email,p.full_name FROM support_tickets st LEFT JOIN people p ON p.id=st.person_id WHERE st.id=?`).bind(tid).first();
     if(!ticket)return json({error:'NOT_FOUND'},404);
     const b=await bodyJson(req);
-    const nextStatus=['received','in_progress','responded','completed'].includes(b.status)?b.status:ticket.status;
+    const allowedStatuses=['received','open','classifying','in_progress','waiting_supplement','waiting_user','waiting_partner','escalated','responded','completed','closed','reopened'];
+    const rawStatus=allowedStatuses.includes(b.status)?b.status:ticket.status;
+    const nextStatus=['completed','closed'].includes(rawStatus)?'completed':rawStatus==='responded'?'responded':rawStatus==='received'?'received':'in_progress';
     const priority=['low','normal','high','urgent'].includes(b.priority)?b.priority:'normal';
+    const impact=['low','medium','high','critical'].includes(b.impact_level)?b.impact_level:'medium';
     const note=clean(b.resolution_note,2000)||null;
     const closedReason=clean(b.closed_reason,500)||null;
-    if(nextStatus==='completed'&&!note&&!closedReason)return json({error:'RESOLUTION_REQUIRED',message:'Cần nhập kết quả xử lý hoặc lý do đóng yêu cầu hỗ trợ.'},400);
+    const dupId=clean(b.duplicate_of_ticket_id,100)||null;
+    const escAccId=clean(b.escalated_to_account_id,100)||null;
+    const escReason=clean(b.escalation_reason,500)||null;
+    if(['completed','closed'].includes(nextStatus)&&!note&&!closedReason)return json({error:'RESOLUTION_REQUIRED',message:'Cần nhập kết quả xử lý hoặc lý do đóng yêu cầu hỗ trợ trước khi đóng phiếu.'},400);
+    if(rawStatus==='escalated'&&!escReason)return json({error:'ESCALATION_REASON_REQUIRED',message:'Cần ghi rõ lý do leo thang xử lý.'},400);
     await env.DB.batch([
       env.DB.prepare(`UPDATE support_tickets SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextStatus,tid),
-      env.DB.prepare(`INSERT INTO support_ticket_assignments(ticket_id,org_node_id,assigned_account_id,priority,sla_due_at,resolution_note,closed_reason,responded_at,resolved_at,updated_by_account_id,updated_at) VALUES(?,?,?,?,?,?,?,CASE WHEN ? IN ('responded','completed') THEN CURRENT_TIMESTAMP ELSE NULL END,CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE NULL END,?,CURRENT_TIMESTAMP) ON CONFLICT(ticket_id) DO UPDATE SET org_node_id=COALESCE(excluded.org_node_id,support_ticket_assignments.org_node_id),assigned_account_id=COALESCE(excluded.assigned_account_id,support_ticket_assignments.assigned_account_id),priority=excluded.priority,sla_due_at=COALESCE(excluded.sla_due_at,support_ticket_assignments.sla_due_at),resolution_note=COALESCE(excluded.resolution_note,support_ticket_assignments.resolution_note),closed_reason=COALESCE(excluded.closed_reason,support_ticket_assignments.closed_reason),responded_at= COALESCE(support_ticket_assignments.responded_at,excluded.responded_at),resolved_at=COALESCE(support_ticket_assignments.resolved_at,excluded.resolved_at),updated_by_account_id=excluded.updated_by_account_id,updated_at=CURRENT_TIMESTAMP`).bind(tid,clean(b.org_node_id,100)||null,clean(b.assigned_account_id,100)||s.account_id,priority,clean(b.sla_due_at,30)||null,note,closedReason,nextStatus,nextStatus,s.account_id)
+      env.DB.prepare(`INSERT INTO support_ticket_assignments(ticket_id,org_node_id,assigned_account_id,priority,impact_level,duplicate_of_ticket_id,escalated_to_account_id,escalation_reason,sla_due_at,resolution_note,closed_reason,responded_at,resolved_at,updated_by_account_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,CASE WHEN ? IN ('responded','completed','closed') THEN CURRENT_TIMESTAMP ELSE NULL END,CASE WHEN ? IN ('completed','closed') THEN CURRENT_TIMESTAMP ELSE NULL END,?,CURRENT_TIMESTAMP) ON CONFLICT(ticket_id) DO UPDATE SET org_node_id=COALESCE(excluded.org_node_id,support_ticket_assignments.org_node_id),assigned_account_id=COALESCE(excluded.assigned_account_id,support_ticket_assignments.assigned_account_id),priority=excluded.priority,impact_level=excluded.impact_level,duplicate_of_ticket_id=COALESCE(excluded.duplicate_of_ticket_id,support_ticket_assignments.duplicate_of_ticket_id),escalated_to_account_id=COALESCE(excluded.escalated_to_account_id,support_ticket_assignments.escalated_to_account_id),escalation_reason=COALESCE(excluded.escalation_reason,support_ticket_assignments.escalation_reason),sla_due_at=COALESCE(excluded.sla_due_at,support_ticket_assignments.sla_due_at),resolution_note=COALESCE(excluded.resolution_note,support_ticket_assignments.resolution_note),closed_reason=COALESCE(excluded.closed_reason,support_ticket_assignments.closed_reason),responded_at=COALESCE(support_ticket_assignments.responded_at,excluded.responded_at),resolved_at=COALESCE(support_ticket_assignments.resolved_at,excluded.resolved_at),updated_by_account_id=excluded.updated_by_account_id,updated_at=CURRENT_TIMESTAMP`).bind(
+        tid,clean(b.org_node_id,100)||null,clean(b.assigned_account_id,100)||s.account_id,priority,impact,dupId,escAccId,escReason,clean(b.sla_due_at,30)||null,note,closedReason,nextStatus,nextStatus,s.account_id
+      )
     ]);
-    await audit(env,s.account_id,'support_ticket_updated','support_ticket',tid,clean(b.org_node_id,100)||null,{status:nextStatus,priority});
-    return json({ok:true,status:nextStatus});
+    let mail={sent:false,reason:'NOT_REQUESTED'};
+    if(b.notify===true&&ticket.email){
+      mail=await sendMemberEmail(env,{to:ticket.email,templateCode:'support_ticket_updated',entityType:'support_ticket',entityId:tid,subject:`[Sky First] Cập nhật yêu cầu hỗ trợ ${ticket.ticket_code}`,html:memberEmailHtml({title:'Cập nhật trạng thái phiếu hỗ trợ',name:ticket.full_name||ticket.email,intro:`Yêu cầu hỗ trợ ${ticket.ticket_code} đã được cập nhật trạng thái.`,code:ticket.ticket_code,status:nextStatus.toUpperCase(),processing:'',body:note||closedReason||'Vui lòng đăng nhập vào Trung tâm Nghiệp vụ Số Sky First để xem chi tiết.',ctaUrl:env.APP_URL||DEFAULT_SYSTEM_IDENTITY.appUrl,ctaLabel:'Xem yêu cầu hỗ trợ'})});
+    }
+    await audit(env,s.account_id,'support_ticket_updated','support_ticket',tid,clean(b.org_node_id,100)||null,{status:nextStatus,priority,impact_level:impact,duplicate_of_ticket_id:dupId,email_sent:mail.sent===true});
+    return json({ok:true,status:nextStatus,email_sent:mail.sent===true});
   }
 
   // =========================================================
-  // ADMIN GOVERNANCE & P4-P7 UNIFIED CAPABILITY ENGINE
+  // ADMIN GOVERNANCE &  UNIFIED CAPABILITY ENGINE
   // =========================================================
   if(url.pathname==='/api/admin/governance/overview'&&req.method==='GET'){
     if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
@@ -5606,16 +5900,16 @@ env.DB.prepare(`
     if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN',message:'Cần quyền Quản trị Mạng lưới hoặc Quản trị Hệ thống để cập nhật sổ đăng ký quản trị.'},403);
     const b=await bodyJson(req);
     const allowedDomains=new Set([
-      'workflow_def','workflow_change','workflow_exception','sod_rule',
+      'workflow_def','workflow_change','workflow_exception','sod_rule','policy_rule',
       'knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment',
-      'legal_obligation','privacy_dsar','background_job','backup_verify','tech_dependency','service_catalog','route_link','email_template','csr_program','esd_program','public_page','feature_flag','cost_record','tech_handover','archive_inspection',
+      'legal_obligation','privacy_dsar','background_job','backup_verify','tech_dependency','service_catalog','route_link','email_template','csr_program','esd_program','public_page','form_definition','feature_flag','cost_record','tech_handover','archive_inspection',
       'capability_map','case_lifecycle','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','ops_lesson','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio'
     ]);
     const domainGroup=clean(b.domain_group,60);
     const code=clean(b.code,80).toUpperCase();
     const title=clean(b.title,240);
     if(!allowedDomains.has(domainGroup)||!code||!title)return json({error:'INVALID_GOVERNANCE_ENTRY',message:'Thiếu phân nhóm hợp lệ, mã định danh hoặc tiêu đề.'},400);
-    // SoD check (P4.03): proposer cannot self-approve a workflow change or exception if approver_account_id is explicitly set to self on restricted groups
+    // SoD check (): proposer cannot self-approve a workflow change or exception if approver_account_id is explicitly set to self on restricted groups
     if(['workflow_change','workflow_exception','decision_record'].includes(domainGroup)&&b.approver_account_id&&b.approver_account_id===s.account_id&&b.owner_account_id===s.account_id&&b.status==='approved'){
       return json({error:'SOD_CONFLICT_DETECTED',message:'Xung đột phân tách nhiệm vụ (SoD): Người đề xuất không được tự phê duyệt trực tiếp mục này mà không có ngoại lệ được cấp thẩm quyền xác nhận.'},409);
     }
@@ -5633,7 +5927,7 @@ env.DB.prepare(`
     return json({ok:true,id,code},201);
   }
 
-  // P6.47 Safe Archive / ZIP Inspection Endpoint (inspects structure without executing code)
+  //  Safe Archive / ZIP Inspection Endpoint (inspects structure without executing code)
   if(url.pathname==='/api/admin/archive-inspect'&&req.method==='POST'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     const bytes=new Uint8Array(await req.arrayBuffer());
@@ -5647,7 +5941,7 @@ env.DB.prepare(`
     return json(report,report.valid?200:400);
   }
 
-  // P6.19 & P6.44 Admin Email & OTP Delivery Logs
+  //  &  Admin Email & OTP Delivery Logs
   if(url.pathname==='/api/admin/email-center'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);
@@ -5664,7 +5958,7 @@ env.DB.prepare(`
     });
   }
 
-  // P4-P7 Governance Registry Update & Approval Lifecycle (with SoD enforcement)
+  //  Governance Registry Update & Approval Lifecycle (with SoD enforcement)
   const govPatchMatch=url.pathname.match(/^\/api\/admin\/governance\/registry\/([^/]+)$/);
   if(govPatchMatch&&req.method==='PATCH'){
     if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN',message:'Cần quyền Quản trị Mạng lưới hoặc Quản trị Hệ thống để cập nhật mục quản trị.'},403);
@@ -5680,7 +5974,7 @@ env.DB.prepare(`
     const nextEvidence=b.evidence_ref!==undefined?clean(b.evidence_ref,500):existing.evidence_ref;
     const nextPayload=typeof b.payload==='object'&&b.payload!==null?JSON.stringify(b.payload):(b.payload_json!==undefined?clean(b.payload_json,4000):existing.payload_json);
     const nextEffectiveTo=b.effective_to!==undefined?(clean(b.effective_to,20)||null):existing.effective_to;
-    // SoD check (P4.03): Owner cannot self-approve restricted governance records
+    // SoD check (): Owner cannot self-approve restricted governance records
     if(nextStatus==='approved'&&['workflow_change','workflow_exception','decision_record'].includes(existing.domain_group)){
       const effectiveOwner=clean(b.owner_account_id,100)||existing.owner_account_id;
       if(effectiveOwner===s.account_id){
@@ -5696,7 +5990,7 @@ env.DB.prepare(`
     return json({ok:true,id:gid,code:existing.code,status:nextStatus,version_label:nextVersion});
   }
 
-  // P6.22 Configuration Impact Preview
+  //  Configuration Impact Preview
   if(url.pathname==='/api/admin/portal-config/preview-impact'&&req.method==='POST'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     const b=await bodyJson(req);
@@ -5722,7 +6016,7 @@ env.DB.prepare(`
       }
     }
     if(b.links!==undefined){
-      if(!Array.isArray(b.links)||b.links.length!==5)errors.push('Danh sách liên kết hệ sinh thái phải có đúng 5 cổng Sky First.');
+      if(!Array.isArray(b.links)||b.links.length!==DEFAULT_PORTAL_LINKS.length)errors.push(`Danh sách liên kết hệ sinh thái phải có đúng ${DEFAULT_PORTAL_LINKS.length} cổng đang hoạt động.`);
       else affected.push('Menu liên kết hệ sinh thái Sky First trên toàn bộ trang công khai và cổng thành viên');
     }
     if(b.stats!==undefined){
@@ -5744,7 +6038,7 @@ env.DB.prepare(`
     });
   }
 
-  // P6.21, P6.34 Configuration Version Rollback
+  // ,  Configuration Version Rollback
   const cfgRollbackMatch=url.pathname.match(/^\/api\/admin\/config-history\/([^/]+)\/rollback$/);
   if(cfgRollbackMatch&&req.method==='POST'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
@@ -5767,7 +6061,7 @@ env.DB.prepare(`
     return json({ok:true,config_key:row.config_key,restored_from_version:row.version_no,new_version_no:nextVer,settings:restoredObj});
   }
 
-  // P6.19 Safe Email Delivery Retry
+  //  Safe Email Delivery Retry
   const emailRetryMatch=url.pathname.match(/^\/api\/admin\/email-center\/([^/]+)\/retry$/);
   if(emailRetryMatch&&req.method==='POST'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
@@ -5807,7 +6101,7 @@ env.DB.prepare(`
     }
   }
 
-  // P6.36 Vendor-Independent Standardized Metadata & Governance Export Bundle
+  //  Vendor-Independent Standardized Metadata & Governance Export Bundle
   if(url.pathname==='/api/admin/export-bundle'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);
@@ -5835,7 +6129,178 @@ env.DB.prepare(`
     return json({ok:true,exported_at:new Date().toISOString(),sha256_checksum:checksum,bundle},200,{'cache-control':'no-store'});
   }
 
-  // P6.52 Pre-Release Readiness Gate
+  // - &  Workflow Bottleneck Analytics, Processing Times & Business Compliance Report
+  if(url.pathname==='/api/admin/workflows/analytics'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [reqStats,ticketStats,queueStats,govCompliance]=await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) approved,SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) rejected,SUM(CASE WHEN status='supplement' THEN 1 ELSE 0 END) supplement,SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending,SUM(CASE WHEN status IN ('pending','supplement') AND created_at<=datetime('now','-48 hours') THEN 1 ELSE 0 END) overdue_48h,AVG(CASE WHEN reviewed_at IS NOT NULL THEN (julianday(reviewed_at)-julianday(created_at))*24.0 ELSE NULL END) avg_review_hours FROM account_requests`).first(),
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN st.status IN ('completed','closed') THEN 1 ELSE 0 END) completed,SUM(CASE WHEN st.status='waiting_supplement' THEN 1 ELSE 0 END) waiting_supplement,SUM(CASE WHEN st.status='escalated' THEN 1 ELSE 0 END) escalated,SUM(CASE WHEN sta.sla_due_at IS NOT NULL AND sta.sla_due_at<datetime('now') AND st.status NOT IN ('completed','closed') THEN 1 ELSE 0 END) overdue_sla FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id`).first(),
+      env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN workflow_state='blocked' THEN 1 ELSE 0 END) blocked,SUM(CASE WHEN workflow_state='in_progress' THEN 1 ELSE 0 END) in_progress,SUM(CASE WHEN workflow_state='completed' THEN 1 ELSE 0 END) completed FROM work_queue_states`).first(),
+      env.DB.prepare(`SELECT domain_group,status,COUNT(*) n FROM governance_registry WHERE domain_group IN ('workflow_def','workflow_change','workflow_exception','sod_rule','policy_rule','decision_record') GROUP BY domain_group,status`).all()
+    ]);
+    const reqTotal=Number(reqStats?.total||0);
+    const reqApproved=Number(reqStats?.approved||0);
+    const bottlenecks=[];
+    if(Number(reqStats?.overdue_48h||0)>0){
+      bottlenecks.push({step:'Xét duyệt hồ sơ đăng ký tài khoản',waiting_count:Number(reqStats.overdue_48h),severity:'high',evidence:`${reqStats.overdue_48h} hồ sơ ở trạng thái pending/supplement quá 48 giờ.`});
+    }
+    if(Number(ticketStats?.overdue_sla||0)>0){
+      bottlenecks.push({step:'Phản hồi và giải quyết phiếu hỗ trợ nghiệp vụ',waiting_count:Number(ticketStats.overdue_sla),severity:'high',evidence:`${ticketStats.overdue_sla} phiếu hỗ trợ đã vượt thời hạn cam kết SLA.`});
+    }
+    if(Number(queueStats?.blocked||0)>0){
+      bottlenecks.push({stage:'Xử lý công việc bị chặn chờ bên phối hợp',step:'Xử lý công việc bị chặn chờ bên phối hợp',waiting_count:Number(queueStats.blocked),severity:'medium',evidence:`${queueStats.blocked} công việc trong hàng đợi đang ở trạng thái blocked.`,recommendation:'Rà soát điều kiện còn thiếu và đôn đốc đơn vị phối hợp.'});
+    }
+    if(!bottlenecks.length){
+      bottlenecks.push({stage:'Vận hành quy trình tổng thể',step:'Vận hành quy trình tổng thể',waiting_count:0,severity:'info',evidence:'Hiện không có hồ sơ đăng ký hoặc phiếu hỗ trợ nào vượt ngưỡng SLA.',recommendation:'Tiếp tục duy trì kiểm soát SLA định kỳ.'});
+    }
+    const arMetrics={
+      total:reqTotal,
+      approved:reqApproved,
+      rejected:Number(reqStats?.rejected||0),
+      supplement_returned:Number(reqStats?.supplement||0),
+      supplement_rate_pct:reqTotal?Number(((Number(reqStats?.supplement||0)/reqTotal)*100).toFixed(1)):0,
+      pending:Number(reqStats?.pending||0),
+      overdue_48h:Number(reqStats?.overdue_48h||0),
+      overdue_48h_count:Number(reqStats?.overdue_48h||0),
+      completion_rate_pct:reqTotal?Number(((reqApproved/reqTotal)*100).toFixed(1)):100,
+      avg_processing_hours:reqStats?.avg_review_hours!=null?Number(Number(reqStats.avg_review_hours).toFixed(2)):0
+    };
+    const supTotal=Number(ticketStats?.total||0);
+    const supMetrics={
+      total:supTotal,
+      completed:Number(ticketStats?.completed||0),
+      waiting_supplement:Number(ticketStats?.waiting_supplement||0),
+      escalated:Number(ticketStats?.escalated||0),
+      overdue_sla:Number(ticketStats?.overdue_sla||0),
+      sla_breach_rate_pct:supTotal?Number(((Number(ticketStats?.overdue_sla||0)/supTotal)*100).toFixed(1)):0,
+      avg_resolution_hours:0
+    };
+    return json({
+      ok:true,
+      workflow_metrics:{account_requests:arMetrics,support_tickets:supMetrics},
+      account_request_workflow:arMetrics,
+      support_workflow:supMetrics,
+      bottlenecks,
+      compliance_breakdown:govCompliance.results||[]
+    });
+  }
+
+  // , , ,  Grounded Business Assistant & Knowledge Impact Analyzer
+  if(url.pathname==='/api/admin/knowledge/assistant'&&req.method==='POST'){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const query=clean(b.query||b.question,300);
+    if(!query)return json({error:'QUERY_REQUIRED',message:'Vui lòng nhập câu hỏi hoặc chủ đề nghiệp vụ cần tra cứu.'},400);
+    const qLike=`%${query}%`;
+    const [matchedDocs,allRules,counts]=await Promise.all([
+      env.DB.prepare(`SELECT code,domain_group,title,version_label,status,summary,evidence_ref,updated_at FROM governance_registry WHERE title LIKE ? OR summary LIKE ? OR code LIKE ? OR domain_group LIKE ? ORDER BY updated_at DESC LIMIT 10`).bind(qLike,qLike,qLike,qLike).all(),
+      env.DB.prepare(`SELECT code,domain_group,title,version_label,status,summary,evidence_ref,updated_at FROM governance_registry WHERE status='active' ORDER BY updated_at DESC LIMIT 15`).all(),
+      env.DB.prepare(`SELECT (SELECT COUNT(*) FROM account_requests WHERE status IN ('pending','supplement')) pending_requests,(SELECT COUNT(*) FROM support_tickets WHERE status NOT IN ('completed','closed')) open_tickets,(SELECT COUNT(*) FROM member_cards WHERE status='active') active_cards`).first()
+    ]);
+    const docs=(matchedDocs.results?.length?matchedDocs.results:allRules.results)||[];
+    const verifiedFacts=docs.slice(0,6).map(d=>({
+      code:d.code,
+      source_code:d.code,
+      domain_group:d.domain_group,
+      title:d.title,
+      version_label:d.version_label,
+      status:d.status,
+      fact:d.summary,
+      evidence_ref:d.evidence_ref||'Nội bộ',
+      provenance:`Sổ đăng ký quản trị (${d.code} · phiên bản ${d.version_label} · nguồn: ${d.evidence_ref||'nội bộ'})`
+    }));
+    const inferences=[
+      `Gợi ý xử lý dựa trên dữ liệu thực tế hiện tại: Hệ thống đang có ${Number(counts?.pending_requests||0)} yêu cầu tài khoản chờ duyệt và ${Number(counts?.open_tickets||0)} phiếu hỗ trợ đang mở.`,
+      'Lưu ý: Mọi đề xuất chuẩn bị nội dung từ Trợ lý Nghiệp vụ chỉ mang tính tham khảo kỹ thuật, không tự động thay thế quyết định phê duyệt của cấp có thẩm quyền.'
+    ];
+    const impactItems=docs.filter(d=>['workflow_def','sod_rule','legal_obligation','sla_standard'].includes(d.domain_group)).map(d=>({
+      code:d.code,
+      title:d.title,
+      impact_note:'Cần rà soát tính đồng bộ của hướng dẫn nội bộ và biểu mẫu liên quan khi cập nhật mục này.'
+    }));
+    return json({
+      ok:true,
+      query,
+      verified_facts:verifiedFacts,
+      inferences_and_recommendations:inferences,
+      knowledge_impact_items:impactItems,
+      insufficient_evidence:matchedDocs.results?.length?[]:['Không tìm thấy văn bản khớp chính xác từ khóa; đang hiển thị các quy tắc đang hiệu lực gần nhất để đối chiếu.'],
+      ai_governance_notice:'Tuân thủ quy tắc quản trị AI: Giới hạn trong phạm vi quyền người dùng; phân biệt rõ dữ kiện đã xác minh và suy luận tham khảo.'
+    });
+  }
+
+  //  &  Case Reconstruction & Provenance Timeline
+  if(url.pathname==='/api/admin/case-reconstruction'&&req.method==='GET'){
+    if(!(await hasPerm(env,s.account_id,'member.view')))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const ref=clean(url.searchParams.get('ref')||url.searchParams.get('subject_id'),120);
+    if(!ref)return json({error:'REF_REQUIRED',message:'Vui lòng nhập mã hồ sơ, mã thành viên, mã yêu cầu hoặc mã phiếu hỗ trợ.'},400);
+    const [person,reqRow,ticketRow,audits,consents]=await Promise.all([
+      env.DB.prepare(`SELECT id,member_code,full_name,email,status,created_at,updated_at FROM people WHERE id=? OR member_code=? OR lower(email)=lower(?) LIMIT 1`).bind(ref,ref,ref).first(),
+      env.DB.prepare(`SELECT id,request_code,full_name,email,status,admin_note,reviewed_at,created_at FROM account_requests WHERE id=? OR request_code=? OR lower(email)=lower(?) LIMIT 1`).bind(ref,ref,ref).first(),
+      env.DB.prepare(`SELECT st.*,sta.priority,sta.impact_level,sta.resolution_note,sta.closed_reason FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE st.id=? OR st.ticket_code=? LIMIT 1`).bind(ref,ref).first(),
+      env.DB.prepare(`SELECT l.*,a.username FROM audit_log l LEFT JOIN accounts a ON a.id=l.actor_account_id WHERE l.entity_id=? OR l.details_json LIKE ? ORDER BY l.id ASC LIMIT 100`).bind(ref,`%${ref}%`).all(),
+      env.DB.prepare(`SELECT id,subject_type,subject_id,email,terms_version,privacy_version,read_acknowledged,terms_accepted,privacy_consent,email_verified,purpose_scope,consented_at FROM legal_consent_records WHERE subject_id=? OR lower(email)=lower(?) ORDER BY consented_at ASC`).bind(ref,ref).all()
+    ]);
+    const timeline=[];
+    if(reqRow){
+      timeline.push({timestamp:reqRow.created_at,event:'Tiếp nhận yêu cầu đăng ký tài khoản',source:`account_requests (${reqRow.request_code})`,detail:`Trạng thái: ${reqRow.status}`});
+      if(reqRow.reviewed_at)timeline.push({timestamp:reqRow.reviewed_at,event:'Xét duyệt yêu cầu đăng ký',source:`account_requests (${reqRow.request_code})`,detail:reqRow.admin_note||reqRow.status});
+    }
+    if(person){
+      timeline.push({timestamp:person.created_at,event:'Khởi tạo hồ sơ thành viên chính thức',source:`people (${person.member_code})`,detail:`Họ tên: ${person.full_name} · Trạng thái: ${person.status}`});
+    }
+    if(ticketRow){
+      timeline.push({timestamp:ticketRow.created_at,event:'Tạo phiếu hỗ trợ nghiệp vụ',source:`support_tickets (${ticketRow.ticket_code})`,detail:`${ticketRow.subject} (${ticketRow.status})`});
+    }
+    for(const c of (consents.results||[])){
+      timeline.push({timestamp:c.consented_at,event:'Ghi nhận bằng chứng đồng ý pháp lý & điều khoản',source:`legal_consent_records (${c.id})`,detail:`Phiên bản: ${c.terms_version} / ${c.privacy_version} · OTP verified: ${c.email_verified}`});
+    }
+    for(const a of (audits.results||[])){
+      timeline.push({timestamp:a.created_at,event:`Nhật ký kiểm toán: ${a.action}`,source:`audit_log (#${a.id} bởi ${a.username||'Hệ thống'})`,detail:`${a.entity_type} · ${a.entity_id||''}`});
+    }
+    timeline.sort((x,y)=>String(x.timestamp||'').localeCompare(String(y.timestamp||'')));
+    return json({
+      ok:true,
+      ref,
+      found:Boolean(person||reqRow||ticketRow||timeline.length),
+      person:person||null,
+      event_count:timeline.length,
+      entities:{person:person||null,account_request:reqRow||null,support_ticket:ticketRow||null},
+      consents:consents.results||[],
+      timeline:timeline.map(t=>({...t,title:t.event})),
+      provenance_note:'Chuỗi sự kiện được tái dựng trực tiếp từ các bảng dữ liệu gốc (people, account_requests, support_tickets, legal_consent_records, audit_log).'
+    });
+  }
+
+  //  &  Data & Knowledge Consistency Checker
+  if(url.pathname==='/api/admin/data-consistency'&&req.method==='GET'){
+    if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [orphanAccounts,orphanMemberships,expiredActiveCards,expiredGovRules,duplicatePendingReqs]=await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) n FROM accounts a LEFT JOIN people p ON p.id=a.person_id WHERE p.id IS NULL`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM org_memberships m LEFT JOIN people p ON p.id=m.person_id LEFT JOIN org_nodes o ON o.id=m.org_node_id WHERE p.id IS NULL OR o.id IS NULL`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at<date('now')`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM governance_registry WHERE status='active' AND effective_to IS NOT NULL AND effective_to<date('now')`).first(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM (SELECT lower(email) em FROM account_requests WHERE status IN ('pending','supplement') GROUP BY lower(email) HAVING COUNT(*)>1)`).first()
+    ]);
+    const checks=[
+      {code:'ORPHAN_ACCOUNTS',title:'Tài khoản không gắn với hồ sơ thành viên hợp lệ',count:Number(orphanAccounts?.n||0),status:Number(orphanAccounts?.n||0)===0?'passed':'warning'},
+      {code:'ORPHAN_MEMBERSHIPS',title:'Bản ghi đơn vị/vai trò mồ côi',count:Number(orphanMemberships?.n||0),status:Number(orphanMemberships?.n||0)===0?'passed':'warning'},
+      {code:'EXPIRED_ACTIVE_CARDS',title:'Thẻ đã qua ngày hết hạn nhưng trạng thái lưu trữ vẫn là active (đã được chặn bởi effectiveIssueStatus)',count:Number(expiredActiveCards?.n||0),status:Number(expiredActiveCards?.n||0)===0?'passed':'info'},
+      {code:'EXPIRED_GOVERNANCE_DOCS',title:'Quy tắc / văn bản tri thức đã hết hạn hiệu lực cần rà soát cập nhật',count:Number(expiredGovRules?.n||0),status:Number(expiredGovRules?.n||0)===0?'passed':'warning'},
+      {code:'DUPLICATE_PENDING_REQUESTS',title:'Yêu cầu đăng ký đang chờ bị trùng địa chỉ email',count:Number(duplicatePendingReqs?.n||0),status:Number(duplicatePendingReqs?.n||0)===0?'passed':'warning'}
+    ];
+    return json({
+      ok:true,
+      consistent:checks.every(c=>c.status==='passed'||c.status==='info'),
+      checks
+    });
+  }
+
+  //  Pre-Release Readiness Gate
   if(url.pathname==='/api/admin/release-readiness'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);

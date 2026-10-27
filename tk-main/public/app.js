@@ -30,12 +30,10 @@ const safeStore={get:k=>{try{return localStorage.getItem(k)}catch{return null}},
 let logo='/sfn-logo.png';
 const vietnamDateInput=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return `${v.year}-${v.month}-${v.day}`};
 
+const RETIRED_OR_EXTERNAL_PORTAL_HOST_RE=/^(?:tnv|slc|mail|sfec)\.skyfirst\.io\.vn$/i;
 let PORTALS=[
   ['Trang Thông Tin Điện Tử Sky First','https://www.skyfirst.io.vn/','Thông tin chính thức của Sky First'],
-  ['Cổng Thông Tin Số Sky First','https://ctt.skyfirst.io.vn/','Thông tin, chương trình và tiện ích số'],
-  ['Trung Tâm Tình Nguyện Viên Sky First','https://tnv.skyfirst.io.vn/','Hoạt động tình nguyện và cộng đồng'],
-  ['Trung Tâm Học Tập Số Sky First','https://slc.skyfirst.io.vn/','Học tập và lớp học trực tuyến'],
-  ['Trung Tâm Thư Điện Tử Sky First','https://mail.skyfirst.io.vn/','Dịch vụ thư điện tử']
+  ['Cổng Thông Tin Số Sky First','https://ctt.skyfirst.io.vn/','Thông tin, chương trình và tiện ích số']
 ];
 const safeImageUrl=(value,fallback='')=>{
   const raw=String(value||'').trim();
@@ -50,7 +48,7 @@ const safeImageUrl=(value,fallback='')=>{
   }catch{return fallback}
 };
 const allowedPortalUrl=value=>{
-  try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&(u.hostname==='skyfirst.io.vn'||u.hostname.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}
+  try{const u=new URL(value);const h=u.hostname.toLowerCase();if(RETIRED_OR_EXTERNAL_PORTAL_HOST_RE.test(h))return null;return u.protocol==='https:'&&!u.username&&!u.password&&(h==='skyfirst.io.vn'||h.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}
 };
 function applyPortalConfig(data){
   const d=data&&typeof data==='object'?data:{};
@@ -73,9 +71,9 @@ function applyPortalConfig(data){
   document.title=String(brand.siteName||'Trung tâm Nghiệp vụ Số Sky First').slice(0,100);
   document.querySelectorAll('[data-site-name]').forEach(el=>{el.textContent=brand.siteName||'Trung tâm Nghiệp vụ Số Sky First'});
   document.querySelectorAll('img[data-brand-logo],.side-logo,.gate-brand img,.auth-mobile-brand img,.standalone-header img,.standalone-panel>img').forEach(el=>{el.src=logo});
-  if(Array.isArray(d.links)&&d.links.length===5){
-    const links=d.links.map(x=>[String(x?.name||'').slice(0,100),allowedPortalUrl(x?.url)||'',String(x?.description||'').slice(0,140)]);
-    if(links.length===5&&links.every(x=>x[0]&&x[1]))PORTALS=links;
+  if(Array.isArray(d.links)&&d.links.length>=1){
+    const links=d.links.map(x=>[String(x?.name||'').slice(0,100),allowedPortalUrl(x?.url)||'',String(x?.description||'').slice(0,140)]).filter(x=>x[0]&&x[1]);
+    if(links.length>=1)PORTALS=links;
   }
   refreshPortalMenus();
 }
@@ -2390,7 +2388,7 @@ async function renderProfile(c){
 
   $('#changeEmailOtpBtn').onclick=()=>{
     let verifiedEmailToken='';
-    modal('Đổi email đăng nhập (Xác minh OTP · P2.06 / P6.44)',`
+    modal('Đổi email đăng nhập (Xác minh mã OTP)',`
       <form id="changeEmailForm" class="form-grid">
         <p class="muted" style="grid-column:1/-1">Email hiện tại: <b>${esc(p.email||'—')}</b>. Để bảo vệ tài khoản, hệ thống yêu cầu xác minh mã OTP 6 chữ số gửi tới địa chỉ email mới trước khi cập nhật.</p>
         <label style="grid-column:1/-1">Địa chỉ email mới *<input type="email" name="new_email" id="newEmailInput" required placeholder="nhap-email-moi@domain.vn"></label>
@@ -3245,6 +3243,16 @@ function renderSupport(c){
         </label>
 
         <label>
+          Mức độ ảnh hưởng
+          <select name="impact_level">
+            <option value="low">Thấp — Cần hướng dẫn / tra cứu thông tin</option>
+            <option value="medium" selected>Trung bình — Ảnh hưởng thao tác cá nhân</option>
+            <option value="high">Cao — Gián đoạn nghiệp vụ đơn vị / sự kiện</option>
+            <option value="critical">Khẩn cấp — Ngừng hoạt động diện rộng / bảo mật</option>
+          </select>
+        </label>
+
+        <label>
           Tiêu đề
           <input
             name="subject"
@@ -3261,6 +3269,11 @@ function renderSupport(c){
           ></textarea>
         </label>
 
+        <label>
+          Đường dẫn tệp minh chứng (nếu có)
+          <input name="attachment_url" placeholder="/api/files/... hoặc https://nghiepvu.skyfirst.io.vn/...">
+        </label>
+
         <button class="primary">
           Gửi yêu cầu
         </button>
@@ -3270,78 +3283,56 @@ function renderSupport(c){
     </div>
   `;
 
-
   $('#pwForm').onsubmit=async e=>{
-
     e.preventDefault();
-
     try{
-
-      await api(
-        '/api/me/password',
-        {
-          method:'POST',
-          body:JSON.stringify(
-            Object.fromEntries(
-              new FormData(e.target)
-            )
-          )
-        }
-      );
-
-      alert(
-        'Đã đổi mật khẩu.'
-      );
-
+      await api('/api/me/password',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+      alert('Đã đổi mật khẩu.');
       e.target.reset();
-
     }catch(err){
-
-      alert(
-        err.data?.error||
-        err.message
-      );
+      alert(err.data?.error||err.message);
     }
   };
 
-
   $('#ticketForm').onsubmit=async e=>{
-
     e.preventDefault();
-
     try{
-
-      const d=
-        await api(
-          '/api/me/support',
-          {
-            method:'POST',
-            body:JSON.stringify(
-              Object.fromEntries(
-                new FormData(e.target)
-              )
-            )
-          }
-        );
-
-      toast('Đã ghi nhận yêu cầu hỗ trợ: '+d.ticket_code);
+      const d=await api('/api/me/support',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+      toast('Đã ghi nhận yêu cầu hỗ trợ: '+d.ticket_code+(d.potential_duplicate_ticket_code?' (Phát hiện trùng nội dung với '+d.potential_duplicate_ticket_code+')':''));
       e.target.reset();
       await loadMyTickets();
     }catch(err){
-      alert(err.data?.error||err.message);
+      alert(err.data?.message||err.data?.error||err.message);
     }
   };
   const ticketHistoryCard=document.createElement('div');
   ticketHistoryCard.className='card';
   ticketHistoryCard.style.marginTop='14px';
-  ticketHistoryCard.innerHTML='<h2>Lịch sử yêu cầu hỗ trợ của tôi</h2><div id="myTicketsBox" class="empty">Đang tải...</div>';
+  ticketHistoryCard.innerHTML='<h2>Lịch sử yêu cầu hỗ trợ của tôi</h2><p class="muted">Theo dõi hạn SLA phản hồi/xử lý, gửi trao đổi bổ sung, mở lại phiếu khi chưa giải quyết dứt điểm hoặc đánh giá mức độ hài lòng.</p><div id="myTicketsBox" class="empty">Đang tải...</div>';
   c.appendChild(ticketHistoryCard);
   async function loadMyTickets(){
     const box=$('#myTicketsBox');if(!box)return;
     try{
       const r=await api('/api/me/support');
       const items=r.items||[];
-      box.outerHTML=`<div id="myTicketsBox">${items.length?`<div class="table-wrap"><table><thead><tr><th>Mã phiếu</th><th>Danh mục</th><th>Tiêu đề</th><th>Trạng thái</th><th>Phản hồi / Xử lý</th><th>Thời gian</th></tr></thead><tbody>${items.map(x=>`<tr><td><b>${esc(x.ticket_code)}</b></td><td>${esc(x.category)}</td><td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div></td><td><span class="badge ${x.status==='completed'?'ok':'warn'}">${esc(statusVi(x.status))}</span></td><td>${esc(x.resolution_note||x.closed_reason||'Đang chờ bộ phận phụ trách phản hồi')}</td><td>${esc(x.created_at)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Bạn chưa gửi yêu cầu hỗ trợ nào.</div>'}</div>`;
+      box.outerHTML=`<div id="myTicketsBox">${items.length?`<div class="table-wrap"><table><thead><tr><th>Mã phiếu &amp; SLA</th><th>Danh mục &amp; Ảnh hưởng</th><th>Tiêu đề &amp; Trao đổi</th><th>Trạng thái</th><th>Phản hồi / Xử lý</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><b>${esc(x.ticket_code)}</b><div class="meta">Tạo: ${esc(x.created_at)}</div><div class="meta">Hạn xử lý: ${esc(x.sla_resolution_due_at||'—')}</div>${x.duplicate_of_ticket_id?`<div class="meta">Liên kết trùng: ${esc(x.duplicate_of_ticket_id)}</div>`:''}</td><td>${esc(x.category)}<div class="meta">Ảnh hưởng: <b>${esc(x.impact_level||'medium')}</b></div></td><td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div>${(x.messages||[]).length?`<div class="meta" style="margin-top:6px"><b>Trao đổi (${x.messages.length}):</b> ${x.messages.map(m=>`<div>• [${esc(m.sender_role)}] ${esc(m.body)}</div>`).join('')}</div>`:''}</td><td><span class="badge ${x.status==='completed'?'ok':'warn'}">${esc(statusVi(x.status))}</span>${x.reopen_count?`<div class="meta">Đã mở lại ${x.reopen_count} lần</div>`:''}</td><td>${esc(x.resolution_note||x.closed_reason||'Đang chờ bộ phận phụ trách phản hồi')}${x.satisfaction_score?`<div class="meta">Đánh giá: <b>${x.satisfaction_score}/5</b> · ${esc(x.satisfaction_comment||'')}</div>`:''}</td><td><div class="toolbar"><button type="button" class="secondary" data-my-ticket-reply="${esc(x.id)}">Phản hồi thêm</button>${['completed','closed','rejected'].includes(x.status)?`<button type="button" class="secondary" data-my-ticket-reopen="${esc(x.id)}">Mở lại phiếu</button><button type="button" class="primary" data-my-ticket-rate="${esc(x.id)}">Đánh giá</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Bạn chưa gửi yêu cầu hỗ trợ nào.</div>'}</div>`;
+      $$('[data-my-ticket-reply]').forEach(btn=>btn.onclick=async()=>{
+        const body=prompt('Nhập nội dung phản hồi hoặc thông tin bổ sung cho phiếu hỗ trợ:');
+        if(!body)return;
+        try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketReply)}/reply`,{method:'POST',body:JSON.stringify({body})});toast('Đã gửi phản hồi bổ sung.');await loadMyTickets()}catch(e){alert(e.data?.message||e.message)}
+      });
+      $$('[data-my-ticket-reopen]').forEach(btn=>btn.onclick=async()=>{
+        const reason=prompt('Nhập lý do mở lại phiếu hỗ trợ (ví dụ: sự cố vẫn còn tái diễn):');
+        if(!reason)return;
+        try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketReopen)}/reopen`,{method:'POST',body:JSON.stringify({reason})});toast('Đã mở lại phiếu hỗ trợ.');await loadMyTickets()}catch(e){alert(e.data?.message||e.message)}
+      });
+      $$('[data-my-ticket-rate]').forEach(btn=>btn.onclick=()=>{
+        modal('Đánh giá kết quả hỗ trợ',`<form id="rateTicketForm" class="form-grid"><label>Mức độ hài lòng (1 đến 5 sao)<select name="score"><option value="5">5 — Rất hài lòng</option><option value="4">4 — Hài lòng</option><option value="3">3 — Bình thường</option><option value="2">2 — Chưa hài lòng</option><option value="1">1 — Cần cải thiện gấp</option></select></label><label>Nhận xét chi tiết<textarea name="comment" rows="3" placeholder="Ghi nhận thêm ý kiến của bạn..."></textarea></label><button class="primary">Gửi đánh giá</button></form>`);
+        $('#rateTicketForm').onsubmit=async e=>{
+          e.preventDefault();
+          try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketRate)}/feedback`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$('#modal')?.remove();toast('Cảm ơn bạn đã gửi đánh giá chất lượng hỗ trợ.');await loadMyTickets()}catch(err){alert(err.data?.message||err.message)}
+        };
+      });
     }catch{box.textContent='Chưa tải được lịch sử phiếu hỗ trợ.'}
   }
   loadMyTickets();
@@ -3368,6 +3359,14 @@ function statusVi(x){
     todo:'Chưa thực hiện',
     doing:'Đang thực hiện',
     done:'Hoàn thành',
+    open:'Mới tiếp nhận',
+    in_progress:'Đang xử lý',
+    paused:'Tạm dừng',
+    blocked:'Đang bị chặn',
+    escalated:'Đã chuyển cấp',
+    responded:'Đã phản hồi',
+    reopened:'Mở lại',
+    waiting_user:'Chờ người gửi bổ sung',
 
     verified:'Đã xác minh',
     unverified:'Chưa xác minh',
@@ -8123,7 +8122,7 @@ async function renderPortalStudio(c){
   try{
     const [saved,published]=await Promise.all([api('/api/admin/portal-config'),api('/api/public/portal-config')]);
     const settings=saved.settings||{},brand={siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,...(settings.brand||{})};
-    const links=Array.isArray(settings.links)&&settings.links.length===5?settings.links:PORTALS.map(([name,url,description])=>({name,url,description}));
+    const links=Array.isArray(settings.links)&&settings.links.length===PORTALS.length?settings.links:PORTALS.map(([name,url,description])=>({name,url,description}));
     const fallbacks=[['members','Thành viên đang hoạt động'],['activities','Hoạt động đã tổ chức'],['units','Đơn vị trực thuộc'],['programs','Chương trình và dự án']];
     const byKey=new Map((settings.stats||[]).map(x=>[x.key,x]));
     c.innerHTML=`<div class="section-title"><div><h1>Cấu hình giao diện & thống kê</h1><p class="muted">Những thay đổi về nội dung và giao diện thông thường được áp dụng mà không cần sửa mã nguồn.</p></div></div>
@@ -8147,12 +8146,12 @@ async function renderPortalStudio(c){
       <hr><h2>Thông điệp và số liệu ở trang đăng nhập</h2><div class="studio-grid">
       ${fallbacks.map(([key,title])=>{const x=byKey.get(key)||{key,label:title,mode:key==='programs'?'manual':'auto',enabled:key!=='programs',value:null};return `<fieldset class="studio-stat" data-stat-key="${key}"><legend>${esc(title)}</legend><label>Tên hiển thị<input name="label" maxlength="75" value="${esc(x.label||title)}" required></label><label>Cách lấy số liệu<select name="mode"><option value="auto" ${x.mode==='auto'?'selected':''} ${key==='programs'?'disabled':''}>Tự động từ hệ thống</option><option value="manual" ${x.mode==='manual'?'selected':''}>Nhập số đã kiểm chứng</option></select></label><label>Giá trị công bố<input name="value" type="number" min="0" max="1000000000" step="1" value="${x.value??''}" placeholder="Chỉ dùng khi nhập thủ công"></label><label class="studio-check"><input type="checkbox" name="enabled" ${x.enabled!==false?'checked':''}> Hiển thị chỉ số</label></fieldset>`}).join('')}</div>
       <label>Thông điệp bên dưới thống kê<textarea name="tagline" maxlength="190" rows="2">${esc(settings.tagline||published.tagline||'')}</textarea></label>
-      <label>Lý do thay đổi cấu hình (ghi vào lịch sử phiên bản P6.34)<input name="change_reason" maxlength="240" placeholder="Ví dụ: Cập nhật số liệu quý IV và điều chỉnh màu nhận diện"></label>
-      <div class="toolbar"><button class="primary" id="studioSave">Lưu thay đổi</button><button type="button" class="secondary" id="studioPreviewImpact">Xem trước tác động (P6.22)</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div>
+      <label>Lý do thay đổi cấu hình (ghi vào lịch sử phiên bản)<input name="change_reason" maxlength="240" placeholder="Ví dụ: Cập nhật số liệu quý IV và điều chỉnh màu nhận diện"></label>
+      <div class="toolbar"><button class="primary" id="studioSave">Lưu thay đổi</button><button type="button" class="secondary" id="studioPreviewImpact">Xem trước tác động cấu hình</button><a href="/login" target="_blank" rel="noopener" class="secondary" style="padding:10px 16px;border-radius:12px">Xem trang đăng nhập ↗</a></div><div id="studioMsg" role="status" aria-live="polite"></div>
       <div id="studioImpactBox" style="margin-top:10px"></div>
     </form>
     <div class="card" style="margin-top:14px">
-      <div class="section-title"><div><h2>Lịch sử phiên bản &amp; Khôi phục cấu hình (P6.21, P6.34)</h2><p class="muted">Mỗi lần lưu cấu hình được ghi nhận phiên bản kèm trạng thái trước/sau để hỗ trợ khôi phục an toàn.</p></div></div>
+      <div class="section-title"><div><h2>Lịch sử phiên bản &amp; Khôi phục cấu hình</h2><p class="muted">Mỗi lần lưu cấu hình được ghi nhận phiên bản kèm trạng thái trước/sau để hỗ trợ khôi phục an toàn.</p></div></div>
       <div id="studioHistoryBox">Đang tải lịch sử phiên bản...</div>
     </div>`;
     const form=$('#studioForm');
@@ -8184,7 +8183,7 @@ async function renderPortalStudio(c){
       const box=$('#studioImpactBox');box.innerHTML='<div class="muted">Đang phân tích phạm vi ảnh hưởng...</div>';
       try{
         const res=await api('/api/admin/portal-config/preview-impact',{method:'POST',body:JSON.stringify(collectStudioPayload())});
-        box.innerHTML=`<div class="request-note"><b>Kết quả phân tích tác động trước khi lưu (P6.22):</b> ${res.valid?'<span class="status-ok">Hợp lệ</span>':'<span class="status-bad">Có lỗi cần sửa</span>'}<ul>${(res.affected_components||[]).map(x=>`<li>Ảnh hưởng: ${esc(x)}</li>`).join('')}${(res.warnings||[]).map(w=>`<li class="status-bad">Lưu ý: ${esc(w)}</li>`).join('')}${(res.errors||[]).map(er=>`<li class="status-bad">Lỗi: ${esc(er)}</li>`).join('')}</ul></div>`;
+        box.innerHTML=`<div class="request-note"><b>Kết quả phân tích tác động trước khi lưu:</b> ${res.valid?'<span class="status-ok">Hợp lệ</span>':'<span class="status-bad">Có lỗi cần sửa</span>'}<ul>${(res.affected_components||[]).map(x=>`<li>Ảnh hưởng: ${esc(x)}</li>`).join('')}${(res.warnings||[]).map(w=>`<li class="status-bad">Lưu ý: ${esc(w)}</li>`).join('')}${(res.errors||[]).map(er=>`<li class="status-bad">Lỗi: ${esc(er)}</li>`).join('')}</ul></div>`;
       }catch(e){box.textContent='Không thể phân tích tác động: '+(e.data?.message||e.message)}
     };
     async function loadStudioHistory(){
@@ -8766,55 +8765,348 @@ async function renderAdminOrg(c){
    ADMIN - WORK CENTER / REPORTS / SYSTEM
    ========================================================= */
 async function renderAdminWork(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">ĐIỀU HÀNH NGHIỆP VỤ (P4–P7)</div><h1>Trung tâm công việc &amp; Điều phối nghiệp vụ</h1><p class="muted">Quản lý việc cần xử lý, phiếu hỗ trợ nghiệp vụ, quy trình, tri thức, SLA, chất lượng và rủi ro trong một trung tâm duy nhất.</p></div><button class="secondary" id="workRefresh">Làm mới</button></div>
-  <div class="tabs" id="workCenterTabs">
-    <button class="active" data-wtab="queue">Hàng đợi việc cần xử lý</button>
-    <button data-wtab="support">Yêu cầu hỗ trợ nghiệp vụ (P7.09)</button>
-    <button data-wtab="workflows">Quy trình &amp; Phân tách nhiệm vụ (P4)</button>
-    <button data-wtab="knowledge">Tri thức &amp; Hỗ trợ quyết định (P5)</button>
-    <button data-wtab="capabilities">Năng lực nghiệp vụ chuyên sâu (P7)</button>
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">TRUNG TÂM ĐIỀU HÀNH NGHIỆP VỤ</div><h1>Trung tâm công việc &amp; Điều phối nghiệp vụ</h1><p class="muted">Quản lý hàng đợi việc cần xử lý, phiếu hỗ trợ nghiệp vụ, phân tích quy trình, trợ lý tri thức có dẫn nguồn, tái dựng vụ việc và danh mục năng lực.</p></div><button class="secondary" id="workRefresh">Làm mới</button></div>
+  <div class="tabs" id="workCenterTabs" role="tablist">
+    <button class="active" data-wtab="queue" role="tab">Hàng đợi việc cần xử lý</button>
+    <button data-wtab="support" role="tab">Yêu cầu hỗ trợ nghiệp vụ</button>
+    <button data-wtab="workflows" role="tab">Quy trình &amp; Phân tích điểm nghẽn</button>
+    <button data-wtab="knowledge" role="tab">Tri thức, Trợ lý &amp; Tái dựng vụ việc</button>
+    <button data-wtab="capabilities" role="tab">Năng lực, SLA, Rủi ro &amp; Sáng kiến</button>
   </div>
   <div id="workBox" class="card">Đang tải...</div>`;
   let activeWTab='queue';
+  let queueFilters={q:'',kind:'',status:'',priority:'',overdue_only:'',sort:'priority_desc'};
+  let supportFilters={q:'',status:'',category:'',priority:'',sla_breached:''};
+
   const load=async()=>{
     const host=$('#workBox');if(!host)return;
     host.innerHTML='<div class="empty">Đang tải dữ liệu thực tế...</div>';
     if(activeWTab==='queue'){
-      const [d,gov]=await Promise.all([api('/api/admin/work-center'),api('/api/admin/governance/overview').catch(()=>null)]);
+      const qs=new URLSearchParams(Object.entries(queueFilters).filter(([,v])=>v)).toString();
+      const [d,gov]=await Promise.all([api('/api/admin/work-center'+(qs?'?'+qs:'')),api('/api/admin/governance/overview').catch(()=>null)]);
       const items=d.items||[];
       const anom=gov?.anomalies||{};
-      host.innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${[['Yêu cầu chờ',d.counts.pending_requests],['Tài khoản cần chú ý',d.counts.account_attention],['Thẻ sắp hết hạn',d.counts.expiring_cards],['Hồ sơ thiếu thông tin',d.counts.incomplete_profiles]].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div>
-      <div class="card" style="margin-bottom:14px"><h2>Phát hiện bất thường nghiệp vụ &amp; Xung đột trách nhiệm (P4.03, P4.05)</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="card stat"><span>Hồ sơ chờ &gt; 48h</span><strong>${Number(anom.stuck_requests_over_48h||0)}</strong></div><div class="card stat"><span>Thành viên thiếu CCCD/Email</span><strong>${Number(anom.incomplete_active_people||0)}</strong></div><div class="card stat"><span>Thẻ quá hạn cần đồng bộ</span><strong>${Number(anom.expired_cards_still_marked_active||0)}</strong></div><div class="card stat"><span>Xung đột tự đánh giá (SoD)</span><strong>${Number(anom.sod_self_evaluation_conflicts||0)}</strong></div></div></div>
-      <div class="card"><div class="section-title"><h2>Danh sách việc cần xử lý</h2></div>${items.length?`<div class="table-wrap"><table><thead><tr><th>Loại việc</th><th>Nội dung</th><th>Đối tượng</th><th>Thời gian</th><th></th></tr></thead><tbody>${items.map(x=>`<tr><td>${esc(x.kind_label)}</td><td><b>${esc(x.title)}</b><div class="meta">${esc(x.detail||'')}</div></td><td>${esc(x.target||'—')}</td><td>${esc(x.created_at||'')}</td><td><button class="secondary" data-work-view="${esc(x.target_view||'admin-members')}">Mở</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Hiện không có việc cần xử lý.</div>'}</div>`;
+      host.innerHTML=`<div class="grid" style="grid-template-columns:repeat(6,minmax(0,1fr));margin-bottom:14px">${[
+        ['Tổng việc trong hàng đợi',d.counts.total_filtered??items.length],
+        ['Việc quá hạn SLA',d.counts.overdue_items??0],
+        ['Đang bị chặn (Blocked)',d.counts.blocked_items??0],
+        ['Yêu cầu chờ duyệt',d.counts.pending_requests],
+        ['Phiếu hỗ trợ đang mở',d.counts.open_support_tickets??0],
+        ['Thẻ sắp hết hạn',d.counts.expiring_cards]
+      ].map(x=>`<div class="card stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}</div>
+      <div class="card" style="margin-bottom:14px"><h2>Cảnh báo bất thường nghiệp vụ &amp; Kiểm soát phân tách nhiệm vụ</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="card stat"><span>Hồ sơ chờ &gt; 48h</span><strong>${Number(anom.stuck_requests_over_48h||0)}</strong></div><div class="card stat"><span>Thành viên thiếu CCCD/Email</span><strong>${Number(anom.incomplete_active_people||0)}</strong></div><div class="card stat"><span>Thẻ quá hạn cần đồng bộ</span><strong>${Number(anom.expired_cards_still_marked_active||0)}</strong></div><div class="card stat"><span>Xung đột tự đánh giá (SoD)</span><strong>${Number(anom.sod_self_evaluation_conflicts||0)}</strong></div></div></div>
+      <div class="card">
+        <div class="section-title"><h2>Danh sách việc cần xử lý có chấm điểm ưu tiên</h2></div>
+        <div class="toolbar" style="margin-bottom:12px">
+          <input id="wqSearch" placeholder="Tìm tiêu đề, đối tượng, đơn vị, người phụ trách..." value="${esc(queueFilters.q)}" style="min-width:220px">
+          <select id="wqKind">
+            <option value="">Tất cả loại việc</option>
+            <option value="account_request" ${queueFilters.kind==='account_request'?'selected':''}>Yêu cầu cấp tài khoản</option>
+            <option value="support_ticket" ${queueFilters.kind==='support_ticket'?'selected':''}>Phiếu hỗ trợ nghiệp vụ</option>
+            <option value="expiring_card" ${queueFilters.kind==='expiring_card'?'selected':''}>Thẻ thành viên sắp hết hạn</option>
+            <option value="incomplete_profile" ${queueFilters.kind==='incomplete_profile'?'selected':''}>Hồ sơ thiếu dữ liệu chuẩn</option>
+          </select>
+          <select id="wqStatus">
+            <option value="">Tất cả trạng thái</option>
+            <option value="open" ${queueFilters.status==='open'?'selected':''}>Mới tiếp nhận</option>
+            <option value="in_progress" ${queueFilters.status==='in_progress'?'selected':''}>Đang xử lý</option>
+            <option value="paused" ${queueFilters.status==='paused'?'selected':''}>Tạm dừng</option>
+            <option value="blocked" ${queueFilters.status==='blocked'?'selected':''}>Đang bị chặn</option>
+            <option value="escalated" ${queueFilters.status==='escalated'?'selected':''}>Đã chuyển cấp</option>
+            <option value="completed" ${queueFilters.status==='completed'?'selected':''}>Hoàn thành</option>
+          </select>
+          <select id="wqPriority">
+            <option value="">Mọi mức độ ưu tiên</option>
+            <option value="critical" ${queueFilters.priority==='critical'?'selected':''}>Khẩn cấp (Critical)</option>
+            <option value="high" ${queueFilters.priority==='high'?'selected':''}>Cao (High)</option>
+            <option value="normal" ${queueFilters.priority==='normal'?'selected':''}>Bình thường (Normal)</option>
+          </select>
+          <select id="wqSort">
+            <option value="priority_desc" ${queueFilters.sort==='priority_desc'?'selected':''}>Điểm ưu tiên giảm dần</option>
+            <option value="due_asc" ${queueFilters.sort==='due_asc'?'selected':''}>Hạn xử lý gần nhất</option>
+            <option value="waiting_desc" ${queueFilters.sort==='waiting_desc'?'selected':''}>Chờ lâu nhất</option>
+          </select>
+          <label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="wqOverdue" ${queueFilters.overdue_only==='1'?'checked':''}> Chỉ việc quá hạn</label>
+          <button type="button" class="primary" id="wqApplyBtn">Lọc hàng đợi</button>
+        </div>
+        <div class="toolbar" style="margin-bottom:12px">
+          <button type="button" class="secondary" id="wqBulkClaimBtn">Nhận việc hàng loạt (mục đã chọn)</button>
+          <button type="button" class="secondary" id="wqBulkInProgressBtn">Chuyển Đang xử lý hàng loạt</button>
+        </div>
+        ${items.length?`<div class="table-wrap"><table><thead><tr><th><input type="checkbox" id="wqSelectAll" aria-label="Chọn tất cả việc"></th><th>Loại &amp; Đơn vị</th><th>Nội dung &amp; Lý do ưu tiên</th><th>Điểm ưu tiên</th><th>Trạng thái &amp; Phụ trách</th><th>Hạn xử lý / Chờ</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr>
+          <td><input type="checkbox" data-wq-check="${esc(x.item_key)}"></td>
+          <td><b>${esc(x.kind_label)}</b><div class="meta">${esc(x.org_name||'Sky First Network')}</div></td>
+          <td><b>${esc(x.title)}</b><div class="meta">${esc(x.detail||'')}</div><div class="meta" style="color:var(--accent)">Ưu tiên: ${esc(x.priority_reason||'')}</div>${x.status==='blocked'?`<div class="service-warning" style="margin-top:4px">Bị chặn: ${esc(x.blocked_reason||'')} · Điều kiện thiếu: ${esc(x.blocked_missing_condition||'')} · Phối hợp: ${esc(x.blocked_coordination_party||'')}</div>`:''}</td>
+          <td><span class="badge ${x.priority==='critical'||x.overdue?'off':'warn'}">${Number(x.priority_score||0)} điểm · ${esc(x.priority)}</span></td>
+          <td><span class="badge ${x.status==='completed'?'ok':x.status==='blocked'?'off':'warn'}">${esc(statusVi(x.status))}</span><div class="meta">Phụ trách: <b>${esc(x.assignee_name||'Chưa phân công')}</b></div></td>
+          <td><div>Hạn: <b>${esc((x.due_at||'—').slice(0,16).replace('T',' '))}</b></div><div class="meta">Đã chờ: ${Number(x.waiting_hours||0)} giờ ${x.overdue?'· <b class="status-bad">QUÁ HẠN</b>':''}</div></td>
+          <td><div class="toolbar">
+            <button type="button" class="primary" data-wq-manage="${esc(x.item_key)}">Xử lý / Phân công</button>
+            <button type="button" class="secondary" data-wq-remind="${esc(x.item_key)}">Nhắc việc</button>
+            <button type="button" class="secondary" data-work-view="${esc(x.target_view||'admin-members')}">Hồ sơ gốc</button>
+          </div></td>
+        </tr>`).join('')}</tbody></table></div>`:'<div class="empty">Không có công việc nào khớp bộ lọc hiện tại.</div>'}
+      </div>`;
+      $('#wqApplyBtn').onclick=()=>{
+        queueFilters={
+          q:$('#wqSearch').value.trim(),
+          kind:$('#wqKind').value,
+          status:$('#wqStatus').value,
+          priority:$('#wqPriority').value,
+          sort:$('#wqSort').value,
+          overdue_only:$('#wqOverdue').checked?'1':''
+        };
+        load();
+      };
+      const selAll=$('#wqSelectAll');
+      if(selAll)selAll.onchange=()=>$$('[data-wq-check]').forEach(cb=>{cb.checked=selAll.checked});
+      const getSelectedKeys=()=>$$('[data-wq-check]:checked').map(cb=>cb.dataset.wqCheck);
+      $('#wqBulkClaimBtn').onclick=async()=>{
+        const keys=getSelectedKeys();if(!keys.length)return alert('Hãy chọn ít nhất 1 công việc trong bảng.');
+        try{const r=await api('/api/admin/work-center/bulk',{method:'POST',body:JSON.stringify({item_keys:keys,action:'claim',handover_note:'Nhận việc hàng loạt từ hàng đợi'})});toast(`Đã nhận ${r.updated_count} công việc.`);await load()}catch(e){alert(e.data?.message||e.message)}
+      };
+      $('#wqBulkInProgressBtn').onclick=async()=>{
+        const keys=getSelectedKeys();if(!keys.length)return alert('Hãy chọn ít nhất 1 công việc trong bảng.');
+        try{const r=await api('/api/admin/work-center/bulk',{method:'POST',body:JSON.stringify({item_keys:keys,action:'set_status',status:'in_progress',handover_note:'Chuyển trạng thái đang xử lý hàng loạt'})});toast(`Đã cập nhật ${r.updated_count} công việc.`);await load()}catch(e){alert(e.data?.message||e.message)}
+      };
       $$('[data-work-view]').forEach(b=>b.onclick=()=>goView(b.dataset.workView));
+      $$('[data-wq-remind]').forEach(b=>b.onclick=async()=>{
+        try{
+          await api('/api/admin/work-center/'+encodeURIComponent(b.dataset.wqRemind),{method:'PATCH',body:JSON.stringify({action:'remind',handover_note:'Gửi nhắc việc có kiểm soát tần suất'})});
+          toast('Đã ghi nhận nhắc việc.');await load();
+        }catch(e){alert(e.data?.message||e.data?.error||e.message)}
+      });
+      $$('[data-wq-manage]').forEach(b=>b.onclick=async()=>{
+        const key=b.dataset.wqManage;
+        const row=items.find(r=>r.item_key===key);if(!row)return;
+        let detail={state:null,history:[]};
+        try{detail=await api('/api/admin/work-center/'+encodeURIComponent(key))}catch{}
+        modal('Điều phối công việc · '+esc(row.title),`<div class="request-note"><b>Điểm ưu tiên:</b> ${row.priority_score} (${esc(row.priority_reason)})<br><b>Đối tượng:</b> ${esc(row.target)} · <b>Đơn vị:</b> ${esc(row.org_name||'Sky First Network')}</div>
+        <form id="wqManageForm" class="form-grid">
+          <label>Thao tác điều phối<select name="action">
+            <option value="update">Cập nhật tiến độ / trạng thái</option>
+            <option value="claim">Nhận việc về tôi</option>
+            <option value="assign">Giao việc / bàn giao người xử lý</option>
+          </select></label>
+          <label>Trạng thái tiến độ<select name="status">
+            <option value="open" ${row.status==='open'?'selected':''}>Mới tiếp nhận (open)</option>
+            <option value="in_progress" ${row.status==='in_progress'?'selected':''}>Đang xử lý (in_progress)</option>
+            <option value="paused" ${row.status==='paused'?'selected':''}>Tạm dừng (paused)</option>
+            <option value="blocked" ${row.status==='blocked'?'selected':''}>Đang bị chặn (blocked — bắt buộc nhập 3 thông tin)</option>
+            <option value="escalated" ${row.status==='escalated'?'selected':''}>Chuyển cấp xử lý (escalated)</option>
+            <option value="completed" ${row.status==='completed'?'selected':''}>Hoàn thành (completed)</option>
+          </select></label>
+          <label>Mức độ ưu tiên<select name="priority">
+            <option value="normal" ${row.priority==='normal'?'selected':''}>Bình thường</option>
+            <option value="high" ${row.priority==='high'?'selected':''}>Cao</option>
+            <option value="critical" ${row.priority==='critical'?'selected':''}>Khẩn cấp</option>
+          </select></label>
+          <label>Người phụ trách chính<input name="assignee_name" value="${esc(row.assignee_name||'')}"></label>
+          <label>Người phối hợp (phân cách bằng dấu phẩy)<input name="collaborators" value="${esc((row.collaborators||[]).join(', '))}" placeholder="Ví dụ: Ban Nhân sự, Văn phòng Trung ương"></label>
+          <label>Phụ thuộc công việc (mã item_key)<input name="dependencies" value="${esc((row.dependencies||[]).join(', '))}" placeholder="Ví dụ: account_request:req_01"></label>
+          <label>Lý do bị chặn (bắt buộc nếu chọn Đang bị chặn)<input name="blocked_reason" value="${esc(row.blocked_reason||'')}"></label>
+          <label>Điều kiện còn thiếu (bắt buộc nếu chọn Đang bị chặn)<input name="blocked_missing_condition" value="${esc(row.blocked_missing_condition||'')}"></label>
+          <label style="grid-column:1/-1">Bên cần phối hợp tháo gỡ (bắt buộc nếu chọn Đang bị chặn)<input name="blocked_coordination_party" value="${esc(row.blocked_coordination_party||'')}"></label>
+          <label style="grid-column:1/-1">Ghi chú bàn giao / Kết quả xử lý<textarea name="handover_note" rows="3">${esc(row.resolution_result||'')}</textarea></label>
+          <button class="primary">Lưu điều phối công việc</button>
+        </form>
+        <div style="margin-top:12px"><b>Lịch sử thay đổi trên mục công việc (${(detail.history||[]).length}):</b>
+          <div class="list" style="margin-top:6px">${(detail.history||[]).map(h=>`<div class="list-item"><b>${esc(h.action)}</b> · <span class="meta">${esc(h.created_at)} · ${esc(h.username||'Hệ thống')}</span></div>`).join('')||'<div class="muted">Chưa có lịch sử ghi nhận riêng.</div>'}</div>
+        </div>`);
+        $('#wqManageForm').onsubmit=async e=>{
+          e.preventDefault();
+          const fd=Object.fromEntries(new FormData(e.target));
+          fd.collaborators=String(fd.collaborators||'').split(',').map(s=>s.trim()).filter(Boolean);
+          fd.dependencies=String(fd.dependencies||'').split(',').map(s=>s.trim()).filter(Boolean);
+          fd.resolution_result=fd.handover_note;
+          try{
+            await api('/api/admin/work-center/'+encodeURIComponent(key),{method:'PATCH',body:JSON.stringify(fd)});
+            $('#modal')?.remove();toast('Đã lưu điều phối công việc.');await load();
+          }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+        };
+      });
     }else if(activeWTab==='support'){
-      const d=await api('/api/admin/support-tickets');
+      const qs=new URLSearchParams(Object.entries(supportFilters).filter(([,v])=>v)).toString();
+      const d=await api('/api/admin/support-tickets'+(qs?'?'+qs:''));
       const rows=d.items||[];
-      host.innerHTML=`<div class="section-title"><div><h2>Tiếp nhận &amp; Xử lý Yêu cầu Hỗ trợ Nghiệp vụ (P7.09)</h2><p class="muted">Theo dõi trạng thái xử lý, người phụ trách và kết quả đóng yêu cầu trên dữ liệu thật.</p></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Mã phiếu</th><th>Người gửi</th><th>Danh mục</th><th>Nội dung</th><th>Trạng thái</th><th>Phản hồi / Kết quả</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.ticket_code)}</b></td><td>${esc(x.full_name||'—')}<div class="meta">${esc(x.member_code||x.email||'')}</div></td><td>${esc(x.category)}</td><td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div></td><td><span class="badge ${x.status==='completed'?'ok':'warn'}">${esc(statusVi(x.status))}</span></td><td>${esc(x.resolution_note||x.closed_reason||'—')}</td><td><button class="secondary" data-ticket-resolve="${esc(x.id)}">Cập nhật xử lý</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có yêu cầu hỗ trợ nào.</td></tr>'}</tbody></table></div>`;
-      $$('[data-ticket-resolve]').forEach(b=>b.onclick=()=>{
+      const st=d.stats||{};
+      host.innerHTML=`<div class="section-title"><div><h2>Tiếp nhận, Phân công, SLA &amp; Xử lý Yêu cầu Hỗ trợ Nghiệp vụ</h2><p class="muted">Theo dõi thời hạn phản hồi/xử lý theo SLA, phát hiện phiếu trùng, trao đổi công khai/ghi chú nội bộ và kết quả giải quyết.</p></div><button type="button" class="secondary" id="exportSupportCsvBtn">Xuất báo cáo CSV</button></div>
+      <div class="grid" style="grid-template-columns:repeat(6,minmax(0,1fr));margin-bottom:14px">
+        <div class="card stat"><span>Tổng số phiếu</span><strong>${Number(st.total||0)}</strong></div>
+        <div class="card stat"><span>Đang mở / Chờ</span><strong>${Number(st.open||0)}</strong></div>
+        <div class="card stat"><span>Đang xử lý</span><strong>${Number(st.in_progress||0)}</strong></div>
+        <div class="card stat"><span>Đã hoàn thành</span><strong>${Number(st.completed||0)}</strong></div>
+        <div class="card stat"><span>Vi phạm hạn SLA</span><strong class="${st.sla_breached?'status-bad':''}">${Number(st.sla_breached||0)}</strong></div>
+        <div class="card stat"><span>Điểm hài lòng TB</span><strong>${st.avg_satisfaction?st.avg_satisfaction+'/5':'Chưa có'}</strong></div>
+      </div>
+      <div class="toolbar" style="margin-bottom:12px">
+        <input id="supSearch" placeholder="Tìm mã phiếu, tiêu đề, người gửi..." value="${esc(supportFilters.q)}">
+        <select id="supStatus">
+          <option value="">Mọi trạng thái</option>
+          <option value="open" ${supportFilters.status==='open'?'selected':''}>Mới tiếp nhận</option>
+          <option value="in_progress" ${supportFilters.status==='in_progress'?'selected':''}>Đang xử lý</option>
+          <option value="responded" ${supportFilters.status==='responded'?'selected':''}>Đã phản hồi</option>
+          <option value="escalated" ${supportFilters.status==='escalated'?'selected':''}>Đã chuyển cấp</option>
+          <option value="completed" ${supportFilters.status==='completed'?'selected':''}>Hoàn thành</option>
+        </select>
+        <select id="supPriority">
+          <option value="">Mọi mức ưu tiên</option>
+          <option value="urgent" ${supportFilters.priority==='urgent'?'selected':''}>Khẩn cấp</option>
+          <option value="high" ${supportFilters.priority==='high'?'selected':''}>Cao</option>
+          <option value="normal" ${supportFilters.priority==='normal'?'selected':''}>Bình thường</option>
+        </select>
+        <label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="supBreached" ${supportFilters.sla_breached==='1'?'checked':''}> Chỉ phiếu quá hạn SLA</label>
+        <button type="button" class="primary" id="supFilterBtn">Lọc phiếu</button>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Mã phiếu &amp; SLA</th><th>Người gửi</th><th>Danh mục &amp; Ảnh hưởng</th><th>Nội dung</th><th>Trạng thái &amp; Phụ trách</th><th>Kết quả / Đánh giá</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr>
+        <td><b>${esc(x.ticket_code)}</b><div class="meta">Hạn xử lý: ${esc((x.sla_resolution_due_at||'—').slice(0,16).replace('T',' '))}</div>${x.sla_resolution_breached?'<span class="badge off">Quá hạn SLA</span>':''}${x.duplicate_of_ticket_id?`<div class="meta">Trùng với: ${esc(x.duplicate_of_ticket_id)}</div>`:''}</td>
+        <td>${esc(x.full_name||'—')}<div class="meta">${esc(x.member_code||x.email||'')}</div></td>
+        <td>${esc(x.category)}<div class="meta">Ảnh hưởng: <b>${esc(x.impact_level||'medium')}</b> · Ưu tiên: <b>${esc(x.priority||'normal')}</b></div></td>
+        <td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div>${x.attachment_url?`<div class="meta">Đính kèm: <a href="${esc(x.attachment_url)}" target="_blank" rel="noopener">${esc(x.attachment_url)}</a></div>`:''}</td>
+        <td><span class="badge ${x.status==='completed'?'ok':x.status==='escalated'?'off':'warn'}">${esc(statusVi(x.status))}</span><div class="meta">Đơn vị: ${esc(x.assigned_unit||'Chưa gán')}</div></td>
+        <td>${esc(x.resolution_note||x.closed_reason||'—')}${x.satisfaction_score?`<div class="meta">Hài lòng: <b>${x.satisfaction_score}/5</b></div>`:''}</td>
+        <td><button class="secondary" data-ticket-resolve="${esc(x.id)}">Xử lý / Ghi chú</button></td>
+      </tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có yêu cầu hỗ trợ nào.</td></tr>'}</tbody></table></div>`;
+      $('#supFilterBtn').onclick=()=>{
+        supportFilters={
+          q:$('#supSearch').value.trim(),
+          status:$('#supStatus').value,
+          priority:$('#supPriority').value,
+          sla_breached:$('#supBreached').checked?'1':'',
+          category:''
+        };
+        load();
+      };
+      $('#exportSupportCsvBtn').onclick=()=>{
+        const csv=['Mã phiếu,Người gửi,Mã thành viên,Danh mục,Mức ảnh hưởng,Ưu tiên,Trạng thái,Hạn SLA,Vi phạm SLA,Kết quả xử lý,Điểm hài lòng',...rows.map(r=>[r.ticket_code,r.full_name||'',r.member_code||'',r.category,r.impact_level||'medium',r.priority||'normal',r.status,r.sla_resolution_due_at||'',r.sla_resolution_breached?'Có':'Không',r.resolution_note||'',r.satisfaction_score||''].map(v=>`"${String(v).replaceAll('"','""')}"`).join(','))].join('\n');
+        const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='bao-cao-ho-tro-nghiep-vu-skyfirst.csv';a.click();URL.revokeObjectURL(a.href);
+      };
+      $$('[data-ticket-resolve]').forEach(b=>b.onclick=async()=>{
         const row=rows.find(r=>r.id===b.dataset.ticketResolve);if(!row)return;
-        modal('Xử lý yêu cầu hỗ trợ · '+esc(row.ticket_code),`<form id="resolveTicketForm" class="form-grid"><label>Trạng thái<select name="status"><option value="in_progress" ${row.status==='in_progress'?'selected':''}>Đang xử lý</option><option value="responded" ${row.status==='responded'?'selected':''}>Đã phản hồi</option><option value="completed" ${row.status==='completed'?'selected':''}>Hoàn thành / Đóng phiếu</option></select></label><label>Mức ưu tiên<select name="priority"><option value="normal">Bình thường</option><option value="high">Cao</option><option value="urgent">Khẩn cấp</option></select></label><label>Nội dung phản hồi / Kết quả xử lý *<textarea name="resolution_note" rows="4" required>${esc(row.resolution_note||'')}</textarea></label><label>Lý do đóng yêu cầu<input name="closed_reason" value="${esc(row.closed_reason||'Đã giải quyết xong')}"></label><button class="primary">Lưu kết quả xử lý</button></form>`);
-        $('#resolveTicketForm').onsubmit=async e=>{e.preventDefault();const payload=Object.fromEntries(new FormData(e.target));await api('/api/admin/support-tickets/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify(payload)});$('#modal')?.remove();toast('Đã cập nhật phiếu hỗ trợ.');await load()};
+        let msgData={messages:[]};
+        try{msgData=await api(`/api/admin/support-tickets/${encodeURIComponent(row.id)}/messages`)}catch{}
+        modal('Xử lý yêu cầu hỗ trợ · '+esc(row.ticket_code),`<form id="resolveTicketForm" class="form-grid">
+          <label>Trạng thái<select name="status">
+            <option value="open" ${row.status==='open'?'selected':''}>Mới tiếp nhận (open)</option>
+            <option value="in_progress" ${row.status==='in_progress'?'selected':''}>Đang xử lý (in_progress)</option>
+            <option value="responded" ${row.status==='responded'?'selected':''}>Đã phản hồi (responded)</option>
+            <option value="waiting_user" ${row.status==='waiting_user'?'selected':''}>Chờ người gửi bổ sung (waiting_user)</option>
+            <option value="escalated" ${row.status==='escalated'?'selected':''}>Chuyển cấp xử lý (escalated)</option>
+            <option value="completed" ${row.status==='completed'?'selected':''}>Hoàn thành / Đóng phiếu (completed)</option>
+          </select></label>
+          <label>Mức ưu tiên<select name="priority">
+            <option value="normal" ${row.priority==='normal'?'selected':''}>Bình thường</option>
+            <option value="high" ${row.priority==='high'?'selected':''}>Cao</option>
+            <option value="urgent" ${row.priority==='urgent'?'selected':''}>Khẩn cấp</option>
+          </select></label>
+          <label>Mức độ ảnh hưởng<select name="impact_level">
+            <option value="low" ${row.impact_level==='low'?'selected':''}>Thấp</option>
+            <option value="medium" ${(row.impact_level||'medium')==='medium'?'selected':''}>Trung bình</option>
+            <option value="high" ${row.impact_level==='high'?'selected':''}>Cao</option>
+            <option value="critical" ${row.impact_level==='critical'?'selected':''}>Khẩn cấp</option>
+          </select></label>
+          <label>Đơn vị phụ trách<input name="assigned_unit" value="${esc(row.assigned_unit||'Trung tâm Nghiệp vụ Số Sky First')}"></label>
+          <label>Liên kết mã phiếu gốc nếu trùng lặp (không tự xóa)<input name="duplicate_of_ticket_id" value="${esc(row.duplicate_of_ticket_id||'')}" placeholder="Nhập ID phiếu gốc nếu trùng"></label>
+          <label>Lý do chuyển cấp (nếu chọn Chuyển cấp)<input name="escalation_reason" value="${esc(row.escalation_reason||'')}"></label>
+          <label style="grid-column:1/-1">Nội dung phản hồi / Kết quả xử lý (bắt buộc khi đóng phiếu)<textarea name="resolution_note" rows="3">${esc(row.resolution_note||'')}</textarea></label>
+          <label style="grid-column:1/-1">Lý do đóng yêu cầu<input name="closed_reason" value="${esc(row.closed_reason||'Đã giải quyết xong')}"></label>
+          <button class="primary">Lưu kết quả xử lý</button>
+        </form>
+        <hr>
+        <h3>Trao đổi công khai &amp; Ghi chú nội bộ (${(msgData.messages||[]).length})</h3>
+        <div class="list" style="max-height:180px;overflow:auto;margin-bottom:10px">${(msgData.messages||[]).map(m=>`<div class="list-item"><span class="badge ${m.visibility==='internal'?'off':'ok'}">${m.visibility==='internal'?'Ghi chú nội bộ':'Phản hồi công khai'}</span> <b>${esc(m.sender_username||m.sender_role)}</b> · <span class="meta">${esc(m.created_at)}</span><div>${esc(m.body)}</div></div>`).join('')||'<div class="muted">Chưa có tin nhắn trao đổi.</div>'}</div>
+        <form id="ticketMsgForm" class="form-grid">
+          <label>Loại ghi nhận<select name="visibility"><option value="public">Phản hồi công khai cho người gửi</option><option value="internal">Ghi chú nội bộ (ẩn với người gửi)</option></select></label>
+          <label style="grid-column:1/-1">Nội dung phản hồi / ghi chú *<textarea name="body" rows="2" required></textarea></label>
+          <button class="secondary">Gửi tin nhắn / ghi chú</button>
+        </form>`);
+        $('#resolveTicketForm').onsubmit=async e=>{
+          e.preventDefault();
+          try{
+            const payload=Object.fromEntries(new FormData(e.target));
+            await api('/api/admin/support-tickets/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify(payload)});
+            $('#modal')?.remove();toast('Đã cập nhật phiếu hỗ trợ.');await load();
+          }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+        };
+        $('#ticketMsgForm').onsubmit=async e=>{
+          e.preventDefault();
+          try{
+            const payload=Object.fromEntries(new FormData(e.target));
+            await api(`/api/admin/support-tickets/${encodeURIComponent(row.id)}/messages`,{method:'POST',body:JSON.stringify(payload)});
+            $('#modal')?.remove();toast('Đã lưu trao đổi vào phiếu hỗ trợ.');await load();
+          }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+        };
       });
     }else if(activeWTab==='workflows'){
-      const d=await api('/api/admin/governance/registry');
+      const [d,wfAnalytics]=await Promise.all([api('/api/admin/governance/registry'),api('/api/admin/workflows/analytics').catch(()=>null)]);
       const items=(d.items||[]).filter(x=>['workflow_def','workflow_change','workflow_exception','sod_rule'].includes(x.domain_group));
-      host.innerHTML=`<div class="section-title"><div><h2>Điều phối Quy trình, Phân tách nhiệm vụ (SoD) &amp; Ngoại lệ (P4.01–P4.08)</h2><p class="muted">Quản lý phiên bản quy trình, quy tắc phân tách người lập/người duyệt và lịch sử ngoại lệ có phê duyệt.</p></div><button class="primary" id="newWfEntry">Thêm mục quy trình / ngoại lệ</button></div>
+      const m=wfAnalytics?.workflow_metrics||{};
+      host.innerHTML=`<div class="section-title"><div><h2>Điều phối Quy trình, Đo lường Thời gian Xử lý &amp; Phát hiện Điểm nghẽn</h2><p class="muted">Đo lường trực tiếp thời gian xử lý trung bình, tỷ lệ đúng hạn, tỷ lệ yêu cầu bổ sung và phát hiện điểm nghẽn có bằng chứng dữ liệu.</p></div><button class="primary" id="newWfEntry">Thêm quy trình / ngoại lệ</button></div>
+      ${wfAnalytics?`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">
+        <div class="card stat"><span>TG duyệt tài khoản TB</span><strong>${m.account_requests?.avg_processing_hours??0}h</strong><div class="meta">Tỷ lệ hoàn thành: ${m.account_requests?.completion_rate_pct??0}% · Cần bổ sung: ${m.account_requests?.supplement_rate_pct??0}%</div></div>
+        <div class="card stat"><span>Hồ sơ chờ &gt; 48h</span><strong class="${(m.account_requests?.overdue_48h_count||0)>0?'status-bad':''}">${m.account_requests?.overdue_48h_count??0}</strong><div class="meta">Tổng hồ sơ: ${m.account_requests?.total??0}</div></div>
+        <div class="card stat"><span>TG giải quyết hỗ trợ TB</span><strong>${m.support_tickets?.avg_resolution_hours??0}h</strong><div class="meta">Vi phạm SLA: ${m.support_tickets?.sla_breach_rate_pct??0}%</div></div>
+        <div class="card stat"><span>Điểm nghẽn phát hiện</span><strong>${(wfAnalytics.bottlenecks||[]).length}</strong><div class="meta">Từ dữ liệu vận hành thực tế</div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px"><h3>Phát hiện Điểm nghẽn Quy trình &amp; Đề xuất Cải tiến có Bằng chứng</h3>
+        ${(wfAnalytics.bottlenecks||[]).map(b=>`<div class="list-item"><span class="badge ${b.severity==='high'?'off':b.severity==='warning'?'warn':'ok'}">${esc(b.severity.toUpperCase())}</span> <b>${esc(b.stage)}</b><div><b>Bằng chứng:</b> ${esc(b.evidence)}</div><div class="meta"><b>Khuyến nghị:</b> ${esc(b.recommendation)}</div></div>`).join('')}
+      </div>`:''}
       <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Tóm tắt &amp; Bằng chứng</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td><span class="badge ${x.status==='active'||x.status==='approved'?'ok':'warn'}">${esc(x.status)}</span></td><td>${esc(x.summary||'')}<div class="meta">Nguồn: ${esc(x.evidence_ref||'—')}</div></td><td><button class="secondary" data-gov-edit="${esc(x.id)}">Cập nhật / Duyệt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có bản ghi quy trình.</td></tr>'}</tbody></table></div>`;
       $('#newWfEntry').onclick=()=>openGovernanceModal(['workflow_def','workflow_change','workflow_exception','sod_rule'],load);
       $$('[data-gov-edit]').forEach(b=>b.onclick=()=>{const row=items.find(r=>r.id===b.dataset.govEdit);if(row)openGovernanceEditModal(row,load)});
     }else if(activeWTab==='knowledge'){
       const d=await api('/api/admin/governance/registry');
       const items=(d.items||[]).filter(x=>['knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment','ops_lesson'].includes(x.domain_group));
-      host.innerHTML=`<div class="section-title"><div><h2>Tri thức Tổ chức, Đồ thị Tri thức, Mô phỏng &amp; Quản trị AI (P5.01–P5.14)</h2><p class="muted">Lưu trữ hướng dẫn chính thức có nguồn xác minh, phân biệt rõ kịch bản mô phỏng với dữ liệu thực tế.</p></div><button class="primary" id="newKnEntry">Thêm tri thức / kịch bản mô phỏng</button></div>
+      host.innerHTML=`<div class="section-title"><div><h2>Kho Tri thức Tổ chức, Trợ lý Nghiệp vụ có Dẫn nguồn &amp; Tái dựng Vụ việc</h2><p class="muted">Tra cứu tri thức tách biệt rõ dữ kiện xác minh với suy luận gợi ý; tái dựng toàn bộ chuỗi sự kiện của một hồ sơ/vụ việc theo dòng thời gian.</p></div><button class="primary" id="newKnEntry">Thêm tri thức / kịch bản mô phỏng</button></div>
+      <div class="section-grid" style="margin-bottom:14px">
+        <div class="card">
+          <h3>Trợ lý Hỏi đáp Nghiệp vụ có Dẫn nguồn</h3>
+          <p class="muted">Chỉ sử dụng dữ liệu từ Kho tri thức và cơ sở dữ liệu vận hành thực tế. Tự động cảnh báo khi thiếu căn cứ.</p>
+          <form id="knAskForm" class="toolbar"><input name="question" required placeholder="Nhập từ khóa quy định, SLA, thẻ, quy trình..." style="flex:1"><button class="primary">Tra cứu &amp; Phân tích</button></form>
+          <div id="knAskResult" style="margin-top:10px"></div>
+        </div>
+        <div class="card">
+          <h3>Tái dựng Hồ sơ / Vụ việc theo Dòng thời gian</h3>
+          <p class="muted">Khôi phục chuỗi sự kiện, quyết định, đồng ý pháp lý và nhật ký kiểm toán của một đối tượng.</p>
+          <form id="caseReconForm" class="toolbar"><input name="subject_id" required placeholder="Nhập mã thành viên (SFN-...), email hoặc ID" style="flex:1"><button class="secondary">Tái dựng vụ việc</button></form>
+          <div id="caseReconResult" style="margin-top:10px"></div>
+        </div>
+      </div>
       <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Nội dung &amp; Dẫn nguồn</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td><span class="badge ${x.status==='active'||x.status==='approved'?'ok':'warn'}">${esc(x.status)}</span></td><td>${esc(x.summary||'')}<div class="meta">Căn cứ: ${esc(x.evidence_ref||'—')}</div></td><td><button class="secondary" data-gov-edit="${esc(x.id)}">Cập nhật</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có mục tri thức nào.</td></tr>'}</tbody></table></div>`;
+      $('#knAskForm').onsubmit=async e=>{
+        e.preventDefault();
+        const q=e.target.elements.question.value.trim();
+        const box=$('#knAskResult');box.innerHTML='<div class="muted">Đang đối chiếu nguồn tri thức...</div>';
+        try{
+          const res=await api('/api/admin/knowledge/assistant',{method:'POST',body:JSON.stringify({question:q})});
+          box.innerHTML=`<div class="request-note">
+            <b>1. Dữ kiện đã xác minh (${(res.verified_facts||[]).length}):</b>
+            ${(res.verified_facts||[]).length?`<ul>${res.verified_facts.map(f=>`<li><b>[${esc(f.source_code)}] ${esc(f.title)}:</b> ${esc(f.fact)} <span class="meta">(Nguồn: ${esc(f.evidence_ref)})</span></li>`).join('')}</ul>`:`<div class="status-bad">${esc(res.uncertainty_warning||'Không tìm thấy bài viết khớp trực tiếp.')}</div>`}
+            <b>2. Suy luận &amp; Gợi ý vận hành thực tế:</b>
+            <ul>${(res.inferences_and_recommendations||[]).map(i=>`<li>${esc(i.statement)} <span class="meta">(${esc(i.basis)})</span></li>`).join('')}</ul>
+            <div class="meta">${esc(res.policy_note||'')}</div>
+          </div>`;
+        }catch(err){box.textContent=err.data?.message||err.message}
+      };
+      $('#caseReconForm').onsubmit=async e=>{
+        e.preventDefault();
+        const s=e.target.elements.subject_id.value.trim();
+        const box=$('#caseReconResult');box.innerHTML='<div class="muted">Đang tái dựng dòng thời gian vụ việc...</div>';
+        try{
+          const res=await api('/api/admin/case-reconstruction?subject_id='+encodeURIComponent(s));
+          box.innerHTML=`<div class="request-note">
+            <b>Chân dung đối tượng:</b> ${res.person?`${esc(res.person.full_name)} (${esc(res.person.member_code)}) · Trạng thái: ${esc(res.person.status)}`:'Không tìm thấy hồ sơ thành viên khớp trực tiếp'}
+            <div style="margin-top:6px"><b>Dòng thời gian sự kiện (${res.event_count||0} mốc):</b></div>
+            <div style="max-height:170px;overflow:auto">${(res.timeline||[]).map(t=>`<div>• <b>${esc((t.timestamp||'').slice(0,16).replace('T',' '))}</b> [${esc(t.source)}] ${esc(t.title)} — <span class="meta">${esc(t.detail||'')}</span></div>`).join('')||'<div class="muted">Chưa có sự kiện nào được ghi nhận.</div>'}</div>
+          </div>`;
+        }catch(err){box.textContent=err.data?.message||err.message}
+      };
       $('#newKnEntry').onclick=()=>openGovernanceModal(['knowledge_article','knowledge_graph','ai_governance','scenario_simulation','maturity_assessment','ops_lesson'],load);
       $$('[data-gov-edit]').forEach(b=>b.onclick=()=>{const row=items.find(r=>r.id===b.dataset.govEdit);if(row)openGovernanceEditModal(row,load)});
     }else if(activeWTab==='capabilities'){
       const d=await api('/api/admin/governance/registry');
       const items=(d.items||[]).filter(x=>['capability_map','case_lifecycle','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio','csr_program','esd_program'].includes(x.domain_group));
-      host.innerHTML=`<div class="section-title"><div><h2>Năng lực Nghiệp vụ Chuyên sâu, SLA, Chất lượng, Rủi ro &amp; Danh mục CSR/ESD (P6.23–P6.24, P7.01–P7.20)</h2><p class="muted">Quản lý bản đồ năng lực, cam kết thời hạn (SLA), chất lượng đầu ra, căn cứ quyết định, danh mục rủi ro và chương trình sáng kiến.</p></div><button class="primary" id="newCapEntry">Thêm hồ sơ năng lực / rủi ro / sáng kiến</button></div>
+      host.innerHTML=`<div class="section-title"><div><h2>Bản đồ Năng lực, Cam kết Thời hạn, Chất lượng, Rủi ro &amp; Sáng kiến</h2><p class="muted">Quản lý bản đồ năng lực, cam kết thời hạn (SLA), chất lượng đầu ra, căn cứ quyết định, danh mục rủi ro và chương trình sáng kiến.</p></div><button class="primary" id="newCapEntry">Thêm hồ sơ năng lực / rủi ro / sáng kiến</button></div>
       <div class="table-wrap"><table><thead><tr><th>Phân nhóm</th><th>Mã</th><th>Tiêu đề</th><th>Phiên bản</th><th>Trạng thái</th><th>Mô tả &amp; Bằng chứng</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.version_label)}</td><td><span class="badge ${x.status==='active'||x.status==='approved'?'ok':'warn'}">${esc(x.status)}</span></td><td>${esc(x.summary||'')}<div class="meta">Tham chiếu: ${esc(x.evidence_ref||'—')}</div></td><td><button class="secondary" data-gov-edit="${esc(x.id)}">Cập nhật / Duyệt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có dữ liệu.</td></tr>'}</tbody></table></div>`;
       $('#newCapEntry').onclick=()=>openGovernanceModal(['capability_map','sla_commitment','quality_check','decision_record','change_impact_eval','staff_readiness','demand_forecast','ops_dependency','service_value','dev_proposal','resource_catalog','partner_obligation','sla_standard','beneficiary_feedback','ops_risk','initiative_portfolio','csr_program','esd_program'],load);
       $$('[data-gov-edit]').forEach(b=>b.onclick=()=>{const row=items.find(r=>r.id===b.dataset.govEdit);if(row)openGovernanceEditModal(row,load)});
@@ -8865,34 +9157,34 @@ function openGovernanceModal(domains,onDone){
 }
 
 async function renderAdminReports(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">DỮ LIỆU VẬN HÀNH &amp; HỖ TRỢ QUYẾT ĐỊNH (P5.03, P5.13)</div><h1>Báo cáo &amp; thống kê</h1><p class="muted">Số liệu được tính trực tiếp từ dữ liệu thành viên, tài khoản, đơn vị, thẻ và nhật ký tuân thủ.</p></div><button class="secondary" id="reportRefresh">Làm mới</button></div><div id="reportBox" class="card">Đang tải...</div>`;
-  const load=async()=>{const [d,gov]=await Promise.all([api('/api/admin/reports'),api('/api/admin/governance/overview').catch(()=>null)]);$('#reportBox').innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${Object.entries(d.summary||{}).map(([k,v])=>`<div class="card stat"><span>${esc(v.label)}</span><strong>${v.value}</strong></div>`).join('')}</div>${gov?`<div class="card" style="margin-bottom:14px"><h2>Chỉ số Pháp lý, OTP &amp; Email thực tế (P6.10, P6.19, P6.44)</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="card stat"><span>Bản ghi đồng ý pháp lý</span><strong>${gov.legal_consent.total}</strong></div><div class="card stat"><span>Đã xác minh OTP Email</span><strong>${gov.otp_center.verified}/${gov.otp_center.total}</strong></div><div class="card stat"><span>Email đã gửi thành công</span><strong>${gov.email_center.sent}/${gov.email_center.total_logs}</strong></div><div class="card stat"><span>Sự kiện bảo mật ghi nhận</span><strong>${gov.security_events_total}</strong></div></div><p class="muted" style="margin-top:10px;font-size:12px">Ghi chú giải thích (P5.13): Toàn bộ số liệu trên được truy vấn trực tiếp từ cơ sở dữ liệu D1 hiện tại; không sử dụng dữ liệu mẫu. Trạng thái gửi email phụ thuộc vào cấu hình khóa <code>RESEND_API_KEY</code> trên môi trường vận hành.</p></div>`:''}<div class="section-grid"><div class="card"><h2>Thành viên theo trạng thái</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.member_status||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div><div class="card"><h2>Thành viên theo đơn vị</h2><div class="table-wrap"><table><thead><tr><th>Đơn vị</th><th>Số lượng</th></tr></thead><tbody>${(d.orgs||[]).map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div></div><div class="card" style="margin-top:14px"><h2>Thẻ thành viên</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.cards||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div>`};
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">PHÂN TÍCH DỮ LIỆU VẬN HÀNH &amp; BÁO CÁO</div><h1>Báo cáo &amp; thống kê</h1><p class="muted">Số liệu được tính trực tiếp từ dữ liệu thành viên, tài khoản, đơn vị, thẻ và nhật ký tuân thủ.</p></div><button class="secondary" id="reportRefresh">Làm mới</button></div><div id="reportBox" class="card">Đang tải...</div>`;
+  const load=async()=>{const [d,gov]=await Promise.all([api('/api/admin/reports'),api('/api/admin/governance/overview').catch(()=>null)]);$('#reportBox').innerHTML=`<div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px">${Object.entries(d.summary||{}).map(([k,v])=>`<div class="card stat"><span>${esc(v.label)}</span><strong>${v.value}</strong></div>`).join('')}</div>${gov?`<div class="card" style="margin-bottom:14px"><h2>Chỉ số Đồng ý Pháp lý, Xác minh OTP &amp; Trạng thái Gửi thư</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="card stat"><span>Bản ghi đồng ý pháp lý</span><strong>${gov.legal_consent.total}</strong></div><div class="card stat"><span>Đã xác minh OTP Email</span><strong>${gov.otp_center.verified}/${gov.otp_center.total}</strong></div><div class="card stat"><span>Email đã gửi thành công</span><strong>${gov.email_center.sent}/${gov.email_center.total_logs}</strong></div><div class="card stat"><span>Sự kiện bảo mật ghi nhận</span><strong>${gov.security_events_total}</strong></div></div><p class="muted" style="margin-top:10px;font-size:12px">Ghi chú nguồn dữ liệu: Toàn bộ số liệu trên được truy vấn trực tiếp từ cơ sở dữ liệu D1 hiện tại; không sử dụng dữ liệu mẫu. Trạng thái gửi email phụ thuộc vào cấu hình khóa <code>RESEND_API_KEY</code> trên môi trường vận hành.</p></div>`:''}<div class="section-grid"><div class="card"><h2>Thành viên theo trạng thái</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.member_status||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div><div class="card"><h2>Thành viên theo đơn vị</h2><div class="table-wrap"><table><thead><tr><th>Đơn vị</th><th>Số lượng</th></tr></thead><tbody>${(d.orgs||[]).map(x=>`<tr><td>${esc(x.name)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div></div><div class="card" style="margin-top:14px"><h2>Thẻ thành viên</h2><div class="table-wrap"><table><thead><tr><th>Trạng thái</th><th>Số lượng</th></tr></thead><tbody>${(d.cards||[]).map(x=>`<tr><td>${esc(x.label)}</td><td><b>${x.n}</b></td></tr>`).join('')}</tbody></table></div></div>`};
   $('#reportRefresh').onclick=load; await load();
 }
 
 async function renderAdminSystem(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ TỔNG THỂ &amp; BỀN VỮNG (P6.01–P6.52)</div><h1>Cấu hình hệ thống &amp; Trung tâm Kiểm soát P6</h1><p class="muted">Quản trị tình trạng dịch vụ, Trung tâm Email/OTP, Sổ đăng ký nghĩa vụ pháp lý, Kiểm tra gói ZIP và Cổng kiểm tra trước phát hành.</p></div></div>
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ HỆ THỐNG, AN TOÀN &amp; VẬN HÀNH</div><h1>Cấu hình hệ thống &amp; Kiểm soát vận hành</h1><p class="muted">Quản trị tình trạng dịch vụ, Trung tâm Email/OTP, Sổ đăng ký nghĩa vụ pháp lý, Kiểm tra gói ZIP và Cổng kiểm tra trước phát hành.</p></div></div>
   <div class="section-grid">
     <div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu bộ lọc quản trị để không phải chọn lại mỗi lần.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div>
     <div class="card"><h2>Tình trạng hệ thống</h2><div id="healthBox">Đang kiểm tra...</div></div>
   </div>
-  <div class="card" style="margin-top:14px"><h2>Cổng Kiểm tra Trước Khi Phát hành (P6.52) &amp; Trung tâm Email/OTP (P6.19, P6.44)</h2><div id="releaseGateBox">Đang tải...</div></div>
-  <div class="card" style="margin-top:14px"><h2>Kiểm tra An toàn Gói ZIP (P6.47) &amp; Xuất Gói Dữ liệu Độc lập Nhà cung cấp (P6.36)</h2>
+  <div class="card" style="margin-top:14px"><h2>Cổng Kiểm tra Sẵn sàng Phát hành &amp; Nhật ký Email / OTP</h2><div id="releaseGateBox">Đang tải...</div></div>
+  <div class="card" style="margin-top:14px"><h2>Kiểm tra An toàn Gói Tệp Nén &amp; Xuất Dữ liệu Hệ thống</h2>
     <div class="toolbar" style="margin-bottom:10px">
       <input type="file" id="zipInspectFile" accept=".zip,application/zip" aria-label="Chọn tệp ZIP cần kiểm tra">
-      <button type="button" class="secondary" id="runZipInspectBtn">Kiểm tra cấu trúc gói ZIP (P6.47)</button>
-      <button type="button" class="primary" id="exportBundleBtn">Xuất gói dữ liệu chuẩn hóa JSON + SHA-256 (P6.36)</button>
+      <button type="button" class="secondary" id="runZipInspectBtn">Kiểm tra an toàn gói ZIP</button>
+      <button type="button" class="primary" id="exportBundleBtn">Xuất gói dữ liệu chuẩn hóa (JSON + SHA-256)</button>
     </div>
     <div id="zipInspectResult" class="meta" aria-live="polite">Chọn tệp .zip để kiểm tra số lượng tệp, dung lượng giải nén, tỷ lệ nén và đường dẫn độc hại mà không thực thi mã.</div>
   </div>
-  <div class="card" style="margin-top:14px"><h2>Sổ đăng ký Nghĩa vụ Pháp lý &amp; Danh mục Cổng Dịch vụ (P6.04, P6.15)</h2><div id="legalAndServiceBox">Đang tải...</div></div>`;
+  <div class="card" style="margin-top:14px"><h2>Kiểm tra Tính Nhất quán Dữ liệu &amp; Ràng buộc Toàn vẹn</h2><div id="dataConsistencyBox">Đang kiểm tra...</div></div><div class="card" style="margin-top:14px"><h2>Sổ đăng ký Nghĩa vụ Pháp lý &amp; Danh mục Cổng Dịch vụ</h2><div id="legalAndServiceBox">Đang tải...</div></div>`;
   const refresh=async()=>{let f={items:[]},h={database:'unknown',schema_version:null,required_schema_version:16,schema_status:'unknown',missing_tables:[],missing_columns:[],r2_binding:false,r2_read_status:'not_configured',r2_write_status:'not_tested',email_binding:false,email_status:'not_configured'};let filterError='',healthError='';try{f=await api('/api/admin/saved-filters')}catch(e){filterError=e.message}try{h=await api('/api/admin/system-health')}catch(e){healthError=e.message}$('#savedFilters').innerHTML=(f.items||[]).map(x=>`<div class="list-row"><div><b>${esc(x.name)}</b><div class="meta">${esc(x.view)} · ${esc(x.query||'Không có điều kiện')}</div></div><button class="danger" data-filter-del="${esc(x.id)}">Xóa</button></div>`).join('')||(filterError?`<div class="service-warning">Không tải được bộ lọc: ${esc(filterError)}</div>`:'<div class="empty">Chưa có bộ lọc đã lưu.</div>');const version=Number(h.schema_version||0),required=Number(h.required_schema_version||16),missing=Array.isArray(h.missing_tables)?h.missing_tables:[],missingColumns=Array.isArray(h.missing_columns)?h.missing_columns:[],migrationBehind=h.schema_status==='outdated'||version<required||missing.length>0||missingColumns.length>0;const dbLabel=h.database==='ok'?'Kết nối đã kiểm tra':h.database==='error'?'Không kết nối được':'Chưa xác minh';const r2Label=h.r2_read_status==='read_ok'?'Đọc danh sách được · chưa thử tải lên/xóa':h.r2_read_status==='read_failed'?'Không đọc được kho tệp':h.r2_read_status==='binding_present_test_unavailable'?'Binding có sẵn · chưa kiểm tra đọc/ghi':'Chưa được kiểm tra';const emailLabel=h.email_status==='configured_delivery_not_tested'?'Đã khai báo khóa · chưa kiểm tra gửi thực tế':'Chưa cấu hình';$('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b class="${h.database==='ok'?'status-ok':'status-bad'}">${dbLabel}</b></div><div class="list-row"><span>Phiên bản lược đồ ghi nhận</span><b>${esc(h.schema_version??'Chưa xác định')}</b></div><div class="list-row"><span>Phiên bản yêu cầu</span><b>${required}</b></div><div class="list-row"><span>Đối chiếu cấu trúc bảng</span><b class="${migrationBehind?'status-bad':'status-ok'}">${migrationBehind?'Chưa đạt yêu cầu':'Đã đối chiếu bảng bắt buộc'}</b></div>${missing.length?`<div class="service-warning"><b>Thiếu ${missing.length} bảng bắt buộc:</b><div class="health-table-list">${missing.map(esc).join(' · ')}</div></div>`:''}${missingColumns.length?`<div class="service-warning"><b>Thiếu ${missingColumns.length} cột bắt buộc:</b><div class="health-table-list">${missingColumns.map(esc).join(' · ')}</div></div>`:''}<div class="list-row"><span>Kho tệp R2</span><b>${esc(r2Label)}</b></div><div class="list-row"><span>Email</span><b>${esc(emailLabel)}</b></div>${migrationBehind?'<div class="service-warning"><b>Cần cập nhật cơ sở dữ liệu.</b> Một số bảng hoặc migration còn thiếu. Hãy sao lưu D1, đối chiếu lịch sử migration và áp dụng migration theo thứ tự trước khi sử dụng QR, thẻ hoặc lịch sử cấp phát.</div>':''}${healthError?`<div class="service-warning">Không đọc được tình trạng hệ thống: ${esc(healthError)}</div>`:''}<div class="meta health-footnote">Trạng thái đọc R2 không chứng minh tải lên/xóa hoạt động; trạng thái email chỉ phản ánh cấu hình, không phải email đã gửi thành công.</div>`;$$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()});
   try{
-    const [rel,em,reg]=await Promise.all([api('/api/admin/release-readiness'),api('/api/admin/email-center'),api('/api/admin/governance/registry')]);
+    const [rel,em,reg,dc]=await Promise.all([api('/api/admin/release-readiness'),api('/api/admin/email-center'),api('/api/admin/governance/registry'),api('/api/admin/data-consistency').catch(()=>null)]);
     const logs=(em.delivery_logs||[]).slice(0,15);
     $('#releaseGateBox').innerHTML=`<div class="stack-list">${(rel.gates||[]).map(g=>`<div class="list-row"><span><b>${esc(g.title)}</b><div class="meta">${esc(g.detail)}</div></span><b class="${g.status==='passed'?'status-ok':'status-bad'}">${esc(g.status)}</b></div>`).join('')}</div>
     <p class="meta" style="margin-top:10px">${esc(em.mailbox_note||'')}</p>
-    <h3 style="margin-top:14px">Nhật ký gửi Email gần đây &amp; Thử gửi lại an toàn (P6.19)</h3>
+    <h3 style="margin-top:14px">Nhật ký gửi Email gần đây &amp; Thử gửi lại an toàn</h3>
     <div class="table-wrap"><table><thead><tr><th>Mẫu thư</th><th>Người nhận</th><th>Tiêu đề</th><th>Trạng thái</th><th>Số lần thử lại</th><th>Thời gian</th><th>Thao tác</th></tr></thead><tbody>${logs.map(l=>`<tr><td><code>${esc(l.template_code)}</code></td><td>${esc(l.recipient_email)}</td><td>${esc(l.subject)}</td><td><span class="badge ${l.status==='sent'?'ok':'warn'}">${esc(l.status)}</span><div class="meta">${esc(l.error_detail||'')}</div></td><td>${Number(l.retry_count||0)}</td><td>${esc(l.created_at)}</td><td>${l.status==='sent'?'—':`<button type="button" class="secondary" data-email-retry="${esc(l.id)}">Thử gửi lại</button>`}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có bản ghi gửi email.</td></tr>'}</tbody></table></div>`;
     $$('[data-email-retry]').forEach(btn=>btn.onclick=async()=>{
       btn.disabled=true;
@@ -8902,6 +9194,9 @@ async function renderAdminSystem(c){
         await refresh();
       }catch(e){toast(e.data?.message||e.message,'warn');btn.disabled=false}
     });
+    if(dc&&$('#dataConsistencyBox')){
+      $('#dataConsistencyBox').innerHTML=`<div class="list-row"><span>Trạng thái toàn vẹn dữ liệu</span><b class="${dc.consistent?'status-ok':'status-bad'}">${dc.consistent?'ĐỒNG NHẤT (0 LỖI CẤU TRÚC)':'PHÁT HIỆN '+dc.total_inconsistencies+' BẤT THƯỜNG'}</b></div><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mã kiểm tra</th><th>Tên quy tắc đối soát</th><th>Số bản ghi lệch</th><th>Khuyến nghị xử lý</th></tr></thead><tbody>${(dc.checks||[]).map(c=>`<tr><td><code>${esc(c.code)}</code></td><td>${esc(c.title)}</td><td><b class="${c.count>0?'status-bad':'status-ok'}">${c.count}</b></td><td>${esc(c.remediation)}</td></tr>`).join('')}</tbody></table></div>`;
+    }
     const legals=(reg.items||[]).filter(x=>['legal_obligation','service_catalog'].includes(x.domain_group));
     $('#legalAndServiceBox').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Nhóm</th><th>Mã</th><th>Tên mục / Văn bản</th><th>Trạng thái</th><th>Chi tiết &amp; Nguồn</th></tr></thead><tbody>${legals.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">${esc(x.evidence_ref||'')}</div></td></tr>`).join('')}</tbody></table></div>`;
   }catch{}}
@@ -8924,7 +9219,7 @@ async function renderAdminSystem(c){
       const d=await api('/api/admin/export-bundle');
       const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json;charset=utf-8'});
       const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='skyfirst-operations-center-export.json';a.click();URL.revokeObjectURL(a.href);
-      $('#zipInspectResult').innerHTML=`<div class="request-note"><b>Đã xuất gói dữ liệu chuẩn hóa (P6.36):</b> SHA-256 Checksum: <code>${esc(d.sha256_checksum)}</code></div>`;
+      $('#zipInspectResult').innerHTML=`<div class="request-note"><b>Đã xuất gói dữ liệu chuẩn hóa:</b> SHA-256 Checksum: <code>${esc(d.sha256_checksum)}</code></div>`;
       toast('Đã tải xuống gói dữ liệu chuẩn hóa.');
     }catch(e){toast(e.data?.message||e.message,'warn')}
     finally{$('#exportBundleBtn').disabled=false}

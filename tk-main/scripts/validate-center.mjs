@@ -14,11 +14,13 @@ let nativeSqlite=null;
 try{nativeSqlite=await import('node:sqlite')}catch{}
 if(nativeSqlite?.DatabaseSync){
   const rawDb=new nativeSqlite.DatabaseSync(':memory:');
+  const stmtCache=new Map();
+  const getStmt=(sql)=>{let s=stmtCache.get(sql);if(!s){s=rawDb.prepare(sql);stmtCache.set(sql,s)}return s};
   const normArgs=a=>a.map(x=>x===undefined?null:typeof x==='boolean'?(x?1:0):x);
-  dbExec=async(sql)=>rawDb.exec(sql);
-  dbGet=async(sql,...args)=>{const r=rawDb.prepare(sql).get(...normArgs(args));return r?{...r}:null;};
-  dbAll=async(sql,...args)=>rawDb.prepare(sql).all(...normArgs(args)).map(r=>({...r}));
-  dbRun=async(sql,...args)=>rawDb.prepare(sql).run(...normArgs(args));
+  dbExec=async(sql)=>{stmtCache.clear();return rawDb.exec(sql)};
+  dbGet=async(sql,...args)=>{const r=getStmt(sql).get(...normArgs(args));return r?{...r}:null;};
+  dbAll=async(sql,...args)=>getStmt(sql).all(...normArgs(args)).map(r=>({...r}));
+  dbRun=async(sql,...args)=>getStmt(sql).run(...normArgs(args));
 }else{
   const proc=spawn('python3',['-u','-c',`
 import sqlite3, sys, json
@@ -101,19 +103,18 @@ assert.equal((await call('/api/admin/work-center')).status,200);checks++;
 r=await call('/api/admin/reports');assert.equal(r.status,200);assert('summary' in r);checks++;
 await dbExec("UPDATE account_scopes SET role_id='role_super_admin',org_node_id='org_sfn' WHERE account_id='a';");r=await call('/api/admin/system-health');assert.equal(r.status,200);assert.equal(r.database,'ok');assert.equal(r.required_schema_version,16);assert.equal(r.schema_status,'current');assert.deepEqual(r.missing_tables,[]);assert.equal(r.email_delivery_tested,false);assert.equal(r.system_identity.siteName,'Trung tâm Nghiệp vụ Số Sky First');assert.equal(r.system_identity.appUrl,'https://nghiepvu.skyfirst.io.vn');checks++;
 
-// 3. Portal config, brand normalization, and config version history (P6.21, P6.34)
+// 3. Portal config, brand normalization, retired/external domain stripping, and config version history
 await dbRun("INSERT OR REPLACE INTO system_settings(key,value_json,updated_at) VALUES('member_portal_v4',?,CURRENT_TIMESTAMP)",JSON.stringify({brand:{logoUrl:'https://outside.invalid/logo.png'},links:[{name:'Liên kết sai',url:'https://outside.invalid/'}]}));
-const legacyConfig=await call('/api/public/portal-config');assert.equal(legacyConfig.links.length,5);assert.equal(legacyConfig.brand.logoUrl,'/sfn-logo.png');assert.equal(legacyConfig.brand.siteName,'Trung tâm Nghiệp vụ Số Sky First');assert.equal(legacyConfig.links[0].name,'Trang Thông Tin Điện Tử Sky First');checks++;
+const legacyConfig=await call('/api/public/portal-config');assert.equal(legacyConfig.links.length,2);assert.equal(legacyConfig.brand.logoUrl,'/sfn-logo.png');assert.equal(legacyConfig.brand.siteName,'Trung tâm Nghiệp vụ Số Sky First');assert.equal(legacyConfig.links[0].name,'Trang Thông Tin Điện Tử Sky First');checks++;
 const securityResponse=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/portal-config'),{DB});assert.equal(securityResponse.status,200);assert.equal(securityResponse.headers.get('x-content-type-options'),'nosniff');assert.equal(securityResponse.headers.get('x-frame-options'),'DENY');assert.equal(securityResponse.headers.get('referrer-policy'),'no-referrer');assert((securityResponse.headers.get('content-security-policy')||'').includes("frame-ancestors 'none'"));checks++;
-await dbRun("UPDATE system_settings SET value_json=?,updated_at=CURRENT_TIMESTAMP WHERE key='member_portal_v4'",JSON.stringify({links:[{name:'Cổng chính Sky First Network',url:'https://www.skyfirst.io.vn/'},{name:'Cổng Thông tin',url:'https://ctt.skyfirst.io.vn/'},{name:'Cổng tình nguyện viên',url:'https://tnv.skyfirst.io.vn/'},{name:'Cổng SFEC',url:'https://sfec.skyfirst.io.vn/'},{name:'Lớp học trực tuyến',url:'https://slc.skyfirst.io.vn/'}]}));
-const migratedLinks=await call('/api/public/portal-config');assert.deepEqual(migratedLinks.links.map(x=>x.name),['Trang Thông Tin Điện Tử Sky First','Cổng Thông Tin Số Sky First','Trung Tâm Tình Nguyện Viên Sky First','Trung Tâm Học Tập Số Sky First','Trung Tâm Thư Điện Tử Sky First']);assert.equal(migratedLinks.links[3].url,'https://slc.skyfirst.io.vn/');assert.equal(migratedLinks.links[4].url,'https://mail.skyfirst.io.vn/');checks++;
-const portalDefaults=await call('/api/public/portal-config');assert.equal(portalDefaults.links.length,5);assert.equal(portalDefaults.links[0].name,'Trang Thông Tin Điện Tử Sky First');assert.equal(portalDefaults.links[1].url,'https://ctt.skyfirst.io.vn/');assert.equal(portalDefaults.links[4].url,'https://mail.skyfirst.io.vn/');checks++;
-const linkSet=[{name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức'},{name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin số'},{name:'Trung Tâm Tình Nguyện Viên Sky First',url:'https://tnv.skyfirst.io.vn/',description:'Tình nguyện'},{name:'Trung Tâm Học Tập Số Sky First',url:'https://slc.skyfirst.io.vn/',description:'Học tập'},{name:'Trung Tâm Thư Điện Tử Sky First',url:'https://mail.skyfirst.io.vn/',description:'Thư điện tử'}];
-r=await call('/api/admin/portal-config','PUT',{stats:[],tagline:'Hành trình của thành viên',brand:{siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:17,cornerRadius:12,contentMaxWidth:1360},links:linkSet,change_reason:'Chuẩn hóa nhận diện Trung tâm Nghiệp vụ Số Sky First'});assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links.length,5);checks++;
-r=await call('/api/admin/portal-config');assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.baseFontSize,17);assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links[4].name,'Trung Tâm Thư Điện Tử Sky First');checks++;
+await dbRun("UPDATE system_settings SET value_json=?,updated_at=CURRENT_TIMESTAMP WHERE key='member_portal_v4'",JSON.stringify({links:[{name:'Cổng chính Sky First Network',url:'https://www.skyfirst.io.vn/'},{name:'Cổng Thông tin',url:'https://ctt.skyfirst.io.vn/'}]}));
+const migratedLinks=await call('/api/public/portal-config');assert.deepEqual(migratedLinks.links.map(x=>x.name),['Trang Thông Tin Điện Tử Sky First','Cổng Thông Tin Số Sky First']);assert.equal(migratedLinks.links[0].url,'https://www.skyfirst.io.vn/');assert.equal(migratedLinks.links[1].url,'https://ctt.skyfirst.io.vn/');checks++;
+const linkSet=[{name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức'},{name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin số'}];
+r=await call('/api/admin/portal-config','PUT',{stats:[],tagline:'Hành trình của thành viên',brand:{siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:17,cornerRadius:12,contentMaxWidth:1360},links:linkSet,change_reason:'Chuẩn hóa nhận diện Trung tâm Nghiệp vụ Số Sky First'});assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links.length,2);checks++;
+r=await call('/api/admin/portal-config');assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.baseFontSize,17);assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links[1].name,'Cổng Thông Tin Số Sky First');checks++;
 r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'https://external.invalid/logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:linkSet});assert.equal(r.status,400);assert.equal(r.error,'INVALID_LOGO_PATH');checks++;
-r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:[...linkSet.slice(0,4),{name:'External',url:'https://example.com',description:''}]});assert.equal(r.status,400);assert.equal(r.error,'INVALID_PORTAL_LINK');checks++;
-r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:[{...linkSet[0],url:'https://ctt.skyfirst.io.vn/'},...linkSet.slice(1)]});assert.equal(r.status,400);assert.equal(r.error,'INVALID_PORTAL_LINK');checks++;
+r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:[linkSet[0],{name:'External',url:'https://example.com',description:''}]});assert.equal(r.status,400);assert.equal(r.error,'INVALID_PORTAL_LINK');checks++;
+r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:[{...linkSet[0],url:'https://ctt.skyfirst.io.vn/'},linkSet[1]]});assert.equal(r.status,400);assert.equal(r.error,'INVALID_PORTAL_LINK');checks++;
 
 // 4. Image upload & private request avatar protection
 const crc32=(bytes)=>{let c=0xffffffff;for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1)}return (c^0xffffffff)>>>0};
@@ -463,6 +464,104 @@ function buildTestZip(entries){
   assert.equal(r.status,200);assert.equal(r.ok,true);assert.equal(r.bundle.format,'skyfirst-operations-center-export-v1');
   assert.equal(typeof r.sha256_checksum,'string');assert.equal(r.sha256_checksum.length,64);
   assert(r.bundle.org_nodes.length>=1);assert(r.bundle.governance_registry.length>=10);checks+=6;
+}
+
+// 7. Deep Work Queue Coordination: Priority Scoring, Claim/Assign, Blocked Validation, Reminder Cooldown & Bulk Operations
+{
+  const wq=await call('/api/admin/work-center','GET');
+  assert.equal(wq.status,200);assert(Array.isArray(wq.items));assert(wq.items.length>=1);
+  const firstItem=wq.items[0];
+  assert(typeof firstItem.priority_score==='number');assert(typeof firstItem.priority_reason==='string'&&firstItem.priority_reason.length>0);
+  checks+=4;
+
+  // Blocked state without mandatory fields must fail with 400 BLOCKED_DETAILS_REQUIRED
+  r=await call('/api/admin/work-center/'+encodeURIComponent(firstItem.item_key),'PATCH',{status:'blocked',blocked_reason:'Thiếu giấy tờ'});
+  assert.equal(r.status,400);assert.equal(r.error,'BLOCKED_DETAILS_REQUIRED');checks+=2;
+
+  // Blocked state with all 3 mandatory fields succeeds
+  r=await call('/api/admin/work-center/'+encodeURIComponent(firstItem.item_key),'PATCH',{
+    status:'blocked',
+    priority:'high',
+    blocked_reason:'Chờ xác nhận văn bản từ đơn vị cơ sở',
+    blocked_missing_condition:'Bản sao quyết định cử nhân sự',
+    blocked_coordination_party:'Ban Nhân sự & Văn phòng Trung ương',
+    collaborators:['Ban Nhân sự','Ban Kiểm tra'],
+    dependencies:['account_request:init'],
+    handover_note:'Tạm chặn chờ bổ sung minh chứng'
+  });
+  assert.equal(r.status,200);assert.equal(r.workflow_state,'blocked');assert.equal(r.ok,true);checks+=2;
+
+  // Verify GET /api/admin/work-center/:itemKey returns persisted state and audit history
+  const wqDetail=await call('/api/admin/work-center/'+encodeURIComponent(firstItem.item_key),'GET');
+  assert.equal(wqDetail.status,200);assert.equal(wqDetail.state.status,'blocked');assert(Array.isArray(wqDetail.history));assert(wqDetail.history.length>=1);checks+=4;
+
+  // Reminder with 60-minute cooldown protection
+  r=await call('/api/admin/work-center/'+encodeURIComponent(firstItem.item_key),'PATCH',{action:'remind'});
+  assert.equal(r.ok,true);checks++;
+  r=await call('/api/admin/work-center/'+encodeURIComponent(firstItem.item_key),'PATCH',{action:'remind'});
+  assert.equal(r.status,429);assert.equal(r.error,'REMINDER_COOLDOWN_ACTIVE');checks+=2;
+
+  // Bulk claim & bulk status transition
+  r=await call('/api/admin/work-center/bulk','POST',{item_keys:[firstItem.item_key],action:'claim',handover_note:'Nhận việc hàng loạt'});
+  assert.equal(r.status,200);assert.equal(r.updated_count,1);checks+=2;
+}
+
+// 8. Full Support Ticket Lifecycle: Impact Level, SLA, Duplicate Detection, Public/Internal Messages, Mandatory Resolution, Reopen & Satisfaction Rating
+{
+  // Create support ticket with high impact
+  const t1=await call('/api/me/support','POST',{category:'Kỹ thuật & Tài khoản',subject:'Không tải được thẻ PDF hai mặt trên trình duyệt di động',body:'Khi bấm tải PDF thẻ thành viên trên điện thoại thì báo lỗi.',impact_level:'high',attachment_url:'/api/files/minh-chung.png'});
+  assert.equal(t1.status,200);assert.equal(t1.ok,true);assert.equal(t1.impact_level,'high');assert.equal(t1.priority,'high');assert(t1.sla_resolution_due_at);checks+=5;
+
+  // Create duplicate ticket within 7 days -> detected and linked without deleting
+  const t2=await call('/api/me/support','POST',{category:'Kỹ thuật & Tài khoản',subject:'Không tải được thẻ PDF hai mặt trên trình duyệt di động',body:'Gửi lại yêu cầu hỗ trợ tải PDF.',impact_level:'medium'});
+  assert.equal(t2.status,200);assert.equal(t2.potential_duplicate_ticket_code,t1.ticket_code);checks+=2;
+
+  // Admin posts an internal note and a public reply
+  r=await call(`/api/admin/support-tickets/${encodeURIComponent(t1.id)}/messages`,'POST',{visibility:'internal',body:'Ghi chú nội bộ: Kiểm tra bộ nhớ đệm SVG trên Safari iOS.'});
+  assert.equal(r.status,201);assert.equal(r.visibility,'internal');checks+=2;
+  r=await call(`/api/admin/support-tickets/${encodeURIComponent(t1.id)}/messages`,'POST',{visibility:'public',body:'Ban Kỹ thuật đã tiếp nhận và đang xử lý cho bạn.'});
+  assert.equal(r.status,201);assert.equal(r.visibility,'public');checks+=2;
+
+  // Member replies to ticket
+  r=await call(`/api/me/support/${encodeURIComponent(t1.id)}/reply`,'POST',{body:'Cảm ơn Ban Kỹ thuật, tôi dùng iOS 17.'});
+  assert.equal(r.status,201);checks++;
+
+  // Verify member GET /api/me/support sees public messages & own reply, but NOT internal admin notes
+  const mySupport=await call('/api/me/support','GET');
+  const myT1=mySupport.items.find(x=>x.id===t1.id);
+  assert(myT1);assert.equal(myT1.messages.length,2);assert(myT1.messages.every(m=>m.visibility!=='internal'));checks+=3;
+
+  // Admin attempting to close ticket without resolution_note fails with 400 RESOLUTION_REQUIRED
+  r=await call('/api/admin/support-tickets/'+encodeURIComponent(t1.id),'PATCH',{status:'completed',resolution_note:''});
+  assert.equal(r.status,400);assert.equal(r.error,'RESOLUTION_REQUIRED');checks+=2;
+
+  // Admin closes ticket with full resolution_note
+  r=await call('/api/admin/support-tickets/'+encodeURIComponent(t1.id),'PATCH',{status:'completed',resolution_note:'Đã cập nhật cơ chế tạo Blob PDF trực tiếp tương thích Safari iOS.',closed_reason:'Đã khắc phục triệt để'});
+  assert.equal(r.status,"completed");assert.equal(r.ok,true);checks+=2;
+
+  // Member reopens closed ticket with reason
+  r=await call(`/api/me/support/${encodeURIComponent(t1.id)}/reopen`,'POST',{reason:'Cần kiểm tra thêm ở chế độ dọc (portrait).'});
+  assert.equal(r.status,200);assert.equal(r.ticket_status,'reopened');checks+=2;
+
+  // Admin completes again, then member rates 5 stars
+  await call('/api/admin/support-tickets/'+encodeURIComponent(t1.id),'PATCH',{status:'completed',resolution_note:'Đã kiểm tra cả chế độ ngang và dọc, hoạt động ổn định.'});
+  r=await call(`/api/me/support/${encodeURIComponent(t1.id)}/feedback`,'POST',{score:5,comment:'Hỗ trợ rất nhanh và rõ ràng!'});
+  assert.equal(r.status,200);assert.equal(r.score,5);checks+=2;
+}
+
+// 9. Workflow Bottleneck Analytics, Grounded Knowledge Assistant, Case Reconstruction & Data Consistency
+{
+  const wf=await call('/api/admin/workflows/analytics','GET');
+  assert.equal(wf.status,200);assert.equal(wf.ok,true);assert(wf.workflow_metrics?.account_requests);assert(Array.isArray(wf.bottlenecks));assert(wf.bottlenecks.length>=1);checks+=5;
+
+  const kn=await call('/api/admin/knowledge/assistant','POST',{question:'SLA phê duyệt hồ sơ đăng ký tài khoản'});
+  assert.equal(kn.status,200);assert.equal(kn.ok,true);assert(Array.isArray(kn.verified_facts));assert(Array.isArray(kn.inferences_and_recommendations));checks+=4;
+
+  const recon=await call('/api/admin/case-reconstruction?subject_id=p','GET');
+  assert.equal(recon.status,200);assert.equal(recon.ok,true);assert.equal(recon.person.id,'p');assert(recon.timeline.length>=1);checks+=4;
+
+  const dc=await call('/api/admin/data-consistency','GET');
+  assert.equal(dc.status,200);assert.equal(dc.ok,true);assert.equal(dc.checks.length,5);checks+=3;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

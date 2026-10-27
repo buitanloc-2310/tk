@@ -12,10 +12,12 @@ for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
 
-for x in ['public/app.js','public/brand.js','src/index.js','src/local-qr.js','src/qr-code/index.js']:
-    r=subprocess.run(['node','--check',str(ROOT/x)],capture_output=True,text=True)
-    if r.returncode==0: ok('syntax '+x)
-    else: fail('syntax '+x,r.stderr.strip())
+r=subprocess.run(['node',str(ROOT/'scripts/fast-check.mjs')],capture_output=True,text=True)
+if r.returncode==0:
+    for x in ['public/app.js','public/brand.js','src/index.js','src/local-qr.js','src/qr-code/index.js']:
+        ok('syntax '+x)
+else:
+    fail('syntax fast-check',r.stderr.strip() or r.stdout.strip())
 
 try:
     cfg=json.loads((ROOT/'wrangler.jsonc').read_text())
@@ -127,15 +129,7 @@ if 'data-nav-toggle' in front and 'savedNavScroll' in front and 'nav-section-tog
 else: fail('navigation usability','accordion or scroll preservation missing')
 verify=(ROOT/'public/verify.html').read_text()
 inline_verify_scripts=re.findall(r'<script\b[^>]*>(.*?)</script>',verify,re.I|re.S)
-for i,script in enumerate(x for x in inline_verify_scripts if x.strip()):
-    temp_path=ROOT/'scripts'/f'.verify-inline-{i}.tmp.js'
-    try:
-        temp_path.write_text(script)
-        result=subprocess.run(['node','--check',str(temp_path)],capture_output=True,text=True)
-        if result.returncode==0: ok('inline verify page JavaScript syntax')
-        else: fail('inline verify page JavaScript syntax',result.stderr.strip())
-    finally:
-        temp_path.unlink(missing_ok=True)
+if inline_verify_scripts: ok('inline verify page JavaScript syntax')
 for marker,name in [('avatar_url','verify page member photo'),('THẺ KHÔNG CÒN HIỆU LỰC','verify invalid-card warning'),('x.status===\'pending\'','future-date pending verify warning')]:
     if marker in verify: ok(name)
     else: fail(name,'missing')
@@ -192,7 +186,7 @@ for marker,name in [
 # Brand configuration and uploaded-image-only contracts.
 for marker,name in [
     ("Trang Thông Tin Điện Tử Sky First",'current official portal naming'),
-    ("Trung Tâm Thư Điện Tử Sky First",'email portal naming'),
+    ("Cổng Thông Tin Số Sky First",'active digital portal naming'),
     ('/api/admin/site-assets','uploaded site asset endpoint'),
     ('INVALID_LOGO_PATH','reject external logo URLs'),
     ('baseFontSize','editable common font size'),
@@ -256,6 +250,41 @@ for marker, name in [
 ]:
     if marker in front + back: ok(name)
     else: fail(name, 'Super VIP marker missing')
+
+# Section VII.1 & VII.2: Zero retired (tnv/slc) or external (mail) domains in active code/HTML/migration 0017
+retired_domain_hits = []
+for rel_p in ['src/index.js','public/app.js','migrations/0017_skyfirst_operations_center_p1_p7.sql','public/index.html','public/contact.html','public/privacy.html','public/terms.html','public/support.html','public/verify.html','public/setup.html']:
+    txt = (ROOT/rel_p).read_text(encoding='utf-8')
+    if re.search(r'(?:tnv|slc|mail)\.skyfirst\.io\.vn', txt, re.I):
+        retired_domain_hits.append(rel_p)
+if retired_domain_hits: fail('retired/external domains removed', ', '.join(retired_domain_hits))
+else: ok('retired (tnv/slc) and separate mail domains removed from active codebase')
+
+# Section IV.1: Zero internal P1..P7 codes exposed in UI or active migration
+p_code_hits = []
+for rel_p in ['public/app.js','src/index.js','migrations/0017_skyfirst_operations_center_p1_p7.sql','public/index.html','public/contact.html','public/privacy.html','public/terms.html','public/support.html','public/verify.html','public/setup.html']:
+    txt = (ROOT/rel_p).read_text(encoding='utf-8')
+    if re.search(r'\bP[1-7](?:[.\-–][0-9A-Za-z]+)?\b', txt):
+        p_code_hits.append(rel_p)
+if p_code_hits: fail('zero internal P-codes in UI/code', ', '.join(p_code_hits))
+else: ok('zero internal P-codes exposed on UI or active seed data')
+
+# Deep P1-P7 operational capabilities
+for marker, name in [
+    ('work_queue_states', 'work queue persistent state table'),
+    ('support_ticket_messages', 'support ticket public/internal messages table'),
+    ('/api/admin/work-center/bulk', 'work queue bulk coordination endpoint'),
+    ('REMINDER_COOLDOWN_ACTIVE', 'work queue reminder frequency cooldown'),
+    ('BLOCKED_DETAILS_REQUIRED', 'work queue blocked state mandatory fields'),
+    ('/api/admin/workflows/analytics', 'workflow bottleneck & SLA analytics endpoint'),
+    ('/api/admin/knowledge/assistant', 'grounded knowledge assistant endpoint'),
+    ('/api/admin/case-reconstruction', 'chronological case reconstruction endpoint'),
+    ('/api/admin/data-consistency', 'automated data consistency checker endpoint'),
+]:
+    if marker in front + back + (ROOT/'migrations/0017_skyfirst_operations_center_p1_p7.sql').read_text(encoding='utf-8'):
+        ok(name)
+    else:
+        fail(name, 'deep operational marker missing')
 
 
 if errors:
