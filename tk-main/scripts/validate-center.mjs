@@ -1084,6 +1084,23 @@ function buildTestZip(entries){
   assert.equal(encBody.reason,'ENCRYPTED_ZIP_ENTRY_FORBIDDEN');
   checks+=3;
 
+
+  // 13.7 Web-Integrated Desktop Download Center (.exe & .dmg endpoints + metadata)
+  const dlMeta=await call('/api/public/desktop-downloads','GET');
+  assert.equal(dlMeta.httpStatus,200);
+  assert.equal(dlMeta.version,'6.0.0');
+  assert.equal(dlMeta.windows.execution_level,'asInvoker');
+  assert.equal(dlMeta.macos.bundle_id,'vn.io.skyfirst.nghiepvu.desktop');
+  const exeRes=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/desktop-downloads/windows.exe'),{DB,FILES});
+  assert.equal(exeRes.status,200);
+  const exeBytes=new Uint8Array(await exeRes.arrayBuffer());
+  assert.equal(exeBytes[0],0x4d);assert.equal(exeBytes[1],0x5a); // MZ magic
+  const dmgRes=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/desktop-downloads/macos.dmg'),{DB,FILES});
+  assert.equal(dmgRes.status,200);
+  const dmgBytes=new Uint8Array(await dmgRes.arrayBuffer());
+  assert.equal(new TextDecoder().decode(dmgBytes.slice(-512,-508)),'koly'); // Apple UDIF koly trailer
+  checks+=8;
+
   const expBundle=await call('/api/admin/export-bundle','GET');
   assert.equal(expBundle.httpStatus,200);
   const recomputedHash=createHash('sha256').update(JSON.stringify(expBundle.bundle)).digest('hex');

@@ -345,6 +345,14 @@ function renderLogin(){
             <button type="button" id="checkRequestRegister" class="link-button register-lookup">Tra cứu đăng ký đã gửi</button>
           </div>
           <div class="auth-trust"><span>Thông tin định danh được giới hạn quyền truy cập.</span><span>Tài khoản chỉ kích hoạt sau khi Sky First xác nhận.</span></div>
+          <div class="auth-desktop-downloads" style="margin:12px 0;padding:12px;border-radius:12px;background:rgba(37,99,235,0.06);border:1px solid rgba(37,99,235,0.18)">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#2563eb;margin-bottom:6px">ỨNG DỤNG MÁY TÍNH SKY FIRST (GFI v6.0.0)</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <a class="secondary" style="flex:1;text-align:center;text-decoration:none;padding:8px 10px;font-size:13px;font-weight:600;border-radius:8px" href="/downloads/SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe" download="SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe">⬇ Bản Windows (.exe)</a>
+              <a class="secondary" style="flex:1;text-align:center;text-decoration:none;padding:8px 10px;font-size:13px;font-weight:600;border-radius:8px" href="/downloads/SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg" download="SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg">⬇ Bản macOS (.dmg)</a>
+            </div>
+            <div style="margin-top:6px;text-align:right"><button type="button" id="openDesktopDownloadModalBtn" class="link-button" style="font-size:12px">Kiểm tra mã băm SHA-256 &amp; hướng dẫn cài đặt →</button></div>
+          </div>
           <div class="auth-ecosystem">${portalMenu()}</div>
           <div class="auth-legal"><a href="/support.html">Hỗ trợ</a><a href="/privacy.html">Bảo mật</a><a href="/terms.html">Điều khoản</a></div>
         </div>
@@ -356,6 +364,8 @@ function renderLogin(){
   $('#checkRequest').onclick=()=>routePublic('/registration-status');
   $('#checkRequestRegister').onclick=()=>routePublic('/registration-status');
   loadPublicStats();
+  const dlBtn=$('#openDesktopDownloadModalBtn');
+  if(dlBtn)dlBtn.onclick=()=>openDesktopDownloadCenterModal();
   $('#forgotPassword').onclick=()=>{modal('Đặt lại mật khẩu',`<form id="forgotForm" class="form-grid"><p class="muted">Nhập tên đăng nhập hoặc email. Nếu tài khoản hợp lệ, hệ thống sẽ gửi liên kết đặt lại mật khẩu.</p><label>Tên đăng nhập / Email<input name="login" required autocomplete="username"></label><button class="primary">Gửi liên kết bảo mật</button><div id="forgotMsg" class="msg"></div></form>`);$('#forgotForm').onsubmit=async e=>{e.preventDefault();const login=new FormData(e.target).get('login');await api('/api/public/password/forgot',{method:'POST',body:JSON.stringify({login})}).catch(()=>null);$('#forgotMsg').textContent='Nếu tài khoản tồn tại, hướng dẫn đã được gửi đến email đăng ký.'}};
   $('#togglePassword').onclick=()=>{const i=$('#loginForm').elements.password;i.type=i.type==='password'?'text':'password'};
   $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':code==='ACCOUNT_BANNED'?'Tài khoản bị giới hạn truy cập. Vui lòng liên hệ support@skyfirst.io.vn.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
@@ -9216,6 +9226,19 @@ async function renderAdminSystem(c){
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><h2 style="margin:0">Tình trạng hệ thống</h2><div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="secondary" id="runSchemaReconcileBtn">Đồng bộ &amp; Kiểm tra D1</button><button type="button" class="secondary" id="runR2ProbeBtn">Kiểm tra Đọc/Ghi/Xóa R2</button></div></div><div id="healthBox">Đang kiểm tra...</div></div>
   </div>
   <div class="card" style="margin-top:14px"><h2>Cổng Kiểm tra Sẵn sàng Phát hành &amp; Trung tâm Chẩn đoán Email / OTP</h2><div id="releaseGateBox">Đang tải...</div></div>
+  <div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <h2 style="margin:0">Bộ Cài đặt Ứng dụng Máy tính Tích hợp trên Web (Windows .exe &amp; macOS .dmg)</h2>
+      <button type="button" class="secondary" id="adminOpenDesktopModalBtn">Xem SHA-256 &amp; Hướng dẫn</button>
+    </div>
+    <p class="muted">Tải trực tiếp bộ cài đặt máy tính sử dụng chung tài khoản và phân quyền của Trung tâm Nghiệp vụ Số Sky First (đã tích hợp tại <code>/downloads/*</code> và API <code>/api/public/desktop-downloads/*</code>).</p>
+    <div class="toolbar" style="gap:10px;flex-wrap:wrap">
+      <a class="primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:10px" href="/downloads/SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe" download="SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe">⬇ Tải bộ cài Windows 10/11 64-bit (.exe)</a>
+      <a class="primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:10px" href="/downloads/SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg" download="SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg">⬇ Tải bộ cài macOS Universal (.dmg)</a>
+      <a class="secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:10px" href="/api/public/desktop-downloads/windows.exe">Tải .exe qua API Worker</a>
+      <a class="secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:10px" href="/api/public/desktop-downloads/macos.dmg">Tải .dmg qua API Worker</a>
+    </div>
+  </div>
   <div class="card" style="margin-top:14px"><h2>Kiểm tra An toàn Gói Tệp Nén &amp; Xuất Dữ liệu Hệ thống</h2>
     <div class="toolbar" style="margin-bottom:10px">
       <input type="file" id="zipInspectFile" accept=".zip,application/zip" aria-label="Chọn tệp ZIP cần kiểm tra">
@@ -9320,6 +9343,7 @@ async function renderAdminSystem(c){
     }catch{}
   };
 
+  if($('#adminOpenDesktopModalBtn'))$('#adminOpenDesktopModalBtn').onclick=()=>openDesktopDownloadCenterModal();
   $('#runSchemaReconcileBtn').onclick=async()=>{
     $('#runSchemaReconcileBtn').disabled=true;
     try{
@@ -10528,3 +10552,46 @@ async function renderInternalCommunity(c){
 }
 
 boot();
+
+
+async function openDesktopDownloadCenterModal(){
+  modal('Tải Ứng dụng Máy tính Sky First (Windows .exe & macOS .dmg)','<div id="desktopDlModalBox">Đang tải thông tin phiên bản và mã kiểm chứng SHA-256...</div>');
+  try{
+    const d=await api('/api/public/desktop-downloads');
+    const w=d.windows||{},m=d.macos||{};
+    $('#desktopDlModalBox').innerHTML=`
+      <p class="muted">Phiên bản phát hành: <b>${esc(d.version||'6.0.0')}</b> · Lược đồ D1: <b>Schema ${esc(String(d.schema_version||17))}</b> · Kết nối trực tiếp tới <code>${esc(d.target_domain)}</code></p>
+      <div class="stack-list" style="margin:12px 0">
+        <div class="card" style="padding:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div>
+              <b>1. Bản dành cho Windows 10 / 11 (64-bit)</b>
+              <div class="meta">Tệp: <code>${esc(w.filename)}</code> · Kiến trúc: ${esc(w.architecture)} · Quyền chạy: <code>${esc(w.execution_level)}</code> (không đòi quyền Admin)</div>
+              <div class="meta">SHA-256 (Gói đầy đủ): <code>${esc(w.full_package_sha256)}</code></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <a class="primary" style="text-decoration:none;padding:8px 12px;border-radius:8px" href="${esc(w.static_url)}" download="${esc(w.filename)}">⬇ Tải .EXE đầy đủ</a>
+              <a class="secondary" style="text-decoration:none;padding:8px 12px;border-radius:8px" href="${esc(w.api_download_url)}">Tải qua API</a>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="padding:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div>
+              <b>2. Bản dành cho macOS (Intel &amp; Apple Silicon Universal)</b>
+              <div class="meta">Tệp: <code>${esc(m.filename)}</code> · Định dạng: ${esc(m.architecture)} · Bundle ID: <code>${esc(m.bundle_id)}</code></div>
+              <div class="meta">SHA-256 (Gói đầy đủ): <code>${esc(m.full_package_sha256)}</code></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <a class="primary" style="text-decoration:none;padding:8px 12px;border-radius:8px" href="${esc(m.static_url)}" download="${esc(m.filename)}">⬇ Tải .DMG đầy đủ</a>
+              <a class="secondary" style="text-decoration:none;padding:8px 12px;border-radius:8px" href="${esc(m.api_download_url)}">Tải qua API</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="request-note" style="font-size:12px">${(d.security_notes||[]).map(x=>`<div>• ${esc(x)}</div>`).join('')}</div>
+    `;
+  }catch(e){
+    $('#desktopDlModalBox').innerHTML=`<div class="service-warning">Không tải được thông tin: ${esc(e.message)}</div>`;
+  }
+}

@@ -7,7 +7,7 @@ errors=[]
 def ok(name): print('[OK]',name)
 def fail(name,msg): errors.append(f'{name}: {msg}'); print('[FAIL]',name,msg)
 
-required=['migrations/0017_skyfirst_operations_center_p1_p7.sql','migrations/0018_gfi_schema_column_reconciliation.sql','public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql','migrations/0016_schema_health_baseline.sql','REMEDIATION_REPORT_2026-10-09_V11.md']
+required=['migrations/0017_skyfirst_operations_center_p1_p7.sql','migrations/0018_gfi_schema_column_reconciliation.sql','public/downloads/SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe','public/downloads/SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg','public/index.html','public/app.js','public/brand.js','public/styles.css','public/sfn-logo.png','src/index.js','src/local-qr.js','src/qr-code/index.js','src/qr-code/LICENSE.txt','wrangler.jsonc','migrations/0008_account_request_profile.sql','migrations/0014_independent_verification_qr.sql','migrations/0015_people_work_profile.sql','migrations/0016_schema_health_baseline.sql','REMEDIATION_REPORT_2026-10-09_V11.md']
 for x in required:
     if (ROOT/x).exists(): ok('file '+x)
     else: fail('file '+x,'missing')
