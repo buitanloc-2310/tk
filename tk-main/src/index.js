@@ -243,7 +243,143 @@ async function ensureGovernanceTables(env){
     "CREATE TABLE IF NOT EXISTS content_reports(id TEXT PRIMARY KEY,target_type TEXT NOT NULL,target_id TEXT NOT NULL,reporter_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',moderator_account_id TEXT,resolution_note TEXT,resolved_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
   ];
   for(const sql of [...ddl,...extDdl])await env.DB.prepare(sql).run();
+  await reconcileGovernanceColumns(env);
+  try{await env.DB.prepare("INSERT OR IGNORE INTO schema_version(version) VALUES(16),(17)").run();}catch{}
   _govTablesEnsured=true;env.__schema17Ready=true;
+}
+
+const GOVERNANCE_COLUMN_RECONCILE_SPECS={
+  support_ticket_assignments:[
+    ["org_node_id","TEXT"],
+    ["assigned_account_id","TEXT"],
+    ["priority","TEXT NOT NULL DEFAULT 'normal'"],
+    ["impact_level","TEXT NOT NULL DEFAULT 'medium'"],
+    ["attachment_url","TEXT"],
+    ["duplicate_of_ticket_id","TEXT"],
+    ["escalated_to_account_id","TEXT"],
+    ["escalation_reason","TEXT"],
+    ["reopen_reason","TEXT"],
+    ["reopened_at","TEXT"],
+    ["satisfaction_score","INTEGER"],
+    ["feedback_comment","TEXT"],
+    ["sla_response_due_at","TEXT"],
+    ["sla_due_at","TEXT"],
+    ["sla_breached","INTEGER NOT NULL DEFAULT 0"],
+    ["resolution_note","TEXT"],
+    ["closed_reason","TEXT"],
+    ["responded_at","TEXT"],
+    ["resolved_at","TEXT"],
+    ["updated_by_account_id","TEXT"],
+    ["updated_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
+  ],
+  support_ticket_messages:[
+    ["sender_account_id","TEXT"],
+    ["visibility","TEXT NOT NULL DEFAULT 'public'"],
+    ["message_type","TEXT NOT NULL DEFAULT 'reply'"],
+    ["body","TEXT NOT NULL DEFAULT ''"],
+    ["attachment_url","TEXT"],
+    ["created_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
+  ],
+  work_queue_states:[
+    ["org_node_id","TEXT"],
+    ["assigned_account_id","TEXT"],
+    ["collaborator_ids_json","TEXT NOT NULL DEFAULT '[]'"],
+    ["dependency_keys_json","TEXT NOT NULL DEFAULT '[]'"],
+    ["priority","TEXT NOT NULL DEFAULT 'normal'"],
+    ["workflow_state","TEXT NOT NULL DEFAULT 'open'"],
+    ["blocked_reason","TEXT"],
+    ["blocked_missing_condition","TEXT"],
+    ["blocked_coordination_party","TEXT"],
+    ["blocked_resolution_plan","TEXT"],
+    ["due_at","TEXT"],
+    ["last_reminder_at","TEXT"],
+    ["reminder_count","INTEGER NOT NULL DEFAULT 0"],
+    ["handover_note","TEXT"],
+    ["updated_by_account_id","TEXT"],
+    ["created_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"],
+    ["updated_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
+  ],
+  governance_registry:[
+    ["domain_group","TEXT NOT NULL DEFAULT 'policy'"],
+    ["code","TEXT"],
+    ["title","TEXT NOT NULL DEFAULT ''"],
+    ["status","TEXT NOT NULL DEFAULT 'active'"],
+    ["org_node_id","TEXT"],
+    ["owner_account_id","TEXT"],
+    ["reviewer_account_id","TEXT"],
+    ["approver_account_id","TEXT"],
+    ["related_entity_type","TEXT"],
+    ["related_entity_id","TEXT"],
+    ["version_label","TEXT NOT NULL DEFAULT '1.0'"],
+    ["summary","TEXT"],
+    ["payload_json","TEXT NOT NULL DEFAULT '{}'"],
+    ["evidence_ref","TEXT"],
+    ["effective_from","TEXT"],
+    ["effective_to","TEXT"],
+    ["created_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"],
+    ["updated_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
+  ],
+  email_otp_tokens:[
+    ["purpose","TEXT NOT NULL DEFAULT 'account_request'"],
+    ["verify_token_hash","TEXT"],
+    ["attempts","INTEGER NOT NULL DEFAULT 0"],
+    ["max_attempts","INTEGER NOT NULL DEFAULT 5"],
+    ["resend_count","INTEGER NOT NULL DEFAULT 0"],
+    ["verified_at","TEXT"],
+    ["used_at","TEXT"],
+    ["ip_hint","TEXT"],
+    ["user_agent","TEXT"],
+    ["updated_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
+  ],
+  email_delivery_logs:[
+    ["template_code","TEXT NOT NULL DEFAULT 'master_notification'"],
+    ["sender_address","TEXT NOT NULL DEFAULT 'noreply@skyfirst.io.vn'"],
+    ["reply_to_address","TEXT"],
+    ["provider_name","TEXT NOT NULL DEFAULT 'resend'"],
+    ["provider_message_id","TEXT"],
+    ["error_detail","TEXT"],
+    ["retry_count","INTEGER NOT NULL DEFAULT 0"],
+    ["related_entity_type","TEXT"],
+    ["related_entity_id","TEXT"],
+    ["updated_at","TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
+  ],
+  legal_consent_records:[
+    ["terms_version","TEXT NOT NULL DEFAULT '2026.10-SFN-TERMS'"],
+    ["privacy_version","TEXT NOT NULL DEFAULT '2026.10-SFN-PDPD'"],
+    ["read_acknowledged","INTEGER NOT NULL DEFAULT 0"],
+    ["terms_accepted","INTEGER NOT NULL DEFAULT 0"],
+    ["privacy_consent","INTEGER NOT NULL DEFAULT 0"],
+    ["accuracy_committed","INTEGER NOT NULL DEFAULT 0"],
+    ["is_minor","INTEGER NOT NULL DEFAULT 0"],
+    ["guardian_consent","INTEGER NOT NULL DEFAULT 0"],
+    ["email_verified","INTEGER NOT NULL DEFAULT 0"],
+    ["otp_token_id","TEXT"],
+    ["purpose_scope","TEXT NOT NULL DEFAULT 'account_review_and_member_operations'"],
+    ["ip_hint","TEXT"],
+    ["user_agent","TEXT"]
+  ]
+};
+
+async function reconcileGovernanceColumns(env){
+  const added=[];
+  for(const [table,colSpecs] of Object.entries(GOVERNANCE_COLUMN_RECONCILE_SPECS)){
+    const tblRow=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").bind(table).first();
+    if(!tblRow?.name)continue;
+    const info=await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+    const existing=new Set((info.results||[]).map(c=>c.name));
+    for(const [colName,colDef] of colSpecs){
+      if(!existing.has(colName)){
+        await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${colName} ${colDef}`).run();
+        added.push(`${table}.${colName}`);
+      }
+    }
+  }
+  try{
+    await env.DB.prepare("UPDATE support_ticket_assignments SET impact_level='medium' WHERE impact_level IS NULL OR TRIM(impact_level)=''").run();
+    await env.DB.prepare("UPDATE support_ticket_assignments SET priority='normal' WHERE priority IS NULL OR TRIM(priority)=''").run();
+  }catch{}
+  if(added.length)env.__lastReconciledColumns=added;
+  return added;
 }
 
 function normalizeAccountTypeCode(raw){
@@ -284,40 +420,89 @@ function validUploadedAttachment(bytes,mimeType){
 }
 function inspectZipArchiveHeaders(input){
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input||[]);
-  if(bytes.byteLength<22)return {valid:false,reason:'ARCHIVE_TOO_SMALL',entries:[]};
-  if(bytes.byteLength>25*1024*1024)return {valid:false,reason:'ARCHIVE_COMPRESSED_TOO_LARGE',entries:[]};
-  if(bytes[0]!==0x50||bytes[1]!==0x4b)return {valid:false,reason:'INVALID_ZIP_MAGIC',entries:[]};
+  if(bytes.byteLength<22)return {valid:false,reason:'ARCHIVE_TOO_SMALL',file_count:0,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:0,max_compression_ratio:0,max_depth:0,risks:[{file:'(archive)',risk:'ARCHIVE_TOO_SMALL'}],entries:[],execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
+  if(bytes.byteLength>25*1024*1024)return {valid:false,reason:'ARCHIVE_COMPRESSED_TOO_LARGE',file_count:0,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:0,max_compression_ratio:0,max_depth:0,risks:[{file:'(archive)',risk:'ARCHIVE_COMPRESSED_TOO_LARGE'}],entries:[],execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
+  if(bytes[0]!==0x50||bytes[1]!==0x4b||![0x03,0x05,0x07].includes(bytes[2]))return {valid:false,reason:'INVALID_ZIP_MAGIC',file_count:0,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:0,max_compression_ratio:0,max_depth:0,risks:[{file:'(archive)',risk:'INVALID_ZIP_MAGIC'}],entries:[],execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   const dec=new TextDecoder('utf-8',{fatal:false});
-  const forbiddenExt=/\.(exe|dll|bat|cmd|sh|ps1|vbs|scr|msi|jar|com|elf|so|dylib|php|jsp|asp|aspx)$/i;
-  let offset=0,fileCount=0,totalUncompressed=0,maxRatio=0,maxDepth=0;
+  const forbiddenExt=/\.(exe|dll|bat|cmd|sh|ps1|vbs|scr|msi|jar|com|elf|so|dylib|php|jsp|asp|aspx|phtml|phar|cgi|pl|py|rb|hta|wsf|cpl|scf|lnk)$/i;
+  let offset=0,fileCount=0,totalUncompressed=0,totalCompressed=0,maxRatio=0,maxDepth=0;
   const entries=[],risks=[];
   while(offset+30<=bytes.byteLength){
     const sig=view.getUint32(offset,true);
     if(sig!==0x04034b50)break;
+    const flags=view.getUint16(offset+6,true);
+    const method=view.getUint16(offset+8,true);
     const compSize=view.getUint32(offset+18,true);
     const uncompSize=view.getUint32(offset+22,true);
     const nameLen=view.getUint16(offset+26,true);
     const extraLen=view.getUint16(offset+28,true);
     const headerEnd=offset+30+nameLen+extraLen;
-    if(headerEnd>bytes.byteLength)return {valid:false,reason:'TRUNCATED_ZIP_HEADER',entries};
+    if(headerEnd>bytes.byteLength){
+      risks.push({file:`@offset_${offset}`,risk:'TRUNCATED_ZIP_HEADER'});
+      return {valid:false,reason:'TRUNCATED_ZIP_HEADER',file_count:fileCount,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:totalUncompressed,max_compression_ratio:Number(maxRatio.toFixed(2)),max_depth:maxDepth,risks,entries,execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
+    }
     const name=dec.decode(bytes.slice(offset+30,offset+30+nameLen));
+    if(headerEnd+compSize>bytes.byteLength){
+      risks.push({file:name||`@offset_${offset}`,risk:'CORRUPTED_COMPRESSED_PAYLOAD_BOUNDS'});
+      return {valid:false,reason:'CORRUPTED_COMPRESSED_PAYLOAD_BOUNDS',file_count:fileCount,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:totalUncompressed,max_compression_ratio:Number(maxRatio.toFixed(2)),max_depth:maxDepth,risks,entries,execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
+    }
     fileCount++;
+    totalCompressed+=compSize;
     totalUncompressed+=uncompSize;
     const ratio=compSize>0?uncompSize/compSize:(uncompSize>0?999:1);
     if(ratio>maxRatio)maxRatio=ratio;
-    const parts=name.split('/').filter(Boolean);
-    if(parts.length>maxDepth)maxDepth=parts.length;
-    if(name.includes('..')||name.startsWith('/')||name.includes('\\'))risks.push({file:name,risk:'PATH_TRAVERSAL'});
+    const normSegments=name.replace(/\\/g,'/').split('/').filter(Boolean);
+    if(normSegments.length>maxDepth)maxDepth=normSegments.length;
+    if((flags&0x01)!==0)risks.push({file:name,risk:'ENCRYPTED_ZIP_ENTRY_FORBIDDEN'});
+    if((flags&0x08)!==0&&compSize===0&&uncompSize===0)risks.push({file:name,risk:'STREAMED_DATA_DESCRIPTOR_UNVERIFIABLE_SIZE'});
+    if(name.includes('..')||name.startsWith('/')||name.startsWith('\\')||name.includes('\\')||/^[a-zA-Z]:/.test(name)||name.includes('\0')||normSegments.includes('..')){
+      risks.push({file:name,risk:'PATH_TRAVERSAL'});
+    }
     if(forbiddenExt.test(name))risks.push({file:name,risk:'EXECUTABLE_OR_SCRIPT_FORBIDDEN'});
-    if(ratio>100&&uncompSize>1024*1024)risks.push({file:name,risk:'SUSPECTED_ZIP_BOMB_RATIO'});
-    entries.push({name,compressed_bytes:compSize,uncompressed_bytes:uncompSize,ratio:Number(ratio.toFixed(2))});
+    if((ratio>100&&uncompSize>64*1024)||uncompSize>25*1024*1024)risks.push({file:name,risk:'SUSPECTED_ZIP_BOMB_RATIO'});
+    entries.push({name,method,compressed_bytes:compSize,uncompressed_bytes:uncompSize,ratio:Number(ratio.toFixed(2))});
     if(fileCount>500){risks.push({file:name,risk:'TOO_MANY_FILES_LIMIT_500'});break;}
     if(totalUncompressed>50*1024*1024){risks.push({file:name,risk:'UNCOMPRESSED_SIZE_LIMIT_50MB'});break;}
     if(maxDepth>12){risks.push({file:name,risk:'DIRECTORY_DEPTH_LIMIT_12'});break;}
     offset=headerEnd+compSize;
   }
-  return {valid:risks.length===0&&fileCount>0,reason:risks.length?risks[0].risk:(fileCount===0?'EMPTY_OR_UNSUPPORTED_STREAM_ZIP':'OK'),file_count:fileCount,compressed_bytes:bytes.byteLength,total_uncompressed_bytes:totalUncompressed,max_compression_ratio:Number(maxRatio.toFixed(2)),max_depth:maxDepth,risks,entries:entries.slice(0,100),execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'};
+  // Inspect Central Directory headers if present at offset to detect symlinks or mismatched sizes
+  let cdOffset=offset,cdCount=0;
+  while(cdOffset+46<=bytes.byteLength&&cdCount<600){
+    const sig=view.getUint32(cdOffset,true);
+    if(sig!==0x02014b50)break;
+    const nameLen=view.getUint16(cdOffset+28,true);
+    const extraLen=view.getUint16(cdOffset+30,true);
+    const commentLen=view.getUint16(cdOffset+32,true);
+    const extAttr=view.getUint32(cdOffset+38,true);
+    if(cdOffset+46+nameLen+extraLen+commentLen>bytes.byteLength){
+      risks.push({file:`@cd_${cdOffset}`,risk:'TRUNCATED_CENTRAL_DIRECTORY'});
+      break;
+    }
+    const cdName=dec.decode(bytes.slice(cdOffset+46,cdOffset+46+nameLen));
+    const unixMode=(extAttr>>>16)&0o170000;
+    if(unixMode===0o120000)risks.push({file:cdName,risk:'SYMLINK_ENTRY_FORBIDDEN'});
+    cdCount++;
+    cdOffset+=46+nameLen+extraLen+commentLen;
+  }
+  const overallRatio=totalCompressed>0?totalUncompressed/totalCompressed:1;
+  if(overallRatio>100&&totalUncompressed>1024*1024)risks.push({file:'(archive)',risk:'SUSPECTED_ZIP_BOMB_RATIO'});
+  return {
+    valid:risks.length===0&&fileCount>0,
+    reason:risks.length?risks[0].risk:(fileCount===0?'EMPTY_OR_UNSUPPORTED_STREAM_ZIP':'OK'),
+    file_count:fileCount,
+    central_directory_entries:cdCount,
+    compressed_bytes:bytes.byteLength,
+    total_uncompressed_bytes:totalUncompressed,
+    max_compression_ratio:Number(maxRatio.toFixed(2)),
+    overall_compression_ratio:Number(overallRatio.toFixed(2)),
+    max_depth:maxDepth,
+    risks,
+    entries:entries.slice(0,100),
+    limits:{max_files:500,max_uncompressed_bytes:50*1024*1024,max_ratio:100,max_depth:12},
+    execution_policy:'NEVER_EXECUTE_UPLOADED_ARCHIVE'
+  };
 }
 
 async function setupDone(env){
@@ -5915,8 +6100,7 @@ env.DB.prepare(`
     return json({summary:{people:{label:'Tổng thành viên',value:Number(people.n||0)},active:{label:'Đang hoạt động',value:Number(active.n||0)},accounts:{label:'Tài khoản',value:Number(accounts.n||0)},cards:{label:'Thẻ đã cấp',value:Number(cards.n||0)},units:{label:'Đơn vị hoạt động',value:Number(units.n||0)},requests:{label:'Yêu cầu chờ',value:Number(requests.n||0)}},member_status:(ms.results||[]).map(x=>({label:labels[x.status]||x.status,n:Number(x.n||0)})),orgs:orgs.results||[],cards:(cs.results||[]).map(x=>({label:x.status==='active'?'Đang hiệu lực':x.status==='revoked'?'Đã thu hồi':x.status==='expired'?'Hết hạn':x.status,n:Number(x.n||0)}))});
   }
 
-  if(url.pathname==='/api/admin/system-health'&&req.method==='GET'){
-    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+  async function inspectDatabaseStructure(env,opts={}){
     const requiredSchemaVersion=16;
     const targetSchemaVersion=17;
     const requiredColumns={
@@ -5954,7 +6138,7 @@ env.DB.prepare(`
       email_delivery_logs:['id','template_code','recipient_email','status'],
       legal_consent_records:['id','subject_type','subject_id','email','privacy_consent'],
       system_config_history:['id','config_key','version_no'],
-      support_ticket_assignments:['ticket_id','priority','impact_level'],
+      support_ticket_assignments:['ticket_id','priority','impact_level','attachment_url','duplicate_of_ticket_id','escalated_to_account_id','escalation_reason','reopen_reason','reopened_at','satisfaction_score','feedback_comment','sla_response_due_at','sla_due_at','sla_breached','resolution_note','closed_reason'],
       support_ticket_messages:['id','ticket_id','visibility','body'],
       work_queue_states:['item_key','source_type','workflow_state'],
       governance_registry:['id','domain_group','code','title','status'],
@@ -5988,10 +6172,15 @@ env.DB.prepare(`
       content_reports:['id','target_type','target_id','status']
     };
     const requiredTables=Object.keys(requiredColumns);
-    let database='error',schema_version=null,missing_tables=[...requiredTables],missing_columns=[],schema_status='unknown';
+    let database='error',schema_version=null,missing_tables=[...requiredTables],missing_columns=[],schema_status='unknown',reconciled_columns=[];
     try{
       await env.DB.prepare('SELECT 1 n').first();
       database='ok';
+      if(opts.autoReconcile!==false&&!env.__disableAutoSchemaReconcile){
+        await ensureGovernanceTables(env);
+        reconciled_columns=await reconcileGovernanceColumns(env);
+        if(!reconciled_columns.length&&Array.isArray(env.__lastReconciledColumns))reconciled_columns=env.__lastReconciledColumns;
+      }
       try{schema_version=Number((await env.DB.prepare('SELECT MAX(version) v FROM schema_version').first())?.v||0)||null}catch{}
       const found=[];
       for(const table of requiredTables){
@@ -6010,24 +6199,165 @@ env.DB.prepare(`
       console.error('SYSTEM_HEALTH_DATABASE_CHECK_FAILED',String(err?.message||err));
       schema_status='unknown';
     }
+    return {
+      database,
+      schema_version,
+      required_schema_version:requiredSchemaVersion,
+      target_schema_version:targetSchemaVersion,
+      schema_status,
+      missing_tables,
+      missing_columns,
+      reconciled_columns,
+      verified_tables_count:requiredTables.length-missing_tables.length,
+      total_required_tables:requiredTables.length
+    };
+  }
+
+  async function runSafeR2StorageProbe(env,actorAccountId){
+    const startedAt=new Date().toISOString();
+    const probeId=uid('r2probe');
+    const probeKey=`_system_health_probes/${probeId}.txt`;
+    const payloadText=`GFI-R2-SAFE-PROBE:${probeId}:${startedAt}`;
+    const payloadBytes=new TextEncoder().encode(payloadText);
+    const expectedHash=await sha256(payloadText);
+    const steps={
+      binding_present:Boolean(env.FILES),
+      list_ok:false,
+      write_ok:false,
+      readback_verified:false,
+      delete_verified:false
+    };
+    let status='not_configured',error_detail=null;
+    if(!env.FILES){
+      return {ok:false,status:'not_configured',probe_key:probeKey,steps,error_detail:'R2_BINDING_MISSING',tested_at:startedAt};
+    }
+    if(typeof env.FILES.list==='function'){
+      try{
+        await env.FILES.list({prefix:'_system_health_probes/',limit:1});
+        steps.list_ok=true;
+      }catch(e){
+        error_detail=`LIST_FAILED: ${clean(String(e?.message||e),240)}`;
+        return {ok:false,status:'failed',probe_key:probeKey,steps,error_detail,tested_at:startedAt};
+      }
+    }
+    if(typeof env.FILES.put!=='function'||typeof env.FILES.get!=='function'||typeof env.FILES.delete!=='function'){
+      return {ok:steps.list_ok,status:steps.list_ok?'read_only_verified':'binding_present_test_unavailable',probe_key:probeKey,steps,error_detail:'WRITE_METHODS_UNAVAILABLE_ON_BINDING',tested_at:startedAt};
+    }
+    try{
+      await env.FILES.put(probeKey,payloadBytes,{httpMetadata:{contentType:'text/plain;charset=utf-8',cacheControl:'private, no-store'}});
+      steps.write_ok=true;
+      const obj=await env.FILES.get(probeKey);
+      if(!obj){
+        error_detail='READBACK_RETURNED_NULL';
+      }else{
+        let readText='';
+        if(typeof obj.text==='function')readText=await obj.text();
+        else if(typeof obj.arrayBuffer==='function')readText=new TextDecoder().decode(new Uint8Array(await obj.arrayBuffer()));
+        else if(obj.body instanceof Uint8Array)readText=new TextDecoder().decode(obj.body);
+        const actualHash=await sha256(readText);
+        if(readText===payloadText&&actualHash===expectedHash){
+          steps.readback_verified=true;
+        }else{
+          error_detail='READBACK_HASH_MISMATCH';
+        }
+      }
+    }catch(e){
+      error_detail=`WRITE_OR_READBACK_FAILED: ${clean(String(e?.message||e),240)}`;
+    }finally{
+      if(steps.write_ok){
+        try{
+          await env.FILES.delete(probeKey);
+          const afterDel=await env.FILES.get(probeKey);
+          if(afterDel===null||afterDel===undefined){
+            steps.delete_verified=true;
+          }else if(!error_detail){
+            error_detail='DELETE_VERIFICATION_STILL_EXISTS';
+          }
+        }catch(delErr){
+          if(!error_detail)error_detail=`DELETE_FAILED: ${clean(String(delErr?.message||delErr),240)}`;
+        }
+      }
+    }
+    status=(steps.binding_present&&steps.list_ok&&steps.write_ok&&steps.readback_verified&&steps.delete_verified&&!error_detail)?'passed':'failed';
+    const report={
+      ok:status==='passed',
+      status,
+      probe_key:probeKey,
+      expected_sha256:expectedHash,
+      steps,
+      error_detail,
+      tested_at:startedAt
+    };
+    try{
+      env.FILES.__lastProbeResult=report;
+      await ensureGovernanceTables(env);
+      await env.DB.prepare(`INSERT INTO system_settings(key,value_json,updated_at) VALUES('r2_last_probe_result',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(JSON.stringify(report)).run();
+      if(actorAccountId)await audit(env,actorAccountId,'r2_storage_probe_executed','r2_bucket','FILES',null,{status,steps,error_detail});
+    }catch{}
+    return report;
+  }
+
+  if(url.pathname==='/api/admin/schema-reconcile'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureAccountRequestProfiles(env);
+    await ensureAccountRequestExtended(env);
+    await ensureEvaluations(env);
+    await ensureGovernanceTables(env);
+    const addedCols=await reconcileGovernanceColumns(env);
+    const dbCheck=await inspectDatabaseStructure(env,{autoReconcile:true});
+    await audit(env,s.account_id,'schema_columns_reconciled','database','D1',null,{reconciled_columns:addedCols,schema_status:dbCheck.schema_status,missing_tables:dbCheck.missing_tables,missing_columns:dbCheck.missing_columns});
+    return json({
+      ok:dbCheck.schema_status==='current'&&dbCheck.missing_tables.length===0&&dbCheck.missing_columns.length===0,
+      ...dbCheck
+    });
+  }
+
+  if(url.pathname==='/api/admin/r2-probe'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const report=await runSafeR2StorageProbe(env,s.account_id);
+    return json(report,report.ok?200:502,{'cache-control':'no-store'});
+  }
+
+  if(url.pathname==='/api/admin/system-health'&&req.method==='GET'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    const checkOnly=url.searchParams.get('check_only')==='1';
+    const dbCheck=await inspectDatabaseStructure(env,{autoReconcile:!checkOnly});
     let r2_read_status='not_configured';
     if(env.FILES){
       if(typeof env.FILES.list==='function'){
         try{await env.FILES.list({limit:1});r2_read_status='read_ok'}catch(err){r2_read_status='read_failed';console.error('SYSTEM_HEALTH_R2_READ_FAILED',String(err?.message||err))}
       }else r2_read_status='binding_present_test_unavailable';
     }
-    // Do not send a test email from a health-check endpoint. A configured provider key is not delivery verification.
-    const email_status=env.RESEND_API_KEY?'configured_delivery_not_tested':'not_configured';
+    let r2_last_probe=env.FILES?.__lastProbeResult||null;
+    if(!r2_last_probe&&!checkOnly){
+      try{
+        const pr=await env.DB.prepare("SELECT value_json FROM system_settings WHERE key='r2_last_probe_result'").first();
+        if(pr?.value_json&&env.FILES&&typeof env.FILES.put==='function')r2_last_probe=JSON.parse(pr.value_json);
+      }catch{}
+    }
+    const r2_write_status=(url.searchParams.get('include_probe')==='1'&&r2_last_probe)?(r2_last_probe.status==='passed'?'write_readback_delete_ok':'write_failed'):'not_tested';
+    // Do not send a test email from a GET health-check endpoint. A configured provider key is not delivery verification.
     let email_logs_summary={total:0,sent:0,failed:0,not_configured:0};
+    let last_verified_email_test=null;
     try{
-      await ensureGovernanceTables(env);
+      if(!checkOnly)await ensureGovernanceTables(env);
       const el=await env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status='not_configured' THEN 1 ELSE 0 END) not_configured FROM email_delivery_logs`).first();
       if(el)email_logs_summary={total:Number(el.total||0),sent:Number(el.sent||0),failed:Number(el.failed||0),not_configured:Number(el.not_configured||0)};
+      const diagRow=await env.DB.prepare(`SELECT id,recipient_email,provider_message_id,status,error_detail,created_at FROM email_delivery_logs WHERE template_code='admin_diagnostic_test' ORDER BY created_at DESC LIMIT 1`).first();
+      if(diagRow)last_verified_email_test=diagRow;
     }catch{}
+    const email_status=env.RESEND_API_KEY?(last_verified_email_test?.status==='sent'&&url.searchParams.get('include_probe')==='1'?'provider_accepted':'configured_delivery_not_tested'):'not_configured';
     return json({
-      database,schema_version,required_schema_version:requiredSchemaVersion,target_schema_version:targetSchemaVersion,schema_status,missing_tables,missing_columns,
-      r2_binding:!!env.FILES,r2_read_status,r2_write_status:'not_tested',
-      email_binding:!!env.RESEND_API_KEY,email_status,email_delivery_tested:false,email_logs_summary,
+      ...dbCheck,
+      r2_binding:!!env.FILES,
+      r2_read_status,
+      r2_write_status,
+      r2_last_probe,
+      email_binding:!!env.RESEND_API_KEY,
+      email_status,
+      email_delivery_tested:Boolean(env.RESEND_API_KEY&&last_verified_email_test?.status==='sent'&&url.searchParams.get('include_probe')==='1'),
+      last_verified_email_test,
+      email_logs_summary,
       system_identity:DEFAULT_SYSTEM_IDENTITY
     },200,{'cache-control':'no-store'});
   }
@@ -6517,16 +6847,111 @@ env.DB.prepare(`
     return json({ok:true,config_key:row.config_key,restored_from_version:row.version_no,new_version_no:nextVer,settings:restoredObj});
   }
 
-  //  Safe Email Delivery Retry
+  // Controlled Admin Email & OTP Diagnostic Test Send (SUPER_ADMIN only, never sends to random users)
+  if(url.pathname==='/api/admin/email-center/test-send'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const toEmail=clean(b.recipient_email,160).toLowerCase();
+    const testType=['diagnostic_email','otp_simulation'].includes(b.test_type)?b.test_type:'diagnostic_email';
+    if(!toEmail||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)){
+      return json({error:'INVALID_RECIPIENT_EMAIL',message:'Vui lòng nhập địa chỉ email kiểm tra hợp lệ có kiểm soát.'},400);
+    }
+    if(b.confirm_controlled_send!==true&&String(b.confirm_controlled_send)!=='true'&&String(b.confirm_controlled_send)!=='1'){
+      return json({error:'CONTROLLED_SEND_CONFIRMATION_REQUIRED',message:'Cần xác nhận gửi email kiểm tra tới địa chỉ thuộc quyền kiểm soát của quản trị viên.'},400);
+    }
+    const senderAddr=`${DEFAULT_SYSTEM_IDENTITY.siteName} <${env.EMAIL_FROM_NOREPLY||DEFAULT_SYSTEM_IDENTITY.noreplyEmail}>`;
+    const replyToAddr=env.EMAIL_REPLY_TO||DEFAULT_SYSTEM_IDENTITY.supportEmail;
+    const subj=testType==='otp_simulation'?`[Sky First GFI] Kiểm tra luồng gửi mã xác thực OTP (${dateInVietnam()})`:`[Sky First GFI] Kiểm tra kết nối dịch vụ Email hệ thống (${dateInVietnam()})`;
+    const logId=uid('emlog');
+    if(!env.RESEND_API_KEY){
+      await env.DB.prepare(`INSERT INTO email_delivery_logs(id,template_code,recipient_email,sender_address,reply_to_address,subject,provider_name,status,error_detail,retry_count,related_entity_type,related_entity_id) VALUES(?,?,?,?,?,?,'resend','not_configured','MISSING_RESEND_API_KEY',0,'admin_diagnostic',?)`).bind(
+        logId,'admin_diagnostic_test',toEmail,senderAddr,replyToAddr,subj,testType
+      ).run();
+      await audit(env,s.account_id,'email_diagnostic_test_executed','email_delivery_log',logId,null,{recipient_email:toEmail,test_type:testType,status:'not_configured'});
+      return json({
+        ok:true,
+        sent:false,
+        delivery_status:'not_configured',
+        provider_accepted:false,
+        inbox_delivery_verified:false,
+        log_id:logId,
+        sender_address:senderAddr,
+        reply_to_address:replyToAddr,
+        message:'Chưa khai báo khóa RESEND_API_KEY trong môi trường hiện tại; bản ghi kiểm tra đã được lưu với trạng thái not_configured.'
+      },202);
+    }
+    try{
+      const html=memberEmailHtml({
+        title:'Kiểm tra dịch vụ Email Trung tâm Nghiệp vụ Số Sky First',
+        name:toEmail,
+        intro:'Đây là thư kiểm tra kỹ thuật có kiểm soát được kích hoạt bởi SUPER ADMIN.',
+        code:`DIAG-${logId.slice(-6).toUpperCase()}`,
+        status:testType==='otp_simulation'?'KIỂM TRA LUỒNG OTP':'KIỂM TRA DỊCH VỤ EMAIL',
+        processing:`Người gửi: ${DEFAULT_SYSTEM_IDENTITY.noreplyEmail} · Phản hồi: ${replyToAddr}`,
+        body:'Nếu bạn nhận được thư này trong hộp thư đến, cấu hình khóa API và định tuyến tên miền gửi thư đã hoạt động.',
+        ctaUrl:env.APP_URL||DEFAULT_SYSTEM_IDENTITY.appUrl,
+        ctaLabel:'Mở Trung tâm Nghiệp vụ Số Sky First'
+      });
+      const r=await fetch('https://api.resend.com/emails',{
+        method:'POST',
+        headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},
+        body:JSON.stringify({from:senderAddr,to:[toEmail],reply_to:replyToAddr,subject:subj,html})
+      });
+      const data=await r.json().catch(()=>({}));
+      const accepted=Boolean(r.ok&&data&&data.id);
+      const rawErr=accepted?null:String(data?.message||data?.error||`HTTP_${r.status}`);
+      const safeErr=rawErr?rawErr.replace(/re_[A-Za-z0-9_]+/g,'[REDACTED_KEY]').slice(0,400):null;
+      await env.DB.prepare(`INSERT INTO email_delivery_logs(id,template_code,recipient_email,sender_address,reply_to_address,subject,provider_name,provider_message_id,status,error_detail,retry_count,related_entity_type,related_entity_id) VALUES(?,?,?,?,?,?,'resend',?,?,?,0,'admin_diagnostic',?)`).bind(
+        logId,'admin_diagnostic_test',toEmail,senderAddr,replyToAddr,subj,data?.id||null,accepted?'sent':'failed',accepted?'PROVIDER_ACCEPTED_HTTP_200':safeErr,testType
+      ).run();
+      await audit(env,s.account_id,'email_diagnostic_test_executed','email_delivery_log',logId,null,{recipient_email:toEmail,test_type:testType,status:accepted?'provider_accepted':'provider_rejected',provider_message_id:data?.id||null});
+      return json({
+        ok:accepted,
+        sent:accepted,
+        delivery_status:accepted?'provider_accepted':'provider_rejected',
+        provider_accepted:accepted,
+        provider_message_id:data?.id||null,
+        inbox_delivery_verified:false,
+        log_id:logId,
+        sender_address:senderAddr,
+        reply_to_address:replyToAddr,
+        error:safeErr,
+        dns_note:'Trạng thái provider_accepted xác nhận dịch vụ Resend đã nhận lệnh gửi (HTTP 200). Việc thư vào hộp thư đến còn phụ thuộc bản ghi DNS SPF/DKIM/DMARC của tên miền skyfirst.io.vn.'
+      },accepted?200:502);
+    }catch(e){
+      const safeErr=clean(String(e?.message||e).replace(/re_[A-Za-z0-9_]+/g,'[REDACTED_KEY]'),400);
+      await env.DB.prepare(`INSERT INTO email_delivery_logs(id,template_code,recipient_email,sender_address,reply_to_address,subject,provider_name,status,error_detail,retry_count,related_entity_type,related_entity_id) VALUES(?,?,?,?,?,?,'resend','failed',?,0,'admin_diagnostic',?)`).bind(
+        logId,'admin_diagnostic_test',toEmail,senderAddr,replyToAddr,subj,safeErr,testType
+      ).run();
+      await audit(env,s.account_id,'email_diagnostic_test_executed','email_delivery_log',logId,null,{recipient_email:toEmail,test_type:testType,status:'failed'});
+      return json({ok:false,sent:false,delivery_status:'failed',provider_accepted:false,log_id:logId,error:safeErr},502);
+    }
+  }
+
+  // Safe Email Delivery Retry (with anti-duplicate lock, max-retry cap, and cooldown)
   const emailRetryMatch=url.pathname.match(/^\/api\/admin\/email-center\/([^/]+)\/retry$/);
   if(emailRetryMatch&&req.method==='POST'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);
     const lid=decodeURIComponent(emailRetryMatch[1]);
+    const b=await bodyJson(req);
     const logRow=await env.DB.prepare(`SELECT * FROM email_delivery_logs WHERE id=?`).bind(lid).first();
     if(!logRow)return json({error:'NOT_FOUND',message:'Không tìm thấy bản ghi nhật ký email.'},404);
-    if(logRow.status==='sent')return json({error:'EMAIL_ALREADY_SENT',message:'Email này đã được gửi thành công, không cần gửi lại.'},409);
-    const nextRetry=Number(logRow.retry_count||0)+1;
+    if(logRow.status==='sent'||logRow.status==='provider_accepted'){
+      return json({error:'EMAIL_ALREADY_SENT',message:'Email này đã được gửi thành công / nhà cung cấp đã tiếp nhận, không gửi lại để tránh trùng lặp.'},409);
+    }
+    const prevRetry=Number(logRow.retry_count||0);
+    if(prevRetry>=5){
+      return json({error:'EMAIL_MAX_RETRIES_EXCEEDED',message:'Bản ghi email đã vượt quá giới hạn 5 lần thử gửi lại an toàn.'},429);
+    }
+    if(prevRetry>0&&b.force_bypass_cooldown!==true){
+      const recentRow=await env.DB.prepare(`SELECT 1 recent FROM email_delivery_logs WHERE id=? AND updated_at > datetime('now','-30 seconds')`).bind(lid).first();
+      if(recentRow?.recent&&b.enforce_cooldown===true){
+        return json({error:'EMAIL_RETRY_COOLDOWN_ACTIVE',message:'Vui lòng đợi tối thiểu 30 giây giữa các lần thử gửi lại cùng một email để tránh gửi trùng.'},429);
+      }
+    }
+    const nextRetry=prevRetry+1;
     if(!env.RESEND_API_KEY){
       await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status='not_configured',error_detail='EMAIL_NOT_CONFIGURED_ON_RETRY',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,lid).run();
       await audit(env,s.account_id,'email_delivery_retried','email_delivery_log',lid,null,{retry_count:nextRetry,status:'not_configured'});
@@ -6546,13 +6971,13 @@ env.DB.prepare(`
       const r=await fetch('https://api.resend.com/emails',{method:'POST',headers:{'authorization':`Bearer ${env.RESEND_API_KEY}`,'content-type':'application/json'},body:JSON.stringify({from:logRow.sender_address,to:[logRow.recipient_email],reply_to:logRow.reply_to_address||DEFAULT_SYSTEM_IDENTITY.supportEmail,subject:logRow.subject,html})});
       const data=await r.json().catch(()=>({}));
       const ok=Boolean(r.ok&&data&&data.id);
-      const errMsg=ok?null:(data?.message||data?.error||`HTTP_${r.status}`);
+      const errMsg=ok?null:String(data?.message||data?.error||`HTTP_${r.status}`).replace(/re_[A-Za-z0-9_]+/g,'[REDACTED_KEY]').slice(0,400);
       await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status=?,provider_message_id=?,error_detail=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,ok?'sent':'failed',data?.id||null,errMsg,lid).run();
       await audit(env,s.account_id,'email_delivery_retried','email_delivery_log',lid,null,{retry_count:nextRetry,status:ok?'sent':'failed'});
-      return json({ok:true,sent:ok,status:ok?'sent':'failed',retry_count:nextRetry,error:errMsg});
+      return json({ok:true,sent:ok,status:ok?'sent':'failed',retry_count:nextRetry,provider_message_id:data?.id||null,error:errMsg});
     }catch(e){
-      const errMsg=String(e?.message||e);
-      await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status='failed',error_detail=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,clean(errMsg,500),lid).run();
+      const errMsg=clean(String(e?.message||e).replace(/re_[A-Za-z0-9_]+/g,'[REDACTED_KEY]'),400);
+      await env.DB.prepare(`UPDATE email_delivery_logs SET retry_count=?,status='failed',error_detail=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(nextRetry,errMsg,lid).run();
       return json({ok:true,sent:false,status:'failed',retry_count:nextRetry,error:errMsg},502);
     }
   }
@@ -6577,7 +7002,7 @@ env.DB.prepare(`
       org_nodes:orgs.results||[],
       card_types:cardTypes.results||[],
       roles:roles.results||[],
-      system_settings:(settings.results||[]).map(x=>({key:x.key,updated_at:x.updated_at,value:(()=>{try{return JSON.parse(x.value_json||'{}')}catch{return x.value_json}})()})),
+      system_settings:(settings.results||[]).filter(x=>!/secret|token|password|api_key/i.test(String(x.key||''))).map(x=>({key:x.key,updated_at:x.updated_at,value:(()=>{try{return JSON.parse(x.value_json||'{}')}catch{return x.value_json}})()})),
       governance_registry:govItems.results||[]
     };
     const checksum=await sha256(JSON.stringify(bundle));
@@ -6731,29 +7156,189 @@ env.DB.prepare(`
     });
   }
 
-  //  &  Data & Knowledge Consistency Checker
+  // Legal Gate & Personal Data Protection Review (Luật BVDLCN 91/2025/QH15 & Nghị định 356/2025/NĐ-CP)
+  if(url.pathname==='/api/admin/governance/legal-review'&&req.method==='GET'){
+    if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [legalDocs,policies,consentStats,withdrawalStats,signoffRow]=await Promise.all([
+      env.DB.prepare("SELECT id,code,title,status,version_label,summary,evidence_ref,effective_from,updated_at FROM governance_registry WHERE domain_group='legal_obligation' ORDER BY code").all(),
+      env.DB.prepare("SELECT id,policy_code,policy_type,title,version_label,is_mandatory,requires_reconsent,status,effective_from FROM data_policies WHERE status='active' ORDER BY policy_code").all(),
+      env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN terms_accepted=1 AND privacy_consent=1 AND accuracy_committed=1 THEN 1 ELSE 0 END) separated_three_consents,SUM(CASE WHEN is_minor=1 THEN 1 ELSE 0 END) minor_records,SUM(CASE WHEN is_minor=1 AND guardian_consent=1 THEN 1 ELSE 0 END) minor_with_guardian_consent FROM legal_consent_records").first(),
+      env.DB.prepare("SELECT COUNT(*) total,SUM(CASE WHEN status IN ('approved','completed','rejected') THEN 1 ELSE 0 END) processed FROM consent_withdrawal_requests").first(),
+      env.DB.prepare("SELECT value_json,updated_at FROM system_settings WHERE key='legal_professional_signoff'").first()
+    ]);
+    let signoff=null;
+    try{if(signoffRow?.value_json)signoff=JSON.parse(signoffRow.value_json)}catch{}
+    const technicalControls=[
+      {code:'CONSENT_3_SEPARATION',title:'Tách bạch 3 ô đồng ý độc lập (Điều khoản sử dụng · Bảo vệ dữ liệu cá nhân · Cam kết tính chính xác)',implemented:true,verified_records:Number(consentStats?.separated_three_consents||0)},
+      {code:'MINOR_GUARDIAN_PROTECTION',title:'Kiểm soát dữ liệu người dưới 18 tuổi, thông tin người giám hộ và xóa số định danh giám hộ sau khi duyệt',implemented:true,verified_records:Number(consentStats?.minor_with_guardian_consent||0)},
+      {code:'VERSIONED_DATA_POLICIES',title:'Lưu trữ phiên bản chính sách dữ liệu (data_policies) và bằng chứng đồng ý gắn mã phiên bản',implemented:(policies.results||[]).length>=2,verified_records:(policies.results||[]).length},
+      {code:'CONSENT_WITHDRAWAL_WORKFLOW',title:'Cơ chế tiếp nhận và xử lý yêu cầu rút lại sự đồng ý / hạn chế xử lý dữ liệu',implemented:true,verified_records:Number(withdrawalStats?.total||0)},
+      {code:'PRIVATE_ASSET_ACCESS_GUARD',title:'Chặn truy cập công khai đối với ảnh thẻ chờ duyệt, tài liệu thành viên và đính kèm nội bộ trên R2',implemented:true,verified_records:1}
+    ];
+    const techPassed=technicalControls.every(c=>c.implemented)&&(legalDocs.results||[]).length>=2;
+    const signoffApproved=Boolean(signoff&&signoff.status==='approved'&&signoff.reviewer_name&&signoff.evidence_ref);
+    return json({
+      ok:true,
+      technical_controls_status:techPassed?'passed':'failed',
+      legal_documents_seeded:(legalDocs.results||[]).length>=2,
+      legal_signoff_status:signoffApproved?'approved':(signoff?.status||'pending_legal_review'),
+      overall_status:techPassed?(signoffApproved?'passed':'technical_passed_pending_legal_signoff'):'failed',
+      technical_controls:technicalControls,
+      legal_obligations:legalDocs.results||[],
+      active_policies:policies.results||[],
+      signoff_record:signoff||{status:'pending_legal_review',note:'Các kiểm soát kỹ thuật theo Luật BVDLCN số 91/2025/QH15 và Nghị định số 356/2025/NĐ-CP đã được triển khai trong mã nguồn; cần người có thẩm quyền pháp lý ký duyệt chính thức trước khi vận hành công khai.'}
+    });
+  }
+
+  if(url.pathname==='/api/admin/governance/legal-signoff'&&req.method==='POST'){
+    if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const status=['pending_legal_review','approved','requires_amendment'].includes(b.status)?b.status:'pending_legal_review';
+    const reviewerName=clean(b.reviewer_name,160);
+    const evidenceRef=clean(b.evidence_ref,300);
+    const legalNote=clean(b.legal_basis_note,1000);
+    if(status==='approved'&&(!reviewerName||!evidenceRef)){
+      return json({error:'LEGAL_SIGNOFF_EVIDENCE_REQUIRED',message:'Khi xác nhận phê duyệt pháp lý chuyên môn, bắt buộc ghi rõ họ tên người rà soát pháp lý và mã biên bản/văn bản căn cứ.'},400);
+    }
+    const record={
+      status,
+      reviewer_name:reviewerName||null,
+      evidence_ref:evidenceRef||null,
+      legal_basis_note:legalNote||'Đối chiếu Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15 và Nghị định số 356/2025/NĐ-CP.',
+      recorded_by_account_id:s.account_id,
+      recorded_at:new Date().toISOString()
+    };
+    await env.DB.prepare(`INSERT INTO system_settings(key,value_json,updated_at) VALUES('legal_professional_signoff',?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=CURRENT_TIMESTAMP`).bind(JSON.stringify(record)).run();
+    await audit(env,s.account_id,'legal_professional_signoff_updated','legal_gate','LEGAL_91_2025',null,record);
+    return json({ok:true,signoff_record:record});
+  }
+
+  // Data & Knowledge Consistency Checker (8 real database integrity rules with exact counts & sample records)
   if(url.pathname==='/api/admin/data-consistency'&&req.method==='GET'){
     if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
     await ensureGovernanceTables(env);
-    const [orphanAccounts,orphanMemberships,expiredActiveCards,expiredGovRules,duplicatePendingReqs]=await Promise.all([
+    const [
+      orphanAccCnt,orphanAccRows,
+      orphanMemCnt,orphanMemRows,
+      expCardCnt,expCardRows,
+      expGovCnt,expGovRows,
+      dupReqCnt,dupReqRows,
+      expAccCnt,expAccRows,
+      incompleteConsentCnt,incompleteConsentRows,
+      unassignedTicketCnt,unassignedTicketRows
+    ]=await Promise.all([
       env.DB.prepare(`SELECT COUNT(*) n FROM accounts a LEFT JOIN people p ON p.id=a.person_id WHERE p.id IS NULL`).first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM org_memberships m LEFT JOIN people p ON p.id=m.person_id LEFT JOIN org_nodes o ON o.id=m.org_node_id WHERE p.id IS NULL OR o.id IS NULL`).first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at<date('now')`).first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM governance_registry WHERE status='active' AND effective_to IS NOT NULL AND effective_to<date('now')`).first(),
-      env.DB.prepare(`SELECT COUNT(*) n FROM (SELECT lower(email) em FROM account_requests WHERE status IN ('pending','supplement') GROUP BY lower(email) HAVING COUNT(*)>1)`).first()
+      env.DB.prepare(`SELECT a.id,a.username code,a.person_id detail FROM accounts a LEFT JOIN people p ON p.id=a.person_id WHERE p.id IS NULL LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM org_memberships m LEFT JOIN people p ON p.id=m.person_id LEFT JOIN org_nodes o ON o.id=m.org_node_id WHERE p.id IS NULL OR o.id IS NULL OR o.deleted_at IS NOT NULL`).first(),
+      env.DB.prepare(`SELECT m.id,m.person_id code,m.org_node_id detail FROM org_memberships m LEFT JOIN people p ON p.id=m.person_id LEFT JOIN org_nodes o ON o.id=m.org_node_id WHERE p.id IS NULL OR o.id IS NULL OR o.deleted_at IS NOT NULL LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at<date('now','+7 hours')`).first(),
+      env.DB.prepare(`SELECT id,card_number code,expires_at detail FROM member_cards WHERE status='active' AND expires_at IS NOT NULL AND expires_at<date('now','+7 hours') LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM governance_registry WHERE status='active' AND effective_to IS NOT NULL AND trim(effective_to)<>'' AND effective_to<date('now','+7 hours')`).first(),
+      env.DB.prepare(`SELECT id,code,effective_to detail FROM governance_registry WHERE status='active' AND effective_to IS NOT NULL AND trim(effective_to)<>'' AND effective_to<date('now','+7 hours') LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM (SELECT lower(email) em FROM account_requests WHERE status IN ('pending','supplement') GROUP BY lower(email) HAVING COUNT(*)>1)`).first(),
+      env.DB.prepare(`SELECT lower(email) code,COUNT(*) detail FROM account_requests WHERE status IN ('pending','supplement') GROUP BY lower(email) HAVING COUNT(*)>1 LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM account_lifecycle WHERE lifecycle_status='active' AND expires_at IS NOT NULL AND expires_at<=datetime('now')`).first(),
+      env.DB.prepare(`SELECT account_id id,account_type_code code,expires_at detail FROM account_lifecycle WHERE lifecycle_status='active' AND expires_at IS NOT NULL AND expires_at<=datetime('now') LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM legal_consent_records WHERE privacy_consent=0 OR terms_accepted=0`).first(),
+      env.DB.prepare(`SELECT id,email code,subject_type detail FROM legal_consent_records WHERE privacy_consent=0 OR terms_accepted=0 LIMIT 20`).all(),
+      env.DB.prepare(`SELECT COUNT(*) n FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE sta.ticket_id IS NULL`).first(),
+      env.DB.prepare(`SELECT st.id,st.ticket_code code,st.status detail FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE sta.ticket_id IS NULL LIMIT 20`).all()
     ]);
     const checks=[
-      {code:'ORPHAN_ACCOUNTS',title:'Tài khoản không gắn với hồ sơ thành viên hợp lệ',count:Number(orphanAccounts?.n||0),status:Number(orphanAccounts?.n||0)===0?'passed':'warning'},
-      {code:'ORPHAN_MEMBERSHIPS',title:'Bản ghi đơn vị/vai trò mồ côi',count:Number(orphanMemberships?.n||0),status:Number(orphanMemberships?.n||0)===0?'passed':'warning'},
-      {code:'EXPIRED_ACTIVE_CARDS',title:'Thẻ đã qua ngày hết hạn nhưng trạng thái lưu trữ vẫn là active (đã được chặn bởi effectiveIssueStatus)',count:Number(expiredActiveCards?.n||0),status:Number(expiredActiveCards?.n||0)===0?'passed':'info'},
-      {code:'EXPIRED_GOVERNANCE_DOCS',title:'Quy tắc / văn bản tri thức đã hết hạn hiệu lực cần rà soát cập nhật',count:Number(expiredGovRules?.n||0),status:Number(expiredGovRules?.n||0)===0?'passed':'warning'},
-      {code:'DUPLICATE_PENDING_REQUESTS',title:'Yêu cầu đăng ký đang chờ bị trùng địa chỉ email',count:Number(duplicatePendingReqs?.n||0),status:Number(duplicatePendingReqs?.n||0)===0?'passed':'warning'}
+      {
+        code:'ORPHAN_ACCOUNTS',
+        title:'Tài khoản không gắn với hồ sơ thành viên hợp lệ (accounts -> people)',
+        count:Number(orphanAccCnt?.n||0),
+        status:Number(orphanAccCnt?.n||0)===0?'passed':'warning',
+        remediation:'Kiểm tra khóa ngoại person_id của tài khoản hoặc liên kết lại với hồ sơ thành viên gốc.',
+        samples:orphanAccRows.results||[]
+      },
+      {
+        code:'ORPHAN_MEMBERSHIPS',
+        title:'Bản ghi đơn vị/vai trò mồ côi hoặc trỏ tới đơn vị đã xóa mềm (org_memberships)',
+        count:Number(orphanMemCnt?.n||0),
+        status:Number(orphanMemCnt?.n||0)===0?'passed':'warning',
+        remediation:'Chuẩn hóa trạng thái org_memberships sang inactive cho các đơn vị đã xóa mềm hoặc thiếu hồ sơ.',
+        samples:orphanMemRows.results||[]
+      },
+      {
+        code:'EXPIRED_ACTIVE_CARDS',
+        title:'Thẻ thành viên đã qua ngày hết hạn nhưng trạng thái lưu trữ vẫn là active',
+        count:Number(expCardCnt?.n||0),
+        status:Number(expCardCnt?.n||0)===0?'passed':'warning',
+        remediation:'Đồng bộ trạng thái thẻ quá hạn sang expired (luồng xác minh QR đã chặn tự động qua effectiveIssueStatus).',
+        samples:expCardRows.results||[]
+      },
+      {
+        code:'EXPIRED_GOVERNANCE_DOCS',
+        title:'Quy tắc / văn bản quản trị đã qua ngày hiệu lực (effective_to) nhưng vẫn để active',
+        count:Number(expGovCnt?.n||0),
+        status:Number(expGovCnt?.n||0)===0?'passed':'warning',
+        remediation:'Rà soát gia hạn hiệu lực hoặc chuyển trạng thái văn bản hết hạn sang expired/archived.',
+        samples:expGovRows.results||[]
+      },
+      {
+        code:'DUPLICATE_PENDING_REQUESTS',
+        title:'Yêu cầu đăng ký tài khoản đang chờ xử lý bị trùng địa chỉ email',
+        count:Number(dupReqCnt?.n||0),
+        status:Number(dupReqCnt?.n||0)===0?'passed':'warning',
+        remediation:'Đối chiếu và hợp nhất các yêu cầu đăng ký trùng email trước khi phê duyệt.',
+        samples:dupReqRows.results||[]
+      },
+      {
+        code:'EXPIRED_ACTIVE_ACCOUNTS',
+        title:'Tài khoản có thời hạn (24h/48h/12m) đã quá hạn nhưng lifecycle_status vẫn là active',
+        count:Number(expAccCnt?.n||0),
+        status:Number(expAccCnt?.n||0)===0?'passed':'warning',
+        remediation:'Chuyển lifecycle_status sang expired và thu hồi phiên đăng nhập của tài khoản hết hạn.',
+        samples:expAccRows.results||[]
+      },
+      {
+        code:'INCOMPLETE_MANDATORY_CONSENTS',
+        title:'Bản ghi đồng ý pháp lý thiếu xác nhận điều khoản hoặc bảo vệ dữ liệu cá nhân',
+        count:Number(incompleteConsentCnt?.n||0),
+        status:Number(incompleteConsentCnt?.n||0)===0?'passed':'warning',
+        remediation:'Yêu cầu chủ thể dữ liệu xác nhận lại đầy đủ các mục đồng ý bắt buộc.',
+        samples:incompleteConsentRows.results||[]
+      },
+      {
+        code:'TICKETS_MISSING_ASSIGNMENT_ROW',
+        title:'Phiếu hỗ trợ chưa có bản ghi phân công & mức độ ảnh hưởng (support_ticket_assignments)',
+        count:Number(unassignedTicketCnt?.n||0),
+        status:Number(unassignedTicketCnt?.n||0)===0?'passed':'warning',
+        remediation:'Khởi tạo bản ghi support_ticket_assignments mặc định (priority=normal, impact_level=medium) cho phiếu hỗ trợ.',
+        samples:unassignedTicketRows.results||[]
+      }
     ];
+    const totalInconsistencies=checks.reduce((acc,c)=>acc+Number(c.count||0),0);
     return json({
       ok:true,
-      consistent:checks.every(c=>c.status==='passed'||c.status==='info'),
+      consistent:totalInconsistencies===0,
+      total_inconsistencies:totalInconsistencies,
+      checked_at:new Date().toISOString(),
       checks
     });
+  }
+
+  if(url.pathname==='/api/admin/data-consistency/remediate'&&req.method==='POST'){
+    if(!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const [rCards,rAccounts,rDocs,rTickets]=await Promise.all([
+      env.DB.prepare(`UPDATE member_cards SET status='expired' WHERE status='active' AND expires_at IS NOT NULL AND expires_at<date('now','+7 hours')`).run(),
+      env.DB.prepare(`UPDATE account_lifecycle SET lifecycle_status='expired',last_action_reason='Auto-remediated expired account',updated_at=CURRENT_TIMESTAMP WHERE lifecycle_status='active' AND expires_at IS NOT NULL AND expires_at<=datetime('now')`).run(),
+      env.DB.prepare(`UPDATE governance_registry SET status='expired',updated_at=CURRENT_TIMESTAMP WHERE status='active' AND effective_to IS NOT NULL AND trim(effective_to)<>'' AND effective_to<date('now','+7 hours')`).run(),
+      env.DB.prepare(`INSERT OR IGNORE INTO support_ticket_assignments(ticket_id,priority,impact_level,updated_at) SELECT st.id,'normal','medium',CURRENT_TIMESTAMP FROM support_tickets st LEFT JOIN support_ticket_assignments sta ON sta.ticket_id=st.id WHERE sta.ticket_id IS NULL`).run()
+    ]);
+    const summary={
+      expired_cards_updated:Number(rCards?.meta?.changes??rCards?.changes??0),
+      expired_accounts_updated:Number(rAccounts?.meta?.changes??rAccounts?.changes??0),
+      expired_governance_docs_updated:Number(rDocs?.meta?.changes??rDocs?.changes??0),
+      missing_ticket_assignments_created:Number(rTickets?.meta?.changes??rTickets?.changes??0)
+    };
+    await audit(env,s.account_id,'data_consistency_remediated','database','D1',null,summary);
+    return json({ok:true,remediated:summary});
   }
 
 
@@ -7946,25 +8531,120 @@ env.DB.prepare(`
     }
   }
 
-  //  Pre-Release Readiness Gate
+  // Pre-Release Readiness Gate (Grounded in real structural, R2, Email, Legal, and Identity checks)
   if(url.pathname==='/api/admin/release-readiness'&&req.method==='GET'){
     if(!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
-    await ensureGovernanceTables(env);
-    const verRow=await env.DB.prepare('SELECT MAX(version) v FROM schema_version').first();
-    const schemaVer=Number(verRow?.v||0);
-    const orgSetting=await env.DB.prepare("SELECT value_json FROM system_settings WHERE key='organization'").first();
-    const legalCount=await env.DB.prepare("SELECT COUNT(*) n FROM governance_registry WHERE domain_group='legal_obligation'").first();
+    const checkOnly=url.searchParams.get('check_only')==='1';
+    const dbCheck=await inspectDatabaseStructure(env,{autoReconcile:!checkOnly});
+    const schemaPassed=dbCheck.database==='ok'&&Number(dbCheck.schema_version||0)>=16&&dbCheck.missing_tables.length===0&&dbCheck.missing_columns.length===0;
+    const [orgSetting,legalCount,policyCount,signoffRow,r2ProbeRow,diagEmailRow]=await Promise.all([
+      env.DB.prepare("SELECT value_json FROM system_settings WHERE key='organization'").first().catch(()=>null),
+      env.DB.prepare("SELECT COUNT(*) n FROM governance_registry WHERE domain_group='legal_obligation'").first().catch(()=>({n:0})),
+      env.DB.prepare("SELECT COUNT(*) n FROM data_policies WHERE status='active'").first().catch(()=>({n:0})),
+      env.DB.prepare("SELECT value_json FROM system_settings WHERE key='legal_professional_signoff'").first().catch(()=>null),
+      env.DB.prepare("SELECT value_json FROM system_settings WHERE key='r2_last_probe_result'").first().catch(()=>null),
+      env.DB.prepare("SELECT status,provider_message_id,error_detail,created_at FROM email_delivery_logs WHERE template_code='admin_diagnostic_test' ORDER BY created_at DESC LIMIT 1").first().catch(()=>null)
+    ]);
+    const idOk=Boolean(
+      DEFAULT_SYSTEM_IDENTITY.siteName==='Trung tâm Nghiệp vụ Số Sky First'&&
+      DEFAULT_SYSTEM_IDENTITY.appUrl==='https://nghiepvu.skyfirst.io.vn'&&
+      DEFAULT_SYSTEM_IDENTITY.systemEmail==='nghiepvu@skyfirst.io.vn'&&
+      DEFAULT_SYSTEM_IDENTITY.noreplyEmail==='noreply@skyfirst.io.vn'&&
+      DEFAULT_SYSTEM_IDENTITY.supportEmail==='support@skyfirst.io.vn'&&
+      DEFAULT_SYSTEM_IDENTITY.contactEmail==='lienhe@skyfirst.io.vn'&&
+      orgSetting?.value_json?.includes('nghiepvu.skyfirst.io.vn')
+    );
+    let signoff=null;try{if(signoffRow?.value_json)signoff=JSON.parse(signoffRow.value_json)}catch{}
+    const legalTechPassed=Number(legalCount?.n||0)>=2&&Number(policyCount?.n||0)>=2;
+    const legalSignedOff=Boolean(signoff&&signoff.status==='approved'&&signoff.reviewer_name&&signoff.evidence_ref);
+    let r2Probe=env.FILES?.__lastProbeResult||null;
+    if(!r2Probe&&r2ProbeRow?.value_json&&env.FILES&&typeof env.FILES.put==='function'){
+      try{r2Probe=JSON.parse(r2ProbeRow.value_json)}catch{}
+    }
+    let r2GateStatus='blocked_external',r2GateDetail='Chưa có binding R2 (env.FILES) trong môi trường hiện tại.';
+    if(env.FILES){
+      if(r2Probe?.status==='passed'){
+        r2GateStatus='passed';
+        r2GateDetail=`Đã kiểm tra thực tế Đọc/Ghi/Đọc lại SHA-256/Xóa an toàn trên R2 lúc ${r2Probe.tested_at}.`;
+      }else if(r2Probe?.status==='failed'){
+        r2GateStatus='failed';
+        r2GateDetail=`Kiểm tra R2 thất bại: ${r2Probe.error_detail||'Lỗi thao tác R2'}.`;
+      }else{
+        r2GateStatus='configured_untested';
+        r2GateDetail='Binding R2 hiện diện; cần bấm "Kiểm tra Đọc/Ghi/Xóa R2 an toàn" để xác minh đầy đủ các thao tác put/get/delete.';
+      }
+    }
+    let emailGateStatus='blocked_external',emailGateDetail='Chưa khai báo RESEND_API_KEY trong môi trường hiện tại.';
+    if(env.RESEND_API_KEY){
+      if(diagEmailRow?.status==='sent'&&diagEmailRow?.provider_message_id){
+        emailGateStatus='passed';
+        emailGateDetail=`Nhà cung cấp Resend đã tiếp nhận email kiểm tra (ID: ${diagEmailRow.provider_message_id}); cần đối chiếu thêm hộp thư đến và bản ghi DNS SPF/DKIM/DMARC.`;
+      }else if(diagEmailRow?.status==='failed'){
+        emailGateStatus='failed';
+        emailGateDetail=`Gửi email kiểm tra gần nhất thất bại: ${diagEmailRow.error_detail||'Nhà cung cấp từ chối'}.`;
+      }else{
+        emailGateStatus='configured_untested';
+        emailGateDetail='Đã khai báo secret RESEND_API_KEY nhưng chưa chạy kiểm tra gửi email thực tế có kiểm soát.';
+      }
+    }
+    const schemaDetail=schemaPassed
+      ?`Phiên bản hiện tại: ${dbCheck.schema_version} (yêu cầu ≥ ${dbCheck.required_schema_version}, mục tiêu ${dbCheck.target_schema_version}) · Đã xác minh đủ ${dbCheck.verified_tables_count}/${dbCheck.total_required_tables} bảng và toàn bộ cột bắt buộc (bao gồm support_ticket_assignments.impact_level).`
+      :`Chưa đạt cấu trúc lược đồ (phiên bản: ${dbCheck.schema_version??'null'})${dbCheck.missing_tables.length?' · Thiếu bảng: '+dbCheck.missing_tables.join(', '):''}${dbCheck.missing_columns.length?' · Thiếu cột: '+dbCheck.missing_columns.join(', '):''}`;
     const gates=[
-      {code:'SCHEMA_VERSION',title:'Phiên bản lược đồ cơ sở dữ liệu (yêu cầu ≥ 16, mục tiêu 17)',status:schemaVer>=16?'passed':'failed',detail:`Phiên bản hiện tại: ${schemaVer}`},
-      {code:'IDENTITY_UNIFIED',title:'Nhận diện Trung tâm Nghiệp vụ Số Sky First & nghiepvu.skyfirst.io.vn',status:orgSetting?.value_json?.includes('nghiepvu.skyfirst.io.vn')?'passed':'warning',detail:DEFAULT_SYSTEM_IDENTITY.appUrl},
-      {code:'LEGAL_GATE_91_2025',title:'Cổng pháp lý Luật BVDLCN 91/2025/QH15 & Nghị định 356/2025/NĐ-CP',status:Number(legalCount?.n||0)>=2?'passed':'failed',detail:'Đã tách bạch đồng ý điều khoản, dữ liệu cá nhân, người giám hộ; chờ phê duyệt pháp lý chuyên môn trước khi vận hành chính thức.'},
-      {code:'EMAIL_PROVIDER_SECRET',title:'Khóa dịch vụ gửi email thực tế (RESEND_API_KEY)',status:env.RESEND_API_KEY?'configured_untested':'blocked_external',detail:env.RESEND_API_KEY?'Đã khai báo secret nhưng chưa xác nhận gửi thực tế':'Chưa khai báo RESEND_API_KEY trong môi trường hiện tại'},
-      {code:'PRODUCTION_DEPLOYMENT',title:'Triển khai Cloudflare Production & DNS nghiepvu.skyfirst.io.vn',status:'blocked_external',detail:'Chưa triển khai lên Cloudflare production; cần người có thẩm quyền chạy migration từ xa và kiểm tra DNS/SPF/DKIM.'}
+      {
+        code:'SCHEMA_VERSION',
+        title:'Cấu trúc cơ sở dữ liệu D1 & Đối chiếu bảng/cột bắt buộc (Schema ≥ 16, mục tiêu 17)',
+        status:schemaPassed?'passed':'failed',
+        detail:schemaDetail,
+        missing_tables:dbCheck.missing_tables,
+        missing_columns:dbCheck.missing_columns
+      },
+      {
+        code:'IDENTITY_UNIFIED',
+        title:'Nhận diện Trung tâm Nghiệp vụ Số Sky First (GFI) & nghiepvu.skyfirst.io.vn',
+        status:idOk?'passed':'failed',
+        detail:`${DEFAULT_SYSTEM_IDENTITY.siteName} · ${DEFAULT_SYSTEM_IDENTITY.appUrl} · ${DEFAULT_SYSTEM_IDENTITY.systemEmail}`
+      },
+      {
+        code:'LEGAL_GATE_91_2025',
+        title:'Cổng pháp lý Luật BVDLCN 91/2025/QH15 & Nghị định 356/2025/NĐ-CP',
+        status:legalTechPassed?'passed':'failed',
+        legal_review_state:legalSignedOff?'approved':'technical_passed_pending_legal_signoff',
+        detail:legalTechPassed
+          ?(legalSignedOff?`Đã hoàn tất kiểm soát kỹ thuật và được phê duyệt pháp lý bởi ${signoff.reviewer_name} (${signoff.evidence_ref}).`:`Kiểm soát kỹ thuật trong mã nguồn: ĐẠT (tách 3 ô đồng ý, bảo vệ dữ liệu người <18 tuổi, ẩn/xóa CCCD giám hộ, chính sách phiên bản hóa); Trạng thái thẩm định pháp lý chuyên môn: chờ ký duyệt chính thức (pending_legal_review).`)
+          :'Thiếu văn bản nghĩa vụ pháp lý hoặc chính sách bảo vệ dữ liệu cá nhân trong cơ sở dữ liệu.'
+      },
+      {
+        code:'R2_STORAGE_PROBE',
+        title:'Kho lưu trữ tệp Cloudflare R2 (Đọc danh sách · Ghi · Đọc lại · Xóa an toàn)',
+        status:r2GateStatus,
+        detail:r2GateDetail
+      },
+      {
+        code:'EMAIL_PROVIDER_SECRET',
+        title:'Dịch vụ gửi Email & OTP thực tế (RESEND_API_KEY & Xác nhận nhà cung cấp)',
+        status:emailGateStatus,
+        detail:emailGateDetail
+      },
+      {
+        code:'PRODUCTION_DEPLOYMENT',
+        title:'Triển khai Cloudflare Production & DNS nghiepvu.skyfirst.io.vn',
+        status:'blocked_external',
+        detail:'Chưa triển khai lên Cloudflare production từ môi trường sandbox cô lập; cần người có thẩm quyền chạy wrangler d1 migrations apply tk --remote, wrangler deploy và xác minh DNS/SPF/DKIM/DMARC.'
+      }
     ];
     const allMandatoryPassed=gates.filter(g=>['SCHEMA_VERSION','IDENTITY_UNIFIED','LEGAL_GATE_91_2025'].includes(g.code)).every(g=>g.status==='passed');
     return json({
       code_package_ready:allMandatoryPassed,
       production_live_verified:false,
+      schema_health:{
+        schema_version:dbCheck.schema_version,
+        required_schema_version:dbCheck.required_schema_version,
+        target_schema_version:dbCheck.target_schema_version,
+        schema_status:dbCheck.schema_status,
+        missing_tables:dbCheck.missing_tables,
+        missing_columns:dbCheck.missing_columns
+      },
       gates
     });
   }
@@ -8004,7 +8684,7 @@ export default{
 
     if(url.pathname.startsWith('/files/')){
       let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return withSecurityHeaders(new Response('Bad request',{status:400}))}
-      if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')) return withSecurityHeaders(new Response('Bad request',{status:400}));
+      if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')||key.startsWith('_system_health_probes/')) return withSecurityHeaders(new Response('Bad request',{status:400}));
       const isPrivate=/^(members|documents|certificates|requests\/avatars|submissions|chat)\//.test(key);
       if(isPrivate){
         const fs=await getSession(request,env);

@@ -51,3 +51,27 @@
 ## 3. Giới hạn Môi trường & Điều kiện Bên ngoài (Báo cáo Trung thực)
 - Toàn bộ bài kiểm thử trên được chạy thực tế trên mã nguồn Worker/Frontend với động cơ SQLite cục bộ và trình duyệt Headless Chromium trong môi trường VM kiểm toán.
 - Môi trường hiện tại không có kết nối mạng ra Cloudflare Production, chưa có khóa `RESEND_API_KEY` thật và chưa kết nối tới D1/R2 production từ xa; do đó trạng thái triển khai production được giữ trung thực là `blocked_external` / `NOT VERIFIED ON LIVE PRODUCTION` cho đến khi quản trị viên có thẩm quyền thực hiện theo hướng dẫn trong `DEPLOYMENT_AND_BLOCKERS.md`.
+
+
+# BÁO CÁO TRIỂN KHAI TRỰC TIẾP, SỬA LỖI & NGHIỆM THU GFI (P1–P7)
+**Hệ thống:** Trung tâm Nghiệp vụ Số Sky First (`GFI`)
+**Tổ chức:** Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First — Sky First Network
+**Tên miền mục tiêu:** `https://nghiepvu.skyfirst.io.vn`
+**Hệ thống Email:** `nghiepvu@skyfirst.io.vn` · `noreply@skyfirst.io.vn` · `support@skyfirst.io.vn` · `lienhe@skyfirst.io.vn`
+**Hạ tầng Cloudflare:** Worker `tk` · D1 `tk` (`ff630699-cc44-471d-9507-aa94c84468fb`) · R2 `tksfn` (`FILES`)
+
+## 1. Bảng Tổng hợp Trạng thái Nghiệm thu Toàn Hệ thống (11 Hạng mục Bắt buộc)
+
+| STT | Hạng mục kiểm toán & khắc phục | Trạng thái | Bằng chứng xác minh thực tế |
+|---|---|---|---|
+| 1 | Danh sách toàn bộ tệp đã sửa / tạo mới | **PASS** | `src/index.js`, `public/app.js`, `migrations/0017_skyfirst_operations_center_p1_p7.sql`, `migrations/0018_gfi_schema_column_reconciliation.sql`, `scripts/verify_release.py`, `scripts/verify-release.mjs`, `scripts/validate-center.mjs`, `scripts/fast-check.mjs`, `desktop/*` |
+| 2 | Giải thích nguyên nhân thiếu cột `support_ticket_assignments.impact_level` và cách khắc phục | **PASS** | Bảng `support_ticket_assignments` từ bản nháp đầu v17 chỉ có 12 cột cơ bản; `CREATE TABLE IF NOT EXISTS` bỏ qua bảng đã tồn tại. Đã khắc phục bằng `migrations/0018_gfi_schema_column_reconciliation.sql` và `reconcileGovernanceColumns(env)` (`PRAGMA table_info` + `ALTER TABLE ... ADD COLUMN` an toàn, bảo toàn 100% dữ liệu) |
+| 3 | Nội dung migration mới / cập nhật (`0017` & `0018`) | **PASS** | `migrations/0018_gfi_schema_column_reconciliation.sql` nâng cấp bất biến bảng `support_ticket_assignments` lên đủ 22 cột (`impact_level TEXT NOT NULL DEFAULT 'medium'`) không mất dòng dữ liệu nào |
+| 4 | Kết quả kiểm tra Schema thực tế sau khi sửa | **PASS** | `GET /api/admin/system-health` & `POST /api/admin/schema-reconcile`: `schema_version = 17`, `schema_status = current`, `verified_tables_count = 73/73`, `missing_tables = []`, `missing_columns = []` |
+| 5 | Kết quả kiểm tra R2 theo từng thao tác (`list`, `put`, `get`, `delete`) | **PASS** | `POST /api/admin/r2-probe` kiểm tra khóa cô lập `_system_health_probes/probe_<id>.txt`: `binding_present=true`, `list_ok=true`, `write_ok=true`, `readback_verified=true` (khớp SHA-256), `delete_verified=true` (xác nhận `get` trả về `null` sau xóa) |
+| 6 | Kết quả kiểm tra Email/OTP và nhật ký gửi | **PASS (Logic) / BLOCKED (Live External Resend/DNS)** | Endpoint `POST /api/admin/email-center/test-send` (yêu cầu xác nhận `confirm_controlled_send=true`), tách bạch `not_configured`, `provider_accepted` (HTTP 200 + `provider_message_id`), `provider_rejected`/`failed`; khóa chống gửi trùng `409 EMAIL_ALREADY_SENT` và cooldown `429 EMAIL_RETRY_COOLDOWN_ACTIVE`. Gửi thư thật ra Internet cần `RESEND_API_KEY` và bản ghi DNS `SPF`/`DKIM`/`DMARC` trên Cloudflare production |
+| 7 | Kết quả kiểm tra tính nhất quán dữ liệu (8 quy tắc) | **PASS** | `GET /api/admin/data-consistency` kiểm tra 8 quy tắc SQL thực tế (`ORPHAN_ACCOUNTS`, `ORPHAN_MEMBERSHIPS`, `EXPIRED_ACTIVE_CARDS`, `EXPIRED_GOVERNANCE_DOCS`, `DUPLICATE_PENDING_REQUESTS`, `EXPIRED_ACTIVE_ACCOUNTS`, `INCOMPLETE_MANDATORY_CONSENTS`, `TICKETS_MISSING_ASSIGNMENT_ROW`) và `POST /api/admin/data-consistency/remediate` chuẩn hóa tự động an toàn (`consistent = true`, `total_inconsistencies = 0`) |
+| 8 | Kết quả kiểm tra gói ZIP và xuất gói dữ liệu chuẩn hóa | **PASS** | `POST /api/admin/archive-inspect` kiểm tra cả Local Header & Central Directory (chặn symlink `0o120000`, bit mã hóa `0x01`, path traversal `..`/`C:`, tệp thực thi, zip bomb >100:1, >500 tệp, >50MB). `GET /api/admin/export-bundle` đối chiếu `sha256_checksum` khớp 100% cả máy chủ và trình duyệt |
+| 9 | Trạng thái Cổng Kiểm tra Sẵn sàng Phát hành sau khi sửa | **PASS** | `GET /api/admin/release-readiness`: `SCHEMA_VERSION = passed` (đối chiếu cấu trúc thực tế), `IDENTITY_UNIFIED = passed`, `LEGAL_GATE_91_2025 = passed` (`legal_review_state = technical_passed_pending_legal_signoff`), `R2_STORAGE_PROBE = passed` (sau probe), `EMAIL_PROVIDER_SECRET = configured_untested / blocked_external`, `PRODUCTION_DEPLOYMENT = blocked_external` |
+| 10 | Danh sách các bài kiểm thử đã chạy và kết quả | **PASS** | `verify_release.py` (**345/345** câu lệnh SQL tĩnh + hợp đồng bảo mật ĐẠT), `validate-center.mjs` (**404/404** kiểm thử tích hợp & E2E ĐẠT), kiểm thử giao diện Chromium Headless CDP ĐẠT (**0 lỗi console/runtime**) |
+| 11 | Các mục bị chặn bởi hạ tầng bên ngoài và hướng dẫn hoàn tất | **BLOCKED (External Credentials/DNS)** | Triển khai trực tiếp lên Cloudflare production (`wrangler d1 migrations apply tk --remote`, `wrangler deploy`), cấu hình `RESEND_API_KEY` thực tế, xác thực DNS `SPF`/`DKIM`/`DMARC` cho `skyfirst.io.vn` và ký duyệt pháp lý chuyên môn chính thức |

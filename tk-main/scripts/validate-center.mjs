@@ -129,7 +129,7 @@ r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',lo
 const crc32=(bytes)=>{let c=0xffffffff;for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1)}return (c^0xffffffff)>>>0};
 const pngChunk=(type,data)=>{const t=Buffer.from(type),len=Buffer.alloc(4),crc=Buffer.alloc(4);len.writeUInt32BE(data.length);crc.writeUInt32BE(crc32(Buffer.concat([t,data])));return Buffer.concat([len,t,data,crc])};
 const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(1,0);ihdr.writeUInt32BE(1,4);ihdr[8]=8;ihdr[9]=6;const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),pngChunk('IHDR',ihdr),pngChunk('IDAT',deflateSync(Buffer.from([0,0,0,0,0]))),pngChunk('IEND',Buffer.alloc(0))]);
-const bucket=new Map();const FILES={async put(key,bytes,opts){bucket.set(key,{bytes:new Uint8Array(bytes),metadata:opts.httpMetadata,etag:'"uploaded-test"'})},async get(key){const x=bucket.get(key);if(!x)return null;return {body:x.bytes,httpEtag:x.etag,httpMetadata:x.metadata,arrayBuffer:async()=>x.bytes.slice().buffer,writeHttpMetadata(h){h.set('content-type',x.metadata.contentType);h.set('cache-control',x.metadata.cacheControl)}}},async delete(key){bucket.delete(key)}};
+const bucket=new Map();const FILES={async list(opts={}){const p=opts.prefix||'';return {objects:[...bucket.keys()].filter(k=>k.startsWith(p)).map(key=>({key}))}},async put(key,bytes,opts){bucket.set(key,{bytes:new Uint8Array(bytes),metadata:opts.httpMetadata,etag:'"uploaded-test"'})},async get(key){const x=bucket.get(key);if(!x)return null;return {body:x.bytes,httpEtag:x.etag,httpMetadata:x.metadata,arrayBuffer:async()=>x.bytes.slice().buffer,writeHttpMetadata(h){h.set('content-type',x.metadata.contentType);h.set('cache-control',x.metadata.cacheControl)}}},async delete(key){bucket.delete(key)}};
 const uploadReq=new Request('https://nghiepvu.skyfirst.io.vn/api/admin/site-assets',{method:'POST',headers:{cookie:'sfn_session=test',origin:'https://nghiepvu.skyfirst.io.vn','content-type':'image/png'},body:png});const uploadRes=await api(uploadReq,{DB,FILES},new URL(uploadReq.url));const uploadBody=await uploadRes.json();assert.equal(uploadRes.status,201);assert.match(uploadBody.url,/^\/files\/site-assets\/[a-f0-9-]+\.png$/);assert(bucket.size===1);checks++;
 const badImgReq=new Request('https://nghiepvu.skyfirst.io.vn/api/admin/site-assets',{method:'POST',headers:{cookie:'sfn_session=test',origin:'https://nghiepvu.skyfirst.io.vn','content-type':'image/png'},body:new Uint8Array([137,80,78,71,13,10,26,10,1])});const badImgRes=await api(badImgReq,{DB,FILES},new URL(badImgReq.url));assert.equal(badImgRes.status,400);checks++;
 const fakeRequestAvatarReq=new Request('https://nghiepvu.skyfirst.io.vn/api/public/request-avatar',{method:'POST',headers:{origin:'https://nghiepvu.skyfirst.io.vn','content-type':'image/png'},body:new Uint8Array([137,80,78,71,13,10,26,10,1])});const fakeRequestAvatarRes=await api(fakeRequestAvatarReq,{DB,FILES},new URL(fakeRequestAvatarReq.url));assert.equal(fakeRequestAvatarRes.status,400);checks++;
@@ -570,7 +570,7 @@ function buildTestZip(entries){
   assert.equal(recon.status,200);assert.equal(recon.ok,true);assert.equal(recon.person.id,'p');assert(recon.timeline.length>=1);checks+=4;
 
   const dc=await call('/api/admin/data-consistency','GET');
-  assert.equal(dc.status,200);assert.equal(dc.ok,true);assert.equal(dc.checks.length,5);checks+=3;
+  assert.equal(dc.status,200);assert.equal(dc.ok,true);assert.equal(dc.checks.length,8);checks+=3;
 }
 
 
@@ -913,6 +913,182 @@ function buildTestZip(entries){
 
   r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/comments`,'POST',{body:'Bình luận xác nhận thông báo.'});
   assert.equal(r.httpStatus,201);checks++;
+}
+
+
+// =========================================================
+// 13. GFI DEEP REMEDIATION & END-TO-END SYSTEM VERIFICATION
+// =========================================================
+{
+  // 13.1 Simulate legacy v17 support_ticket_assignments table missing impact_level & companion columns
+  await dbExec(`
+    DROP TABLE support_ticket_assignments;
+    CREATE TABLE support_ticket_assignments(
+      ticket_id TEXT PRIMARY KEY,
+      org_node_id TEXT,
+      assigned_account_id TEXT,
+      priority TEXT NOT NULL DEFAULT 'normal',
+      sla_due_at TEXT,
+      sla_breached INTEGER NOT NULL DEFAULT 0,
+      resolution_note TEXT,
+      closed_reason TEXT,
+      responded_at TEXT,
+      resolved_at TEXT,
+      updated_by_account_id TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO support_ticket_assignments(ticket_id, org_node_id, assigned_account_id, priority, resolution_note)
+    VALUES ('ticket_legacy_v17', 'org_sfn', 'a', 'high', 'Dữ liệu phiếu hỗ trợ cũ phải được bảo toàn 100%');
+  `);
+
+  // With check_only=1, both system-health and release-readiness must detect missing support_ticket_assignments.impact_level and NEVER report passed!
+  const rawHealth=await call('/api/admin/system-health?check_only=1','GET');
+  assert.equal(rawHealth.schema_status,'outdated');
+  assert(rawHealth.missing_columns.includes('support_ticket_assignments.impact_level'));
+  checks+=2;
+
+  const rawRel=await call('/api/admin/release-readiness?check_only=1','GET');
+  assert.equal(rawRel.code_package_ready,false);
+  const rawSchemaGate=rawRel.gates.find(g=>g.code==='SCHEMA_VERSION');
+  assert.equal(rawSchemaGate.status,'failed');
+  assert(rawSchemaGate.missing_columns.includes('support_ticket_assignments.impact_level'));
+  checks+=3;
+
+  // Now run POST /api/admin/schema-reconcile (or normal system-health) and verify it heals support_ticket_assignments.impact_level while preserving data!
+  const rec=await call('/api/admin/schema-reconcile','POST',{});
+  assert.equal(rec.httpStatus,200);
+  assert.equal(rec.ok,true);
+  assert.equal(rec.schema_status,'current');
+  assert.deepEqual(rec.missing_tables,[]);
+  assert.deepEqual(rec.missing_columns,[]);
+  assert(rec.reconciled_columns.includes('support_ticket_assignments.impact_level'));
+  checks+=6;
+
+  const preservedRow=await dbGet("SELECT * FROM support_ticket_assignments WHERE ticket_id='ticket_legacy_v17'");
+  assert(preservedRow);
+  assert.equal(preservedRow.priority,'high');
+  assert.equal(preservedRow.impact_level,'medium');
+  assert.equal(preservedRow.resolution_note,'Dữ liệu phiếu hỗ trợ cũ phải được bảo toàn 100%');
+  checks+=4;
+
+  // 13.2 Safe Non-Destructive R2 Read/Write/Read-Back/Delete Probe
+  const r2ProbeRes=await call('/api/admin/r2-probe','POST',{},{DB,FILES});
+  assert.equal(r2ProbeRes.httpStatus,200);
+  assert.equal(r2ProbeRes.ok,true);
+  assert.equal(r2ProbeRes.status,'passed');
+  assert.deepEqual(r2ProbeRes.steps,{
+    binding_present:true,
+    list_ok:true,
+    write_ok:true,
+    readback_verified:true,
+    delete_verified:true
+  });
+  // Confirm probe object was deleted from bucket and /files/_system_health_probes/... is blocked
+  assert.equal([...bucket.keys()].some(k=>k.startsWith('_system_health_probes/')),false);
+  const blockedProbeFile=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/files/_system_health_probes/probe.txt'),{DB,FILES});
+  assert.equal(blockedProbeFile.status,400);
+  checks+=6;
+
+  // Test failing R2 write probe when bucket put throws an error
+  const brokenR2={
+    async list(){return {objects:[]};},
+    async put(){throw new Error('Simulated R2 write permission denied');},
+    async get(){return null;},
+    async delete(){}
+  };
+  const failedR2Probe=await call('/api/admin/r2-probe','POST',{},{DB,FILES:brokenR2});
+  assert.equal(failedR2Probe.httpStatus,502);
+  assert.equal(failedR2Probe.ok,false);
+  assert.equal(failedR2Probe.status,'failed');
+  assert.equal(failedR2Probe.steps.list_ok,true);
+  assert.equal(failedR2Probe.steps.write_ok,false);
+  // Restore passing R2 probe
+  await call('/api/admin/r2-probe','POST',{},{DB,FILES});
+  checks+=5;
+
+  // 13.3 Controlled Email & OTP Diagnostic Test Send + Anti-Duplicate Retry Lock
+  const unconfirmedMail=await call('/api/admin/email-center/test-send','POST',{recipient_email:'nghiepvu@skyfirst.io.vn',confirm_controlled_send:false});
+  assert.equal(unconfirmedMail.httpStatus,400);
+  assert.equal(unconfirmedMail.error,'CONTROLLED_SEND_CONFIRMATION_REQUIRED');
+  checks+=2;
+
+  const diagMail=await call('/api/admin/email-center/test-send','POST',{recipient_email:'nghiepvu@skyfirst.io.vn',test_type:'diagnostic_email',confirm_controlled_send:true});
+  assert.equal(diagMail.httpStatus,202);
+  assert.equal(diagMail.delivery_status,'not_configured');
+  assert.equal(diagMail.provider_accepted,false);
+  assert(diagMail.log_id);
+  checks+=4;
+
+  // Retry once -> retry_count becomes 1; immediate second retry with enforce_cooldown=true is blocked with 429 EMAIL_RETRY_COOLDOWN_ACTIVE
+  const retry1=await call(`/api/admin/email-center/${encodeURIComponent(diagMail.log_id)}/retry`,'POST',{enforce_cooldown:true});
+  assert.equal(retry1.httpStatus,202);
+  assert.equal(retry1.retry_count,1);
+  const retryCooldown=await call(`/api/admin/email-center/${encodeURIComponent(diagMail.log_id)}/retry`,'POST',{enforce_cooldown:true});
+  assert.equal(retryCooldown.httpStatus,429);
+  assert.equal(retryCooldown.error,'EMAIL_RETRY_COOLDOWN_ACTIVE');
+  checks+=4;
+
+  // 13.4 3-Layer Legal Gate & Sign-off Verification
+  const legalRev1=await call('/api/admin/governance/legal-review','GET');
+  assert.equal(legalRev1.httpStatus,200);
+  assert.equal(legalRev1.technical_controls_status,'passed');
+  assert.equal(legalRev1.legal_documents_seeded,true);
+  assert.equal(legalRev1.legal_signoff_status,'pending_legal_review');
+  assert.equal(legalRev1.overall_status,'technical_passed_pending_legal_signoff');
+  checks+=5;
+
+  const badSignoff=await call('/api/admin/governance/legal-signoff','POST',{status:'approved',reviewer_name:''});
+  assert.equal(badSignoff.httpStatus,400);
+  assert.equal(badSignoff.error,'LEGAL_SIGNOFF_EVIDENCE_REQUIRED');
+  const okSignoff=await call('/api/admin/governance/legal-signoff','POST',{status:'approved',reviewer_name:'Ban Pháp chế Sky First',evidence_ref:'BB-PL-2026-10'});
+  assert.equal(okSignoff.httpStatus,200);
+  const legalRev2=await call('/api/admin/governance/legal-review','GET');
+  assert.equal(legalRev2.overall_status,'passed');
+  // Reset back to pending_legal_review so default state remains honest
+  await call('/api/admin/governance/legal-signoff','POST',{status:'pending_legal_review'});
+  checks+=5;
+
+  // 13.5 8-Rule Data Consistency Detection & Automated Remediation
+  await dbRun("INSERT INTO member_cards(id,person_id,card_type_id,org_node_id,card_number,issued_at,expires_at,status,verify_token) VALUES('card_exp_test','p','card_volunteer','org_sfn','SFN-EXP-999','2024-01-01','2025-01-01','active','tok_exp_999')");
+  await dbRun("DELETE FROM support_ticket_assignments WHERE ticket_id='ticket_legacy_v17'");
+  const dcBefore=await call('/api/admin/data-consistency','GET');
+  assert.equal(dcBefore.httpStatus,200);
+  assert.equal(dcBefore.consistent,false);
+  assert(dcBefore.total_inconsistencies>=1);
+  assert(dcBefore.checks.find(c=>c.code==='EXPIRED_ACTIVE_CARDS').count>=1);
+  assert(dcBefore.checks.every(c=>typeof c.remediation==='string'&&c.remediation.length>5));
+  checks+=5;
+
+  const dcRem=await call('/api/admin/data-consistency/remediate','POST',{});
+  assert.equal(dcRem.httpStatus,200);
+  assert(dcRem.remediated.expired_cards_updated>=1);
+  const dcAfter=await call('/api/admin/data-consistency','GET');
+  assert.equal(dcAfter.consistent,true);
+  assert.equal(dcAfter.total_inconsistencies,0);
+  checks+=4;
+
+  // 13.6 Encrypted ZIP Header Detection & Deterministic Export Bundle SHA-256 Match
+  const encZip=new Uint8Array(38);
+  const dv=new DataView(encZip.buffer);
+  dv.setUint32(0,0x04034b50,true);
+  dv.setUint16(6,0x0001,true); // Bit 0 = Encrypted!
+  dv.setUint32(18,0,true);
+  dv.setUint32(22,10,true);
+  dv.setUint16(26,8,true);
+  encZip.set(new TextEncoder().encode('test.txt'),30);
+  const encReq=new Request('https://nghiepvu.skyfirst.io.vn/api/admin/archive-inspect',{method:'POST',headers:{cookie:'sfn_session=test',origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/zip'},body:encZip});
+  const encRes=await api(encReq,{DB,FILES},new URL(encReq.url));
+  const encBody=await encRes.json();
+  assert.equal(encRes.status,400);
+  assert.equal(encBody.valid,false);
+  assert.equal(encBody.reason,'ENCRYPTED_ZIP_ENTRY_FORBIDDEN');
+  checks+=3;
+
+  const expBundle=await call('/api/admin/export-bundle','GET');
+  assert.equal(expBundle.httpStatus,200);
+  const recomputedHash=createHash('sha256').update(JSON.stringify(expBundle.bundle)).digest('hex');
+  assert.equal(expBundle.sha256_checksum,recomputedHash);
+  checks+=2;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);
