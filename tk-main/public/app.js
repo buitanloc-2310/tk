@@ -39,7 +39,7 @@ const safeImageUrl=(value,fallback='')=>{
   const raw=String(value||'').trim();
   if(!raw)return fallback;
   try{
-    const u=new URL(raw,location.origin);
+    const u=new URL(raw,(location.origin&&location.origin!=='null')?location.origin:'https://nghiepvu.skyfirst.io.vn');
     if(u.origin!==location.origin||u.username||u.password||u.pathname.includes('..'))return fallback;
     if(u.pathname==='/sfn-logo.png')return '/sfn-logo.png';
     if(!u.pathname.startsWith('/files/'))return fallback;
@@ -267,15 +267,15 @@ function initRegistrationWizard(form){
   for(const el of children){
     const h=(el.querySelector('h3')?.textContent||'').trim().toLowerCase();
     if(h.includes('học tập'))step=1;
-    else if(h.includes('thông tin đăng ký'))step=2;
-    else if(h.includes('thông tin cha/mẹ'))step=3;
+    else if(h.includes('hồ sơ đăng ký')||h.includes('thông tin đăng ký'))step=2;
+    else if(h.includes('thông tin cha/mẹ')||h.includes('xác minh email'))step=3;
     groups[step].push(el);
   }
   const sections=groups.map((nodes,i)=>{const section=document.createElement('section');section.className='wizard-step request-grid';section.dataset.step=i;for(const n of nodes)section.append(n);form.append(section);return section});
   const controls=document.createElement('div');controls.className='wizard-controls';controls.innerHTML='<button type="button" id="wizardPrev" class="secondary">← Quay lại</button><button type="button" id="wizardNext" class="primary">Tiếp tục →</button>';form.append(controls);
   // Keep the real submit button inside final section, and never submit early.
   const submit=sections[3].querySelector('button[type="submit"],button.primary.full');if(submit)submit.type='submit';
-  const labels=['Thông tin cá nhân','Học tập / công tác','Đơn vị tham gia','Xác nhận & gửi'];
+  const labels=['Thông tin cá nhân','Học tập & công việc','Hồ sơ Đăng ký','Xác nhận & gửi'];
   let current=0;
   const draw=()=>{sections.forEach((s,i)=>{s.hidden=i!==current});$('#wizardProgress').innerHTML=labels.map((label,i)=>`<div class="wizard-dot ${i===current?'current':i<current?'done':''}"><b>0${i+1}</b><span>${label}</span></div>`).join('');$('#wizardPrev').hidden=current===0;$('#wizardNext').hidden=current===3;window.scrollTo({top:0,behavior:'smooth'})};
   $('#wizardPrev').onclick=()=>{if(current>0){current--;draw()}};
@@ -340,19 +340,11 @@ function renderLogin(){
           </div>
           <div id="authRegisterPane" hidden>
             <div class="auth-heading"><span>ĐĂNG KÝ THÀNH VIÊN</span><h2>Đăng ký thành viên.</h2><p>Hồ sơ được gửi đến Sky First để xác minh trước khi tài khoản được kích hoạt.</p></div>
-            <div class="register-preview"><div><b>01</b><span>Cá nhân &amp; định danh</span></div><div><b>02</b><span>Học tập &amp; công việc</span></div><div><b>03</b><span>Đơn vị Sky First</span></div><div><b>04</b><span>Xác minh &amp; cam kết</span></div></div>
+            <div class="register-preview"><div><b>01</b><span>Thông tin cá nhân</span></div><div><b>02</b><span>Học tập &amp; công việc</span></div><div><b>03</b><span>Hồ sơ Đăng ký</span></div><div><b>04</b><span>Xác nhận &amp; gửi</span></div></div>
             <button type="button" id="startRegistration" class="primary auth-submit">BẮT ĐẦU ĐĂNG KÝ <span>→</span></button>
             <button type="button" id="checkRequestRegister" class="link-button register-lookup">Tra cứu đăng ký đã gửi</button>
           </div>
           <div class="auth-trust"><span>Thông tin định danh được giới hạn quyền truy cập.</span><span>Tài khoản chỉ kích hoạt sau khi Sky First xác nhận.</span></div>
-          <div class="auth-desktop-downloads" style="margin:12px 0;padding:12px;border-radius:12px;background:rgba(37,99,235,0.06);border:1px solid rgba(37,99,235,0.18)">
-            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#2563eb;margin-bottom:6px">ỨNG DỤNG MÁY TÍNH SKY FIRST (GFI v6.0.0)</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <a class="secondary" style="flex:1;text-align:center;text-decoration:none;padding:8px 10px;font-size:13px;font-weight:600;border-radius:8px" href="/downloads/SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe" download="SkyFirst-Digital-Operations-Center-Setup-6.0.0-x64.exe">⬇ Bản Windows (.exe)</a>
-              <a class="secondary" style="flex:1;text-align:center;text-decoration:none;padding:8px 10px;font-size:13px;font-weight:600;border-radius:8px" href="/downloads/SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg" download="SkyFirst-Digital-Operations-Center-6.0.0-universal.dmg">⬇ Bản macOS (.dmg)</a>
-            </div>
-            <div style="margin-top:6px;text-align:right"><button type="button" id="openDesktopDownloadModalBtn" class="link-button" style="font-size:12px">Kiểm tra mã băm SHA-256 &amp; hướng dẫn cài đặt →</button></div>
-          </div>
           <div class="auth-ecosystem">${portalMenu()}</div>
           <div class="auth-legal"><a href="/support.html">Hỗ trợ</a><a href="/privacy.html">Bảo mật</a><a href="/terms.html">Điều khoản</a></div>
         </div>
@@ -364,8 +356,6 @@ function renderLogin(){
   $('#checkRequest').onclick=()=>routePublic('/registration-status');
   $('#checkRequestRegister').onclick=()=>routePublic('/registration-status');
   loadPublicStats();
-  const dlBtn=$('#openDesktopDownloadModalBtn');
-  if(dlBtn)dlBtn.onclick=()=>openDesktopDownloadCenterModal();
   $('#forgotPassword').onclick=()=>{modal('Đặt lại mật khẩu',`<form id="forgotForm" class="form-grid"><p class="muted">Nhập tên đăng nhập hoặc email. Nếu tài khoản hợp lệ, hệ thống sẽ gửi liên kết đặt lại mật khẩu.</p><label>Tên đăng nhập / Email<input name="login" required autocomplete="username"></label><button class="primary">Gửi liên kết bảo mật</button><div id="forgotMsg" class="msg"></div></form>`);$('#forgotForm').onsubmit=async e=>{e.preventDefault();const login=new FormData(e.target).get('login');await api('/api/public/password/forgot',{method:'POST',body:JSON.stringify({login})}).catch(()=>null);$('#forgotMsg').textContent='Nếu tài khoản tồn tại, hướng dẫn đã được gửi đến email đăng ký.'}};
   $('#togglePassword').onclick=()=>{const i=$('#loginForm').elements.password;i.type=i.type==='password'?'text':'password'};
   $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':code==='ACCOUNT_BANNED'?'Tài khoản bị giới hạn truy cập. Vui lòng liên hệ support@skyfirst.io.vn.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
@@ -389,13 +379,11 @@ async function renderAccountRequest(){
 
 
   showRegistrationPage(
-    'Đăng ký thành viên & Biểu mẫu trực tuyến',
+    'Hồ sơ Đăng ký',
     `
-    <div class="tabs" id="publicRegModeTabs" style="margin-bottom:14px">
-      <button type="button" class="active" data-pub-reg-mode="member">Hồ sơ Thành viên (12 tháng / 01 năm)</button>
-      <button type="button" data-pub-reg-mode="trial">Tài khoản Dùng thử (24 giờ / 48 giờ)</button>
-      <button type="button" data-pub-reg-mode="dynamic_forms">Biểu mẫu Trực tuyến &amp; Chữ ký Xác nhận</button>
-      <button type="button" data-pub-reg-mode="public_events">Sự kiện Công khai Đang mở</button>
+    <div class="row" id="publicRegHeaderBar" style="justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+      <span class="badge info">Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước)</span>
+      <button type="button" class="btn ghost sm" id="togglePubEventsViewBtn" data-pub-reg-mode="public_events">Xem Hoạt động &amp; Sự kiện Công khai →</button>
     </div>
     <div id="pubRegDynamicHost" style="display:none"></div>
     <div id="pubRegStandardWrap">
@@ -603,7 +591,7 @@ async function renderAccountRequest(){
         style="margin-top:8px"
       >
         <h3>
-          THÔNG TIN ĐĂNG KÝ Sky First Network
+          HỒ SƠ ĐĂNG KÝ
         </h3>
       </div>
 
@@ -749,11 +737,42 @@ async function renderAccountRequest(){
         <div id="regOtpMsg" class="meta" role="status" aria-live="polite" style="margin-top:8px"></div>
       </div>
 
+      <div class="card full" style="background:#f8fbff;border:1px solid #d7e8f6;padding:16px">
+        <h3 style="margin:0 0 8px">PHƯƠNG THỨC XÁC NHẬN HỒ SƠ ĐĂNG KÝ</h3>
+        <p class="muted" style="margin:0 0 10px;font-size:13px">Chọn một trong hai phương thức xác nhận dưới đây để gắn với Hồ sơ Đăng ký của bạn (hai phương thức là lựa chọn thay thế nhau, không bắt buộc thực hiện đồng thời cả hai):</p>
+        <div class="toolbar" style="margin:0 0 12px;gap:16px;flex-wrap:wrap">
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="radio" name="confirmation_method" value="drawn_signature" checked style="width:auto">
+            <b>Ký trực tiếp trên giao diện</b>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="radio" name="confirmation_method" value="uploaded_file" style="width:auto">
+            <b>Tải tệp xác nhận lên hệ thống</b>
+          </label>
+        </div>
+        <div id="regStep4SignaturePane">
+          <canvas id="regStep4SigCanvas" width="460" height="130" style="border:1px dashed #3b82f6;border-radius:8px;background:#fff;touch-action:none;cursor:crosshair;max-width:100%"></canvas>
+          <div class="toolbar" style="margin-top:8px">
+            <button type="button" class="secondary" id="regStep4ClearSigBtn">Xóa &amp; Ký lại</button>
+            <span class="meta">Sử dụng chuột hoặc màn hình cảm ứng để ký xác nhận trực tiếp vào khung trên.</span>
+          </div>
+          <input type="hidden" name="signature_data_url" id="regStep4SigDataUrl" value="">
+        </div>
+        <div id="regStep4FileUploadPane" style="display:none">
+          <div class="toolbar" style="margin-top:4px;flex-wrap:wrap">
+            <input type="file" id="regStep4ConfirmFile" accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp">
+            <button type="button" class="secondary" id="regStep4UploadBtn">Tải tệp xác nhận lên hệ thống</button>
+          </div>
+          <input type="hidden" name="confirmation_file_url" id="regStep4ConfirmFileUrl" value="">
+          <div id="regStep4UploadMsg" class="meta" style="margin-top:6px">Hỗ trợ định dạng PDF, PNG, JPG, WEBP (tối đa 5MB). Tệp xác nhận được lưu trữ bảo mật riêng tư.</div>
+        </div>
+      </div>
+
       <div class="request-note full">
         <b>🔒 Thông báo Minh bạch &amp; Bảo vệ Dữ liệu Cá nhân (Luật số 91/2025/QH15 &amp; Nghị định 356/2025/NĐ-CP):</b><br>
         1. <b>Mục đích thu thập &amp; xử lý:</b> Các thông tin trong biểu mẫu được Trung tâm Nghiệp vụ Số Sky First (thuộc Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First) thu thập tối thiểu để xác minh danh tính, xét duyệt cấp tài khoản, quản trị hồ sơ thành viên, cấp thẻ/chứng nhận và phân quyền công tác.<br>
-        2. <b>Phạm vi truy cập &amp; lưu trữ:</b> Giới hạn nghiêm ngặt cho bộ phận xét duyệt và quản trị đúng phạm vi đơn vị. Ảnh hồ sơ chờ duyệt được lưu riêng tư (private/no-store); thông tin định danh người giám hộ (nếu dưới 18 tuổi) được tự động ẩn/xóa sau khi hoàn tất phê duyệt.<br>
-        3. <b>Phân biệt pháp lý:</b> Xác nhận bên dưới là sự đồng ý tách bạch theo mục đích và chấp thuận điều khoản hệ thống; không mặc nhiên thay thế chữ ký điện tử chuyên dùng hoặc sự đồng ý cho các mục đích ngoài phạm vi đã nêu.
+        2. <b>Phạm vi truy cập &amp; lưu trữ:</b> Giới hạn nghiêm ngặt cho bộ phận xét duyệt và quản trị đúng phạm vi đơn vị. Ảnh hồ sơ và tệp xác nhận chờ duyệt được lưu riêng tư (private/no-store); thông tin định danh người giám hộ (nếu dưới 18 tuổi) được tự động ẩn/xóa sau khi hoàn tất phê duyệt.<br>
+        3. <b>Quyền quyết định cấp tài khoản:</b> Ban Chấp hành và bộ phận xét duyệt quyết định việc cấp tài khoản, phân quyền đơn vị và thời hạn sử dụng theo thẩm quyền.
       </div>
 
       <label class="full" style="display:flex;align-items:flex-start;gap:10px">
@@ -882,7 +901,66 @@ async function renderAccountRequest(){
   };
 
 
-  const syncEducationFields=()=>{};
+  const eduStatusSel=form.elements.education_status;
+  const empStatusSel=form.elements.employment_status;
+  const syncEducationFields=()=>{
+    if(eduStatusSel&&eduStatusSel.value==='Không còn theo học'){
+      if(!form.elements.school_name.value.trim())form.elements.school_name.value='Không áp dụng';
+      if(!form.elements.class_or_major.value.trim())form.elements.class_or_major.value='Không áp dụng';
+    }
+    if(empStatusSel&&['Chưa đi làm','Tạm nghỉ'].includes(empStatusSel.value)){
+      if(!form.elements.workplace_name.value.trim())form.elements.workplace_name.value=empStatusSel.value;
+      if(!form.elements.work_department.value.trim())form.elements.work_department.value='Không áp dụng';
+      if(!form.elements.job_title.value.trim())form.elements.job_title.value=empStatusSel.value;
+    }
+  };
+  if(eduStatusSel)eduStatusSel.onchange=syncEducationFields;
+  if(empStatusSel)empStatusSel.onchange=syncEducationFields;
+
+  // Wire Step 04 Confirmation Method toggle, Signature Canvas, and Confirmation File Upload
+  const sigPane=$('#regStep4SignaturePane'),filePane=$('#regStep4FileUploadPane');
+  const sigCvs=$('#regStep4SigCanvas'),sigDataField=$('#regStep4SigDataUrl'),confFileField=$('#regStep4ConfirmFileUrl');
+  let step4HasDrawn=false,step4Strokes=[];
+  if(sigCvs){
+    const sctx=sigCvs.getContext('2d');
+    let sdraw=false;
+    sctx.strokeStyle='#0f172a';sctx.lineWidth=2;sctx.lineCap='round';
+    const spos=ev=>{const r=sigCvs.getBoundingClientRect(),t=ev.touches?ev.touches[0]:ev;return {x:Math.round(t.clientX-r.left),y:Math.round(t.clientY-r.top)}};
+    const syncSigUrl=()=>{
+      if(!step4HasDrawn||!step4Strokes.length){if(sigDataField)sigDataField.value='';return;}
+      const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="460" height="130"><path d="${step4Strokes.map(st=>st.join(' ')).join(' ')}" fill="none" stroke="#0f172a" stroke-width="2"/></svg>`;
+      if(sigDataField)sigDataField.value=`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    };
+    sigCvs.onpointerdown=ev=>{sdraw=true;step4HasDrawn=true;const p=spos(ev);step4Strokes.push([`M${p.x} ${p.y}`]);sctx.beginPath();sctx.moveTo(p.x,p.y);syncSigUrl()};
+    sigCvs.onpointermove=ev=>{if(!sdraw)return;const p=spos(ev);step4Strokes[step4Strokes.length-1].push(`L${p.x} ${p.y}`);sctx.lineTo(p.x,p.y);sctx.stroke();syncSigUrl()};
+    window.addEventListener('pointerup',()=>{sdraw=false});
+    const clrBtn=$('#regStep4ClearSigBtn');
+    if(clrBtn)clrBtn.onclick=()=>{sctx.clearRect(0,0,sigCvs.width,sigCvs.height);step4HasDrawn=false;step4Strokes=[];if(sigDataField)sigDataField.value='';};
+  }
+  $$('input[name="confirmation_method"]').forEach(r=>r.onchange=()=>{
+    const m=form.querySelector('input[name="confirmation_method"]:checked')?.value||'drawn_signature';
+    if(sigPane)sigPane.style.display=m==='drawn_signature'?'block':'none';
+    if(filePane)filePane.style.display=m==='uploaded_file'?'block':'none';
+  });
+  const step4UpBtn=$('#regStep4UploadBtn');
+  if(step4UpBtn){
+    step4UpBtn.onclick=async()=>{
+      const fi=$('#regStep4ConfirmFile')?.files?.[0];
+      const msgBox=$('#regStep4UploadMsg');
+      if(!fi){if(msgBox)msgBox.textContent='Vui lòng chọn tệp xác nhận (PDF, PNG, JPG, WEBP) trước khi tải lên.';return;}
+      step4UpBtn.disabled=true;if(msgBox)msgBox.textContent='Đang kiểm tra và tải tệp xác nhận lên kho bảo mật...';
+      try{
+        const buf=await fi.arrayBuffer();
+        const res=await fetch('/api/public/request-confirmation-file',{method:'POST',headers:{'content-type':fi.type||'application/pdf'},body:buf});
+        const d=await res.json().catch(()=>({}));
+        if(!res.ok)throw new Error(d.message||d.error||'Tải tệp thất bại.');
+        if(confFileField)confFileField.value=d.url||'';
+        if(msgBox)msgBox.innerHTML=`<b class="status-ok">✓ Đã tải tệp xác nhận thành công: ${esc(fi.name)} (${d.byte_size} bytes)</b>`;
+      }catch(err){
+        if(msgBox)msgBox.innerHTML=`<span class="status-bad">${esc(err.message)}</span>`;
+      }finally{step4UpBtn.disabled=false;}
+    };
+  }
 
   dob.onchange=
     syncGuardian;
@@ -1075,6 +1153,25 @@ async function renderAccountRequest(){
       }
 
 
+      const confirmMethod=String(fd.get('confirmation_method')||'drawn_signature');
+      const sigDataUrl=String(fd.get('signature_data_url')||'').trim();
+      let confFileUrl=String(fd.get('confirmation_file_url')||'').trim();
+      const pendingFi=$('#regStep4ConfirmFile')?.files?.[0];
+      if(confirmMethod==='uploaded_file'&&!confFileUrl&&pendingFi){
+        const buf=await pendingFi.arrayBuffer();
+        const upRes=await fetch('/api/public/request-confirmation-file',{method:'POST',headers:{'content-type':pendingFi.type||'application/pdf'},body:buf});
+        const upData=await upRes.json().catch(()=>({}));
+        if(!upRes.ok)throw new Error(upData.message||upData.error||'Tải tệp xác nhận thất bại.');
+        confFileUrl=upData.url||'';
+        if(confFileField)confFileField.value=confFileUrl;
+      }
+      if(confirmMethod==='drawn_signature'&&!sigDataUrl){
+        throw new Error('Vui lòng ký xác nhận trực tiếp vào khung chữ ký ở Bước 04 (hoặc chọn phương thức tải tệp xác nhận).');
+      }
+      if(confirmMethod==='uploaded_file'&&!confFileUrl){
+        throw new Error('Vui lòng chọn và tải tệp xác nhận lên hệ thống ở Bước 04 (hoặc chọn phương thức ký trực tiếp).');
+      }
+
       const avatarFile=
         fd.get('avatar');
 
@@ -1121,6 +1218,9 @@ async function renderAccountRequest(){
       body.terms_accepted=fd.get('terms_accepted')?'1':'0';
       body.accuracy_committed='1';
       body.otp_verification_token=String(fd.get('otp_verification_token')||'');
+      body.confirmation_method=confirmMethod;
+      body.signature_data_url=sigDataUrl;
+      body.confirmation_file_url=confFileUrl;
       delete body.email_otp_code;
 
 
@@ -9220,7 +9320,7 @@ async function applyPendingSavedFilterIfAny(){
 }
 
 async function renderAdminSystem(c){
-  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ HỆ THỐNG, AN TOÀN &amp; VẬN HÀNH (GFI)</div><h1>Cấu hình hệ thống &amp; Kiểm soát vận hành</h1><p class="muted">Quản trị tình trạng dịch vụ D1/R2, Trung tâm Email/OTP, Cổng pháp lý 3 lớp, Đối soát toàn vẹn dữ liệu, Kiểm tra gói ZIP và Cổng kiểm tra trước phát hành.</p></div></div>
+  c.innerHTML=`<div class="section-title"><div><div class="eyebrow">QUẢN TRỊ HỆ THỐNG, AN TOÀN &amp; VẬN HÀNH</div><h1>Cấu hình hệ thống &amp; Kiểm soát vận hành</h1><p class="muted">Quản trị tình trạng dịch vụ D1/R2, Trung tâm Email/OTP, Cổng pháp lý 3 lớp, Đối soát toàn vẹn dữ liệu, Kiểm tra gói ZIP và Cổng kiểm tra trước phát hành.</p></div></div>
   <div class="section-grid">
     <div class="card"><h2>Bộ lọc đã lưu</h2><p class="muted">Lưu và áp dụng nhanh bộ lọc quản trị cho các phân hệ vận hành.</p><form id="savedFilterForm" class="form-grid"><label>Tên bộ lọc<input name="name" required placeholder="Ví dụ: Thành viên chưa có thẻ"></label><label>Phân hệ<select name="view"><option value="admin-members">Thành viên</option><option value="admin-requests">Yêu cầu cấp tài khoản</option><option value="admin-calendar">Lịch Sky First Network</option><option value="admin-audit">Nhật ký hệ thống</option></select></label><label style="grid-column:1/-1">Điều kiện lọc<input name="query" placeholder="Ví dụ: hoạt động, Ban Truyền thông, pending"></label><button class="primary">Lưu bộ lọc</button></form><div id="savedFilters" style="margin-top:14px">Đang tải...</div></div>
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><h2 style="margin:0">Tình trạng hệ thống</h2><div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="secondary" id="runSchemaReconcileBtn">Đồng bộ &amp; Kiểm tra D1</button><button type="button" class="secondary" id="runR2ProbeBtn">Kiểm tra Đọc/Ghi/Xóa R2</button></div></div><div id="healthBox">Đang kiểm tra...</div></div>
@@ -9575,222 +9675,187 @@ function renderError(msg){
    PUBLIC REGISTRATION MODES (TRIAL 24H/48H, DYNAMIC FORMS + SIGNATURE PAD, PUBLIC SK EVENTS)
    ========================================================= */
 function bindPublicRegModes(){
-  const tabs=$$('#publicRegModeTabs [data-pub-reg-mode]');
+  const toggleBtn=$('#togglePubEventsViewBtn');
   const stdWrap=$('#pubRegStandardWrap');
   const dynHost=$('#pubRegDynamicHost');
-  if(!tabs.length||!stdWrap||!dynHost)return;
-  tabs.forEach(btn=>btn.onclick=async()=>{
-    tabs.forEach(x=>x.classList.remove('active'));
-    btn.classList.add('active');
-    const mode=btn.dataset.pubRegMode;
-    if(mode==='member'){
+  if(!toggleBtn||!stdWrap||!dynHost)return;
+  let showingEvents=false;
+  toggleBtn.onclick=async()=>{
+    showingEvents=!showingEvents;
+    if(!showingEvents){
       stdWrap.style.display='block';
       dynHost.style.display='none';
+      toggleBtn.textContent='Xem Hoạt động & Sự kiện Công khai →';
       return;
     }
     stdWrap.style.display='none';
     dynHost.style.display='block';
-    dynHost.innerHTML='<div class="empty">Đang tải...</div>';
-    if(mode==='trial'){
-      const typesData=await api('/api/public/account-types').catch(()=>({items:[],equivalence_note:''}));
-      dynHost.innerHTML=`
-        <div class="request-note">
-          <b>Đăng ký Tài khoản Ngắn hạn (24 giờ / 48 giờ):</b><br>
-          • Thời hạn sử dụng chỉ bắt đầu tính từ thời điểm <b>xác minh OTP email và kích hoạt thành công</b> (không tính từ lúc bắt đầu điền biểu mẫu).<br>
-          • ${esc(typesData.equivalence_note||'Gói 12 tháng và 01 năm là cùng một loại thời hạn 365 ngày.')}<br>
-          • Tài khoản 24 giờ / 48 giờ chỉ có quyền sử dụng cá nhân cơ bản, không mặc nhiên có quyền truy cập Admin hoặc dữ liệu nội bộ.
+    toggleBtn.textContent='← Quay lại Hồ sơ Đăng ký (04 bước)';
+    await renderPublicActivitiesList(dynHost);
+  };
+}
+
+async function renderPublicActivitiesList(host){
+  host.innerHTML='<div class="empty">Đang tải danh sách hoạt động và sự kiện công khai...</div>';
+  const evRes=await api('/api/public/sk-events').catch(()=>({items:[]}));
+  const evs=evRes.items||[];
+  host.innerHTML=`
+    <div class="request-note"><b>Cổng Hoạt động &amp; Sự kiện Chính thức Sky First Network:</b> Chỉ hiển thị các hoạt động, chương trình và sự kiện đã được phê duyệt và công bố chính thức. Bấm vào từng hoạt động để xem trang chi tiết, lịch trình, hướng dẫn điểm danh QR và gửi minh chứng.</div>
+    <div class="list" style="margin-top:12px">
+      ${evs.map(ev=>`<div class="card" style="margin-bottom:12px">
+        ${ev.cover_image_url?`<div style="margin-bottom:10px;border-radius:10px;overflow:hidden;max-height:200px"><img src="${esc(safeImageUrl(ev.cover_image_url,'/sfn-logo.png'))}" alt="${esc(ev.name)}" style="width:100%;object-fit:cover"></div>`:''}
+        <div class="section-title">
+          <div><b>${esc(ev.name)}</b> <span class="badge ok">${esc(ev.event_code)}</span></div>
+          <span class="badge">${esc(ev.status==='registration_open'?'Đang mở đăng ký':ev.status==='ongoing'?'Đang diễn ra':ev.status==='completed'?'Đã kết thúc':'Đã công bố')}</span>
         </div>
-        <form id="trialRegForm" class="form-grid" style="margin-top:14px">
-          <label>Họ và tên *<input name="full_name" required></label>
-          <label>Số điện thoại *<input name="phone" required></label>
-          <label>Địa chỉ Email *<input type="email" name="email" id="trialEmailInput" required></label>
-          <label>Loại tài khoản &amp; Thời hạn *<select name="account_type_code" required>
-            <option value="trial_24h">Tài khoản 24 giờ (Hiệu lực 24 giờ từ lúc kích hoạt)</option>
-            <option value="trial_48h">Tài khoản 48 giờ (Hiệu lực 48 giờ từ lúc kích hoạt)</option>
-          </select></label>
-          <label style="grid-column:1/-1">Mật khẩu đăng nhập (ít nhất 10 ký tự) *<input type="password" name="password" minlength="10" required></label>
-          <div class="card" style="grid-column:1/-1;background:#f8fbff;border:1px solid #d7e8f6;padding:12px">
-            <b>Bước xác minh OTP Email bắt buộc trước khi kích hoạt hạn:</b>
-            <div class="toolbar" style="margin-top:8px">
-              <button type="button" class="secondary" id="trialSendOtpBtn">Gửi OTP</button>
-              <input id="trialOtpInput" maxlength="6" placeholder="Nhập 6 số OTP" style="max-width:160px">
-              <button type="button" class="secondary" id="trialVerifyOtpBtn">Xác nhận OTP</button>
-            </div>
-            <input type="hidden" name="otp_verification_token" id="trialOtpToken" value="">
-            <div id="trialOtpMsg" class="meta" style="margin-top:6px"></div>
+        <p class="muted">${esc(ev.purpose)}</p>
+        <div class="meta">Đơn vị tổ chức: <b>${esc(ev.host_org_name||'Sky First Network')}</b> · Thời gian: <b>${esc(ev.starts_at)} → ${esc(ev.ends_at)}</b> · Địa điểm: <b>${esc(ev.location_or_platform)}</b>${ev.registration_closes_at?` · Hạn đăng ký: <b>${esc(ev.registration_closes_at)}</b>`:''}</div>
+        <div class="toolbar" style="margin-top:10px">
+          <button type="button" class="primary" data-open-pub-ev-detail="${esc(ev.id)}">Xem chi tiết &amp; Đăng ký / Điểm danh →</button>
+        </div>
+      </div>`).join('')||'<div class="empty">Hiện chưa có hoạt động hoặc sự kiện công khai nào đang mở.</div>'}
+    </div>
+  `;
+  $$('[data-open-pub-ev-detail]').forEach(b=>b.onclick=()=>renderPublicActivityDetail(host,b.dataset.openPubEvDetail));
+}
+
+async function renderPublicActivityDetail(host,eventId){
+  host.innerHTML='<div class="empty">Đang tải chi tiết hoạt động...</div>';
+  try{
+    const d=await api('/api/public/sk-events/'+encodeURIComponent(eventId));
+    const ev=d.event||d;
+    const customFields=Array.isArray(ev.custom_fields)?ev.custom_fields:[];
+    const comms=Array.isArray(d.communications)?d.communications:[];
+    host.innerHTML=`
+      <div class="toolbar" style="margin-bottom:12px">
+        <button type="button" class="secondary" id="backToPubEventsBtn">← Quay lại danh sách hoạt động</button>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="section-title">
+          <div>
+            <div class="eyebrow">${esc(ev.domain_field||'HOẠT ĐỘNG & SỰ KIỆN SKY FIRST')} · ${esc(ev.event_code)}</div>
+            <h2 style="margin:4px 0">${esc(ev.name)}</h2>
           </div>
-          <label style="grid-column:1/-1;display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="read_acknowledged" value="1" required style="width:auto"><span>Tôi xác nhận đã đọc <a href="/privacy.html" target="_blank">Thông báo bảo mật</a> (Phiên bản 2026.10-SFN-PDPD). *</span></label>
-          <label style="grid-column:1/-1;display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="terms_accepted" value="1" required style="width:auto"><span>Tôi đồng ý với <a href="/terms.html" target="_blank">Điều khoản sử dụng</a> (Phiên bản 2026.10-SFN-TERMS). *</span></label>
-          <label style="grid-column:1/-1;display:flex;gap:8px;align-items:flex-start"><input type="checkbox" name="privacy_consent" value="1" required style="width:auto"><span>Tôi đồng ý xử lý dữ liệu cá nhân cho mục đích cấp và quản lý tài khoản dùng thử có thời hạn. *</span></label>
-          <button class="primary" style="grid-column:1/-1">Kích hoạt tài khoản dùng thử</button>
-          <div id="trialRegResult" style="grid-column:1/-1"></div>
-        </form>
-      `;
-      $('#trialSendOtpBtn').onclick=async()=>{
-        const em=$('#trialEmailInput').value.trim();
-        if(!em)return alert('Vui lòng nhập email trước.');
-        try{const r=await api('/api/public/email-otp/request',{method:'POST',body:JSON.stringify({email:em,purpose:'account_request'})});$('#trialOtpMsg').textContent=r.message}catch(e){$('#trialOtpMsg').textContent=e.data?.message||e.message}
+          <span class="badge ok">${esc(ev.status==='registration_open'?'Đang mở đăng ký':ev.status)}</span>
+        </div>
+        <p>${esc(ev.purpose||'')}</p>
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px">
+          <div class="request-note"><b>Thời gian &amp; Địa điểm:</b><br>${esc(ev.starts_at)} → ${esc(ev.ends_at)}<br>Địa điểm: <b>${esc(ev.location_or_platform)}</b></div>
+          <div class="request-note"><b>Đơn vị tổ chức &amp; Liên hệ:</b><br>Đơn vị: <b>${esc(ev.host_org_name||'Sky First Network')}</b><br>Phụ trách: ${esc(ev.lead_person_name||'Ban Tổ chức')} (${esc(ev.contact_email||'support@skyfirst.io.vn')})</div>
+          <div class="request-note"><b>Đối tượng &amp; Điều kiện tham gia:</b><br>Đối tượng: ${esc(ev.target_participants||'Thành viên & Tình nguyện viên')}<br>Điều kiện: ${esc(ev.eligibility_criteria||'Đăng ký hợp lệ và tuân thủ nội quy chương trình')}${ev.registration_closes_at?`<br>Hạn đăng ký: <b>${esc(ev.registration_closes_at)}</b>`:""}</div>
+        </div>
+        ${ev.implementation_plan?`<div style="margin-top:12px"><b>Nội dung &amp; Lịch trình chi tiết:</b><p class="muted" style="margin-top:4px;white-space:pre-line">${esc(ev.implementation_plan)}</p></div>`:""}
+        ${comms.length?`<div style="margin-top:12px"><b>Thông báo liên quan:</b><div class="stack-list" style="margin-top:6px">${comms.map(cm=>`<div class="list-row"><div><b>${esc(cm.title)}</b><div class="meta">${esc(cm.body)}</div></div><span class="meta">${esc((cm.published_at||cm.created_at||'').slice(0,16))}</span></div>`).join('')}</div></div>`:""}
+      </div>
+
+      <div class="section-grid">
+        <div class="card">
+          <h3>Biểu mẫu Đăng ký Tham gia Hoạt động</h3>
+          ${ev.status==='registration_open'&&ev.registration_state==='open'?`
+            <form id="pubEventRegForm" class="form-grid">
+              <label>Họ và tên *<input name="full_name" required></label>
+              <label>Email *<input type="email" name="email" required></label>
+              <label>Số điện thoại *<input name="phone" required></label>
+              <label>Đơn vị / Trường học<input name="org_name" placeholder="Nhập đơn vị hoặc trường học"></label>
+              ${customFields.map(cf=>{
+                const req=cf.required?'required':'';
+                return `<label style="grid-column:1/-1">${esc(cf.label)} ${cf.required?'*':''}<input name="cf_${esc(cf.code)}" ${req}></label>`;
+              }).join('')}
+              <div style="grid-column:1/-1" class="card">
+                <b>Tải ảnh chân dung / Ảnh minh chứng (Tùy cấu hình hoạt động · Bảo mật riêng tư trên R2):</b>
+                <div class="toolbar" style="margin-top:6px;flex-wrap:wrap">
+                  <input type="file" id="pubEvAssetFile" accept=".png,.jpg,.jpeg,.webp,.pdf">
+                  <button type="button" class="secondary" id="pubEvUploadAssetBtn">Tải minh chứng lên hệ thống</button>
+                </div>
+                <input type="hidden" name="proof_asset_url" id="pubEvProofUrl" value="">
+                <div id="pubEvAssetMsg" class="meta" style="margin-top:4px">Chỉ người nộp và Quản trị viên có thẩm quyền mới được xem tệp minh chứng này.</div>
+              </div>
+              <label style="grid-column:1/-1">Nội dung xác nhận tham gia<textarea name="confirmation_note" rows="2" placeholder="Cam kết tham gia đầy đủ và chấp hành quy định của Ban Tổ chức"></textarea></label>
+              <button class="primary" style="grid-column:1/-1">Gửi đăng ký tham gia</button>
+              <div id="pubEvRegResult" style="grid-column:1/-1"></div>
+            </form>
+          `:`<div class="empty">Hiện hoạt động này không trong thời gian mở cổng đăng ký trực tuyến.</div>`}
+        </div>
+
+        <div class="card">
+          <h3>Điểm danh QR &amp; Tra cứu Trạng thái Tham gia</h3>
+          <p class="muted">Hướng dẫn điểm danh: Nhập mã phiên QR do Ban Tổ chức cung cấp tại buổi sinh hoạt kèm địa chỉ Email đã đăng ký để ghi nhận điểm danh trực tiếp trên máy chủ.</p>
+          <form id="pubEvCheckinForm" class="form-grid">
+            <label>Mã QR phiên điểm danh *<input name="qr_token" required placeholder="Nhập mã QR phiên điểm danh"></label>
+            <label>Email đã đăng ký *<input type="email" name="email" required placeholder="Nhập email của bạn"></label>
+            <label style="grid-column:1/-1">Họ và tên<input name="full_name" placeholder="Nhập họ và tên"></label>
+            <button class="primary" style="grid-column:1/-1">Xác nhận Điểm danh QR</button>
+            <div id="pubEvCheckinResult" style="grid-column:1/-1"></div>
+          </form>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
+            <b>Tra cứu trạng thái đăng ký &amp; điểm danh của tôi:</b>
+            <div class="toolbar" style="margin-top:8px">
+              <input id="pubEvLookupEmail" type="email" placeholder="Nhập email đã đăng ký">
+              <button type="button" class="secondary" id="pubEvLookupBtn">Tra cứu</button>
+            </div>
+            <div id="pubEvLookupResult" class="meta" style="margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    $('#backToPubEventsBtn').onclick=()=>renderPublicActivitiesList(host);
+    const upBtn=$('#pubEvUploadAssetBtn');
+    if(upBtn){
+      upBtn.onclick=async()=>{
+        const fi=$('#pubEvAssetFile')?.files?.[0];
+        const msg=$('#pubEvAssetMsg');
+        if(!fi){msg.textContent='Vui lòng chọn tệp ảnh chân dung hoặc minh chứng trước.';return;}
+        upBtn.disabled=true;msg.textContent='Đang tải tệp lên kho lưu trữ riêng tư...';
+        try{
+          const buf=await fi.arrayBuffer();
+          const res=await fetch('/api/public/sk-events/'+encodeURIComponent(eventId)+'/upload-asset',{method:'POST',headers:{'content-type':fi.type||'image/png'},body:buf});
+          const r=await res.json().catch(()=>({}));
+          if(!res.ok)throw new Error(r.message||r.error||'Tải tệp thất bại.');
+          $('#pubEvProofUrl').value=r.url||'';
+          msg.innerHTML=`<b class="status-ok">✓ Đã lưu tệp minh chứng bảo mật (${r.byte_size} bytes).</b>`;
+        }catch(e){msg.innerHTML=`<span class="status-bad">${esc(e.message)}</span>`;}
+        finally{upBtn.disabled=false;}
       };
-      $('#trialVerifyOtpBtn').onclick=async()=>{
-        const em=$('#trialEmailInput').value.trim(),otp=$('#trialOtpInput').value.trim();
-        try{const r=await api('/api/public/email-otp/verify',{method:'POST',body:JSON.stringify({email:em,otp,purpose:'account_request'})});$('#trialOtpToken').value=r.otp_verification_token||'';$('#trialOtpMsg').innerHTML='<b class="status-ok">✓ Đã xác minh OTP thành công.</b>'}catch(e){$('#trialOtpMsg').textContent=e.data?.message||e.message}
+    }
+    const regForm=$('#pubEventRegForm');
+    if(regForm){
+      regForm.onsubmit=async e=>{
+        e.preventDefault();
+        const fd=Object.fromEntries(new FormData(e.target));
+        const answers={confirmation_note:fd.confirmation_note||'',proof_asset_url:fd.proof_asset_url||''};
+        for(const cf of customFields)answers[cf.code]=fd['cf_'+cf.code]||'';
+        try{
+          const r=await api('/api/public/sk-events/'+encodeURIComponent(eventId)+'/register',{method:'POST',body:JSON.stringify({full_name:fd.full_name,email:fd.email,phone:fd.phone,org_name:fd.org_name,answers})});
+          $('#pubEvRegResult').innerHTML=`<div class="request-note"><b>Đăng ký tham gia thành công!</b><br>Mã đăng ký: <b>${esc(r.registration_code)}</b> · Trạng thái: <b>${esc(r.status)}</b></div>`;
+        }catch(err){$('#pubEvRegResult').innerHTML=`<div class="service-warning">${esc(err.data?.message||err.message)}</div>`;}
       };
-      $('#trialRegForm').onsubmit=async e=>{
+    }
+    const chkForm=$('#pubEvCheckinForm');
+    if(chkForm){
+      chkForm.onsubmit=async e=>{
         e.preventDefault();
         const fd=Object.fromEntries(new FormData(e.target));
         try{
-          const r=await api('/api/public/trial-register',{method:'POST',body:JSON.stringify(fd)});
-          $('#trialRegResult').innerHTML=`<div class="request-note"><b>Đã kích hoạt thành công ${esc(r.duration_label)}!</b><br>Tên đăng nhập: <b>${esc(r.username)}</b> · Mã hồ sơ: <b>${esc(r.member_code)}</b><br>Thời điểm bắt đầu tính hạn: <b>${esc(r.activated_at)}</b> → Thời điểm hết hạn: <b>${esc(r.expires_at)}</b></div>`;
-        }catch(err){$('#trialRegResult').innerHTML=`<div class="service-warning">${esc(err.data?.message||err.message)}</div>`}
+          const r=await api('/api/sk-attendance/checkin',{method:'POST',body:JSON.stringify(fd)});
+          $('#pubEvCheckinResult').innerHTML=`<div class="request-note"><b class="status-ok">✓ Điểm danh thành công!</b><br>Thời gian ghi nhận: <b>${esc(r.checked_in_at||'Vừa xong')}</b> · Trạng thái: <b>${esc(r.attendance_status)}</b></div>`;
+        }catch(err){$('#pubEvCheckinResult').innerHTML=`<div class="service-warning">${esc(err.data?.message||err.message)}</div>`;}
       };
-    }else if(mode==='dynamic_forms'){
-      const [formsRes,polsRes]=await Promise.all([api('/api/public/forms').catch(()=>({items:[]})),api('/api/public/policies').catch(()=>({items:[]}))]);
-      const forms=formsRes.items||[];
-      const policies=polsRes.items||[];
-      if(!forms.length){dynHost.innerHTML='<div class="empty">Hiện chưa có biểu mẫu trực tuyến nào đang mở.</div>';return;}
-      const f=forms[0];
-      const fDetail=await api('/api/public/forms/'+encodeURIComponent(f.slug||f.id)).catch(()=>({form:{...f,fields:[]},policies}));
-      const fields=fDetail.form?.fields||[];
-      let uploadedAttachments=[];
-      dynHost.innerHTML=`
-        <div class="request-note">
-          <b>${esc(fDetail.form.title)}</b> (Mã: <code>${esc(fDetail.form.code)}</code> · Phiên bản: <b>v${fDetail.form.current_version}</b>)<br>
-          ${esc(fDetail.form.description||'')}<br>
-          <span class="meta">Liên hệ hỗ trợ: ${esc(fDetail.form.support_contact||'support@skyfirst.io.vn')}</span>
-        </div>
-        <form id="dynamicPublicForm" class="form-grid" style="margin-top:14px">
-          ${fields.map(fld=>{
-            const reqAttr=fld.required?'required':'';
-            if(fld.type==='textarea')return `<label style="grid-column:1/-1">${esc(fld.label)} ${fld.required?'*':''}<textarea name="ans_${esc(fld.code)}" rows="3" ${reqAttr}></textarea></label>`;
-            if(fld.type==='select')return `<label>${esc(fld.label)} ${fld.required?'*':''}<select name="ans_${esc(fld.code)}" ${reqAttr}>${(fld.options||[]).map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select></label>`;
-            return `<label>${esc(fld.label)} ${fld.required?'*':''}<input type="${fld.type==='email'?'email':fld.type==='number'?'number':fld.type==='date'?'date':'text'}" name="ans_${esc(fld.code)}" ${reqAttr}></label>`;
-          }).join('')}
-          <div class="card" style="grid-column:1/-1;padding:12px">
-            <b>Tệp đính kèm &amp; Tài liệu minh chứng (PDF, DOCX, XLSX, PNG, JPG · Tối đa 5MB):</b>
-            <div class="toolbar" style="margin-top:8px">
-              <input type="file" id="dynFileInput" accept=".pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp">
-              <button type="button" class="secondary" id="dynUploadFileBtn">Tải tệp lên kho an toàn</button>
-            </div>
-            <div id="dynUploadedList" class="meta" style="margin-top:6px">Chưa có tệp đính kèm.</div>
-          </div>
-          <div class="card" style="grid-column:1/-1;padding:12px">
-            <b>Chữ ký xác nhận trên vùng ký cảm ứng / chuột (Gắn với phiên bản nội dung hồ sơ):</b>
-            <p class="meta" style="margin:4px 0 8px">Lưu ý pháp lý: Đây là chữ ký vẽ tay/ảnh xác nhận điện tử gắn với hồ sơ và mã băm nội dung tại thời điểm nộp; không đồng nhất với chữ ký số có chứng thư số công cộng.</p>
-            <canvas id="sigCanvas" width="460" height="130" style="border:1px dashed #3b82f6;border-radius:8px;background:#fff;touch-action:none;cursor:crosshair"></canvas>
-            <div class="toolbar" style="margin-top:8px">
-              <button type="button" class="secondary" id="clearSigBtn">Xóa &amp; Ký lại</button>
-              <label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="sigConfirmCheck" value="1" required style="width:auto"> Tôi xác nhận chữ ký trên và toàn bộ thông tin khai báo là chính xác *</label>
-            </div>
-          </div>
-          <div class="card" style="grid-column:1/-1;padding:12px">
-            <b>Đồng ý Chính sách Dữ liệu &amp; Điều khoản (Tách bạch mục đích bắt buộc và tùy chọn — Không tích sẵn):</b>
-            ${(fDetail.policies||policies).map(p=>`
-              <label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px">
-                <input type="checkbox" data-policy-consent="${esc(p.policy_code)}" value="1" ${p.is_mandatory?'required':''} style="width:auto;margin-top:3px">
-                <span><b>[${p.is_mandatory?'Bắt buộc':'Tùy chọn'}] ${esc(p.title)}</b> (Phiên bản: <code>${esc(p.version_label)}</code> · Hiệu lực: ${esc(p.effective_from)})<br><span class="meta">${esc(p.content_summary)}</span></span>
-              </label>
-            `).join('')}
-          </div>
-          <button class="primary" style="grid-column:1/-1">Nộp hồ sơ đăng ký</button>
-          <div id="dynSubmitResult" style="grid-column:1/-1"></div>
-        </form>
-        <div class="card" style="margin-top:14px;padding:12px">
-          <b>Tra cứu Hồ sơ Biểu mẫu / Gửi bổ sung hồ sơ hoặc Rút lại sự đồng ý tùy chọn:</b>
-          <div class="toolbar" style="margin-top:8px">
-            <input id="lookupSubCode" placeholder="Mã hồ sơ (SFN-HS-...)">
-            <input id="lookupSubEmail" placeholder="Email người nộp">
-            <button type="button" class="secondary" id="lookupSubBtn">Tra cứu hồ sơ</button>
-          </div>
-          <div id="lookupSubBox" style="margin-top:8px"></div>
-        </div>
-      `;
-      // Initialize signature pad canvas
-      const cvs=$('#sigCanvas'),ctx=cvs.getContext('2d');
-      let drawing=false,hasDrawn=false,strokes=[];
-      ctx.strokeStyle='#0f172a';ctx.lineWidth=2;ctx.lineCap='round';
-      const pos=e=>{const r=cvs.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return {x:Math.round(t.clientX-r.left),y:Math.round(t.clientY-r.top)}};
-      cvs.onpointerdown=e=>{drawing=true;hasDrawn=true;const p=pos(e);strokes.push([`M${p.x} ${p.y}`]);ctx.beginPath();ctx.moveTo(p.x,p.y)};
-      cvs.onpointermove=e=>{if(!drawing)return;const p=pos(e);strokes[strokes.length-1].push(`L${p.x} ${p.y}`);ctx.lineTo(p.x,p.y);ctx.stroke()};
-      window.addEventListener('pointerup',()=>{drawing=false});
-      $('#clearSigBtn').onclick=()=>{ctx.clearRect(0,0,cvs.width,cvs.height);hasDrawn=false;strokes=[]};
-
-      $('#dynUploadFileBtn').onclick=async()=>{
-        const fi=$('#dynFileInput')?.files?.[0];
-        if(!fi)return alert('Hãy chọn tệp cần tải lên.');
-        try{
-          const buf=await fi.arrayBuffer();
-          const res=await fetch('/api/public/forms/'+encodeURIComponent(fDetail.form.id)+'/upload',{method:'POST',headers:{'content-type':fi.type||'application/pdf','x-file-name':fi.name},body:buf});
-          const d=await res.json();
-          if(!res.ok)throw new Error(d.message||d.error);
-          uploadedAttachments.push(d);
-          $('#dynUploadedList').innerHTML=uploadedAttachments.map((a,i)=>`<div>✓ <b>${esc(a.file_name)}</b> (${a.byte_size} bytes · ${esc(a.check_status)}) <button type="button" class="ghost" data-rm-att="${i}">Xóa</button></div>`).join('');
-          $$('[data-rm-att]').forEach(b=>b.onclick=()=>{uploadedAttachments.splice(Number(b.dataset.rmAtt),1);b.parentElement.remove()});
-        }catch(e){alert(e.message)}
-      };
-
-      const idemKey='idem_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-      $('#dynamicPublicForm').onsubmit=async e=>{
-        e.preventDefault();
-        const fd=new FormData(e.target);
-        const answers={};
-        for(const fld of fields)answers[fld.code]=String(fd.get('ans_'+fld.code)||'').trim();
-        const consents={};
-        $$('[data-policy-consent]').forEach(cb=>{consents[cb.dataset.policyConsent]=cb.checked?'1':'0'});
-        const sigDataUrl=hasDrawn?`data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="460" height="130"><path d="'+strokes.map(st=>st.join(' ')).join(' ')+'" fill="none" stroke="#0f172a" stroke-width="2"/></svg>')}`:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-        try{
-          const r=await api('/api/public/forms/'+encodeURIComponent(fDetail.form.id)+'/submit',{
-            method:'POST',
-            body:JSON.stringify({
-              idempotency_key:idemKey,
-              applicant_name:answers.full_name||'Người đăng ký',
-              applicant_email:answers.email||'',
-              applicant_phone:answers.phone||'',
-              answers,
-              consents,
-              attachments:uploadedAttachments,
-              signature:{signature_type:'drawn_canvas',signature_data_url:sigDataUrl,confirmed:$('#sigConfirmCheck').checked?'1':'0'}
-            })
-          });
-          $('#dynSubmitResult').innerHTML=`<div class="request-note"><b>Đã nộp hồ sơ thành công!</b><br>Mã hồ sơ: <b>${esc(r.submission_code)}</b> · Phiên bản biểu mẫu: <b>v${r.form_version}</b><br>Mã băm nội dung ký: <code>${esc(r.content_version_hash||'—')}</code></div>`;
-        }catch(err){$('#dynSubmitResult').innerHTML=`<div class="service-warning">${esc(err.data?.message||err.message)}</div>`}
-      };
-
-      $('#lookupSubBtn').onclick=async()=>{
-        const code=$('#lookupSubCode').value.trim(),email=$('#lookupSubEmail').value.trim();
-        try{
-          const r=await api('/api/public/submissions/lookup',{method:'POST',body:JSON.stringify({submission_code:code,email})});
-          const s=r.submission;
-          $('#lookupSubBox').innerHTML=`<div class="request-note"><b>${esc(s.submission_code)}</b> · Trạng thái: <b>${esc(s.status)}</b> · Phiên bản biểu mẫu: v${s.form_version}<br>Ghi chú xử lý: ${esc(s.decision_reason||s.supplement_request_note||'Đang xử lý')}</div>`;
-        }catch(err){$('#lookupSubBox').textContent=err.data?.message||err.message}
-      };
-    }else if(mode==='public_events'){
-      const evRes=await api('/api/public/sk-events').catch(()=>({items:[]}));
-      const evs=evRes.items||[];
-      dynHost.innerHTML=`
-        <div class="request-note"><b>Cổng Sự kiện &amp; Hoạt động Chính thức Sky First Network:</b> Chỉ hiển thị các sự kiện đã hoàn tất thẩm định, phê duyệt và được người có thẩm quyền công bố chính thức.</div>
-        <div class="list" style="margin-top:12px">
-          ${evs.map(ev=>`<div class="card" style="margin-bottom:10px">
-            <div class="section-title"><div><b>${esc(ev.name)}</b> <span class="badge ok">${esc(ev.event_code)}</span></div><span class="badge">${esc(ev.status)}</span></div>
-            <p class="muted">${esc(ev.purpose)}</p>
-            <div class="meta">Thời gian: <b>${esc(ev.starts_at)} → ${esc(ev.ends_at)}</b> · Địa điểm: <b>${esc(ev.location_or_platform)}</b></div>
-            ${ev.status==='registration_open'&&ev.registration_state==='open'?`<div class="toolbar" style="margin-top:10px">
-              <input placeholder="Họ và tên" id="evRegName_${esc(ev.id)}">
-              <input placeholder="Email" id="evRegEmail_${esc(ev.id)}">
-              <button type="button" class="primary" data-pub-ev-reg="${esc(ev.id)}">Đăng ký tham gia</button>
-            </div>`:'<div class="meta" style="margin-top:6px">Cổng đăng ký hiện đang đóng hoặc chưa mở.</div>'}
-          </div>`).join('')||'<div class="empty">Hiện chưa có sự kiện công khai nào đang mở.</div>'}
-        </div>
-      `;
-      $$('[data-pub-ev-reg]').forEach(b=>b.onclick=async()=>{
-        const eid=b.dataset.pubEvReg;
-        const full_name=$('#evRegName_'+eid)?.value.trim(),email=$('#evRegEmail_'+eid)?.value.trim();
-        try{
-          const r=await api('/api/public/sk-events/'+encodeURIComponent(eid)+'/register',{method:'POST',body:JSON.stringify({full_name,email})});
-          toast(`Đăng ký thành công! Mã đăng ký: ${r.registration_code} (${r.status})`);
-        }catch(e){alert(e.data?.message||e.message)}
-      });
     }
-  });
+    const lkBtn=$('#pubEvLookupBtn');
+    if(lkBtn){
+      lkBtn.onclick=async()=>{
+        const em=$('#pubEvLookupEmail')?.value.trim();
+        const out=$('#pubEvLookupResult');
+        if(!em){out.textContent='Vui lòng nhập email để tra cứu.';return;}
+        try{
+          const r=await api('/api/public/sk-events/'+encodeURIComponent(eventId)+'/status-lookup',{method:'POST',body:JSON.stringify({email:em})});
+          out.innerHTML=`<div class="request-note">Mã đăng ký: <b>${esc(r.registration_code)}</b> · Trạng thái đăng ký: <b>${esc(r.registration_status)}</b> · Điểm danh: <b>${r.attended?`Đã điểm danh (${esc(r.checked_in_at||'')})`:'Chưa ghi nhận điểm danh'}</b></div>`;
+        }catch(err){out.innerHTML=`<span class="status-bad">${esc(err.data?.message||err.message)}</span>`;}
+      };
+    }
+  }catch(e){
+    host.innerHTML=`<div class="service-warning">Không tải được chi tiết hoạt động: ${esc(e.message)}</div>`;
+  }
 }
 
 /* =========================================================
@@ -10312,7 +10377,7 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
 }
 
 /* =========================================================
-   GFI II — HỆ THỐNG NHẮN TIN NỘI BỘ (KHÔNG CÓ GỌI THOẠI / VIDEO)
+   PHÂN HỆ II — HỆ THỐNG NHẮN TIN NỘI BỘ (KHÔNG CÓ GỌI THOẠI / VIDEO)
    ========================================================= */
 async function renderInternalChat(c){
   c.innerHTML=`
@@ -10418,7 +10483,7 @@ async function renderInternalChat(c){
 }
 
 /* =========================================================
-   GFI III — MẠNG XÃ HỘI & CỘNG ĐỒNG NỘI BỘ
+   PHÂN HỆ III — MẠNG XÃ HỘI & CỘNG ĐỒNG NỘI BỘ
    ========================================================= */
 async function renderInternalCommunity(c){
   c.innerHTML=`

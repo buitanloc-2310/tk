@@ -316,7 +316,7 @@ else:
     ok('no voice/video calls or WebRTC in messaging module')
 
 
-# GFI Deep Remediation contract checks (Schema Column Reconcile, R2 Safe Probe, Controlled Email Diagnostic, 3-Layer Legal Gate, 8-Rule Data Consistency)
+# Sky First Deep Remediation contract checks (Schema Column Reconcile, R2 Safe Probe, Controlled Email Diagnostic, 3-Layer Legal Gate, 8-Rule Data Consistency)
 for marker, name in [
     ('reconcileGovernanceColumns', 'idempotent schema column reconciliation'),
     ('inspectDatabaseStructure', 'shared real structural database inspection'),
@@ -330,7 +330,48 @@ for marker, name in [
     if marker in front + back:
         ok(name)
     else:
-        fail(name, 'GFI remediation marker missing')
+        fail(name, 'Sky First remediation marker missing')
+
+
+# Section I.1 & III & Registration Remediation Checks:
+# 1. Zero GFI tokens in active code/HTML/migrations
+gfi_hits = []
+for rel_p in ['src/index.js','public/app.js','public/index.html','public/terms.html','public/privacy.html','public/contact.html','public/support.html','public/verify.html','public/setup.html','migrations/0017_skyfirst_operations_center_p1_p7.sql','migrations/0018_gfi_schema_column_reconciliation.sql']:
+    txt = (ROOT/rel_p).read_text(encoding='utf-8')
+    if re.search(r'\bGFI\b', txt, re.I):
+        gfi_hits.append(rel_p)
+if gfi_hits: fail('zero GFI traces in active files', ', '.join(gfi_hits))
+else: ok('zero GFI traces in active website, API, and migrations')
+
+# 2. Zero digital signature (chữ ký số) or version/effective-date display in public/terms.html
+terms_txt = (ROOT/'public/terms.html').read_text(encoding='utf-8')
+if re.search(r'chữ ký số|2026\.10-SFN|Hiệu lực:', terms_txt, re.I):
+    fail('clean Terms of Use', 'terms.html still contains digital signature or version/effective-date string')
+else:
+    ok('clean Terms of Use (no version/effective date or digital signature text)')
+
+# 3. Registration Form Remediation & Login Download Removal
+if 'Hồ sơ Thành viên (12 tháng / 01 năm)' in front:
+    fail('renamed Hồ sơ Đăng ký', 'old label Hồ sơ Thành viên (12 tháng / 01 năm) still present')
+elif 'Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước)' in front and "['Thông tin cá nhân','Học tập & công việc','Hồ sơ Đăng ký','Xác nhận & gửi']" in front:
+    ok('renamed Hồ sơ Thành viên to Hồ sơ Đăng ký with 4 canonical steps')
+else:
+    fail('renamed Hồ sơ Đăng ký', 'expected Hồ sơ Đăng ký label or 4 steps missing')
+
+if 'data-pub-reg-mode="trial"' in front or 'data-pub-reg-mode="dynamic_forms"' in front:
+    fail('removed public trial & dynamic_forms tabs', 'trial or dynamic_forms tab still present on public registration')
+else:
+    ok('removed Trial (24h/48h) and Online Form & Signature public registration tabs')
+
+if 'auth-desktop-downloads' in front:
+    fail('removed .exe/.dmg download box from public login', 'auth-desktop-downloads still present in renderLogin')
+else:
+    ok('removed .exe/.dmg download area from public login page')
+
+if 'Ký trực tiếp trên giao diện' in front and 'Tải tệp xác nhận lên hệ thống' in front and '/api/public/request-confirmation-file' in back:
+    ok('Step 04 supports both direct signature and confirmation file upload')
+else:
+    fail('Step 04 confirmation methods', 'missing direct signature or confirmation file upload in Step 04')
 
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')

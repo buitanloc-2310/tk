@@ -1,7 +1,7 @@
 const { app, BrowserWindow, shell, Menu } = require('electron');
 const path = require('node:path');
 
-// GFI Desktop Application Wrapper — Uses unified Sky First Digital Operations Center backend & RBAC
+// Sky First Desktop Application Wrapper — Uses unified Sky First Digital Operations Center backend & RBAC
 const TARGET_URL = process.env.SFN_APP_URL || 'https://nghiepvu.skyfirst.io.vn';
 const ALLOWED_HOSTS = new Set([
   'nghiepvu.skyfirst.io.vn',

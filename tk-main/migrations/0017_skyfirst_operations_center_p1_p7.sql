@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS data_policies(
 
 INSERT OR IGNORE INTO data_policies(id, policy_code, policy_type, title, version_label, content_summary, content_body, is_mandatory, requires_reconsent, applicable_scope, status, effective_from) VALUES
 ('pol_privacy_2026', 'SFN-PDPD-NOTICE', 'privacy_notice', 'Thông báo Bảo mật và Xử lý Dữ liệu Cá nhân', '2026.10-SFN-PDPD', 'Quy định mục đích thu thập, phạm vi sử dụng, thời hạn lưu trữ và quyền của chủ thể dữ liệu theo Luật 91/2025/QH15 & Nghị định 356/2025/NĐ-CP.', 'Trung tâm Nghiệp vụ Số Sky First thu thập và xử lý dữ liệu cá nhân tối thiểu phục vụ xác minh danh tính, xét duyệt hồ sơ, quản lý thành viên, tổ chức sự kiện và cấp thẻ/chứng nhận. Không công khai CCCD, địa chỉ, số điện thoại hoặc dữ liệu người giám hộ.', 1, 1, 'all_forms', 'active', '2026-01-01'),
-('pol_terms_2026', 'SFN-TERMS-USE', 'terms_of_use', 'Điều khoản Sử dụng Hệ thống Trung tâm Nghiệp vụ Số Sky First', '2026.10-SFN-TERMS', 'Quy định trách nhiệm bảo mật tài khoản, sử dụng đúng thẩm quyền và phân biệt xác nhận điện tử với chữ ký số.', 'Người dùng cam kết khai báo thông tin trung thực, bảo vệ thông tin đăng nhập, đổi mật khẩu tạm ngay lần đầu và tuân thủ quy chế hoạt động của Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First.', 1, 1, 'all_forms', 'active', '2026-01-01'),
+('pol_terms_2026', 'SFN-TERMS-USE', 'terms_of_use', 'Điều khoản Sử dụng Hệ thống Trung tâm Nghiệp vụ Số Sky First', '2026.10-SFN-TERMS', 'Quy định trách nhiệm bảo mật tài khoản, không chia sẻ thông tin xác thực và sử dụng hệ thống đúng thẩm quyền.', 'Người dùng cam kết khai báo thông tin trung thực, bảo vệ thông tin đăng nhập, đổi mật khẩu tạm ngay lần đầu và tuân thủ quy chế hoạt động của Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First.', 1, 1, 'all_forms', 'active', '2026-01-01'),
 ('pol_opt_comm_2026', 'SFN-OPT-NEWS', 'optional_consent', 'Đồng ý nhận bản tin hoạt động & cơ hội tình nguyện mở rộng (Tùy chọn)', '2026.10-SFN-OPT', 'Nhận thông báo về các chương trình cộng đồng, học bổng và sự kiện mở rộng ngoài phạm vi quản lý hồ sơ bắt buộc.', 'Lựa chọn này hoàn toàn tự nguyện và tách biệt với sự đồng ý bắt buộc để thực hiện dịch vụ hồ sơ. Người dùng có thể rút lại sự đồng ý bất kỳ lúc nào.', 0, 0, 'all_forms', 'active', '2026-01-01');
 
 CREATE TABLE IF NOT EXISTS consent_withdrawal_requests(
@@ -334,7 +334,7 @@ CREATE TABLE IF NOT EXISTS signature_records(
   signer_email TEXT NOT NULL,
   signature_type TEXT NOT NULL DEFAULT 'drawn_canvas',
   legal_classification TEXT NOT NULL DEFAULT 'electronic_confirmation_non_ca',
-  legal_disclaimer TEXT NOT NULL DEFAULT 'Chữ ký vẽ tay/ảnh chữ ký gắn với hồ sơ và băm nội dung tại thời điểm nộp; không phải chữ ký số có chứng thư số công cộng.',
+  legal_disclaimer TEXT NOT NULL DEFAULT 'Xác nhận trực tiếp hoặc tệp xác nhận gắn với hồ sơ và mã băm nội dung tại thời điểm gửi.',
   content_version_hash TEXT NOT NULL,
   signed_payload_snapshot TEXT NOT NULL,
   signature_data_url TEXT NOT NULL,

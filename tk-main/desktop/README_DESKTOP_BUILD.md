@@ -1,4 +1,4 @@
-# Ứng dụng Máy tính GFI — Trung tâm Nghiệp vụ Số Sky First (Windows `.exe` & macOS `.dmg`)
+# Ứng dụng Máy tính — Trung tâm Nghiệp vụ Số Sky First (Windows `.exe` & macOS `.dmg`)
 
 ## 1. Kiến trúc & Nguyên tắc Đồng bộ Dữ liệu
 - Ứng dụng máy tính (`desktop/main.cjs`, `desktop/preload.cjs`, `desktop/electron-builder.json`) kết nối trực tiếp tới hệ thống tài khoản, phiên đăng nhập và dữ liệu được phân quyền của **Trung tâm Nghiệp vụ Số Sky First** (`https://nghiepvu.skyfirst.io.vn`).

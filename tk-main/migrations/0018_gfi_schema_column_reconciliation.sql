@@ -1,6 +1,6 @@
 -- ============================================================================
--- MIGRATION 0018: GFI SCHEMA & COLUMN RECONCILIATION (IDEMPOTENT DATA-SAFE)
--- Hệ thống: Trung tâm Nghiệp vụ Số Sky First (GFI)
+-- MIGRATION 0018: SKY FIRST SCHEMA & COLUMN RECONCILIATION (IDEMPOTENT DATA-SAFE)
+-- Hệ thống: Trung tâm Nghiệp vụ Số Sky First
 -- Mục đích:
 --   1. Khắc phục triệt để tình trạng cơ sở dữ liệu ghi nhận schema_version = 17
 --      nhưng bảng support_ticket_assignments được tạo từ bản nháp cũ chưa có cột
@@ -86,6 +86,37 @@ ALTER TABLE support_ticket_assignments_v18 RENAME TO support_ticket_assignments;
 
 CREATE INDEX IF NOT EXISTS idx_support_ticket_assignments_org ON support_ticket_assignments(org_node_id, priority);
 CREATE INDEX IF NOT EXISTS idx_support_ticket_assignments_impact ON support_ticket_assignments(impact_level, priority);
+
+
+CREATE TABLE IF NOT EXISTS account_request_extended_v18(
+  request_id TEXT PRIMARY KEY REFERENCES account_requests(id) ON DELETE CASCADE,
+  school_name TEXT NOT NULL,
+  class_or_major TEXT NOT NULL,
+  employment_status TEXT NOT NULL,
+  workplace_name TEXT NOT NULL,
+  work_department TEXT NOT NULL,
+  job_title TEXT NOT NULL,
+  guardian_date_of_birth TEXT,
+  guardian_id_number TEXT,
+  confirmation_method TEXT NOT NULL DEFAULT 'drawn_signature',
+  signature_data_url TEXT,
+  confirmation_file_url TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT OR IGNORE INTO account_request_extended_v18(
+  request_id, school_name, class_or_major, employment_status,
+  workplace_name, work_department, job_title,
+  guardian_date_of_birth, guardian_id_number, created_at
+)
+SELECT
+  request_id, school_name, class_or_major, employment_status,
+  workplace_name, work_department, job_title,
+  guardian_date_of_birth, guardian_id_number, COALESCE(created_at, CURRENT_TIMESTAMP)
+FROM account_request_extended;
+
+DROP TABLE account_request_extended;
+ALTER TABLE account_request_extended_v18 RENAME TO account_request_extended;
 
 PRAGMA foreign_keys = ON;
 

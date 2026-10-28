@@ -917,7 +917,7 @@ function buildTestZip(entries){
 
 
 // =========================================================
-// 13. GFI DEEP REMEDIATION & END-TO-END SYSTEM VERIFICATION
+// 13. SKY FIRST DEEP REMEDIATION & END-TO-END SYSTEM VERIFICATION
 // =========================================================
 {
   // 13.1 Simulate legacy v17 support_ticket_assignments table missing impact_level & companion columns
@@ -1106,6 +1106,105 @@ function buildTestZip(entries){
   const recomputedHash=createHash('sha256').update(JSON.stringify(expBundle.bundle)).digest('hex');
   assert.equal(expBundle.sha256_checksum,recomputedHash);
   checks+=2;
+}
+
+
+// =========================================================
+// 14. REGISTRATION 4-STEP CONFIRMATION FILE, PUBLIC EVENT DETAIL, PRIVATE PROOF UPLOAD & QR -> MEMBER HISTORY SYNC
+// =========================================================
+{
+  // 14.1 Test Step 04 Confirmation File Upload (POST /api/public/request-confirmation-file)
+  const badConfReq=new Request('https://nghiepvu.skyfirst.io.vn/api/public/request-confirmation-file',{method:'POST',headers:{origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/pdf'},body:new TextEncoder().encode('NOT_A_PDF')});
+  const badConfRes=await api(badConfReq,{DB,FILES},new URL(badConfReq.url));
+  assert.equal(badConfRes.status,400);
+  checks++;
+
+  const validPdfBytes=new TextEncoder().encode('%PDF-1.4\n1 0 obj <<>> endobj\ntrailer <<>>\n%%EOF');
+  const okConfReq=new Request('https://nghiepvu.skyfirst.io.vn/api/public/request-confirmation-file',{method:'POST',headers:{origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/pdf'},body:validPdfBytes});
+  const okConfRes=await api(okConfReq,{DB,FILES},new URL(okConfReq.url));
+  const okConfBody=await okConfRes.json();
+  assert.equal(okConfRes.status,201);
+  assert.match(okConfBody.url,/^\/files\/requests\/confirmations\/.+\.pdf$/);
+  // Anonymous GET on private confirmation file must be blocked (401)
+  const anonConfGet=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn'+okConfBody.url),{DB,FILES});
+  assert.equal(anonConfGet.status,401);
+  checks+=3;
+
+  // 14.2 End-to-End Public Activity Detail -> Private Proof Upload -> Registration -> QR Check-in -> Member History Sync
+  await dbRun("UPDATE people SET email='member.sync@skyfirst.io.vn' WHERE id='p'");
+  const evCreate=await call('/api/admin/sk-events','POST',{
+    name:'Ngày hội Tình nguyện Số Sky First 2026',
+    purpose:'Chương trình tập huấn và hoạt động cộng đồng toàn mạng lưới',
+    starts_at:'2026-11-15 08:00:00',
+    ends_at:'2026-11-15 17:00:00',
+    location_or_platform:'Hội trường Trung tâm TP.HCM',
+    host_org_id:'org_sfn',
+    require_registration_approval:false
+  });
+  assert.equal(evCreate.httpStatus,201);
+  const syncEvId=evCreate.id;
+
+  // Draft event must NOT be accessible on public detail endpoint (404)
+  const draftDetail=await call(`/api/public/sk-events/${encodeURIComponent(syncEvId)}`,'GET');
+  assert.equal(draftDetail.httpStatus,404);
+  checks+=2;
+
+  // Submit -> Appraise -> Approve (by a_rev) -> Publish -> Open Registration
+  await call(`/api/admin/sk-events/${encodeURIComponent(syncEvId)}/transition`,'POST',{action:'submit'});
+  const callRev=async(p,m='GET',b)=>{const rq=new Request('https://nghiepvu.skyfirst.io.vn'+p,{method:m,headers:{cookie:'sfn_session=rev_session_token','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const rs=await api(rq,{DB,FILES},new URL(rq.url));return {httpStatus:rs.status,...(await rs.json())}};
+  await callRev(`/api/admin/sk-events/${encodeURIComponent(syncEvId)}/transition`,'POST',{action:'appraise'});
+  await callRev(`/api/admin/sk-events/${encodeURIComponent(syncEvId)}/transition`,'POST',{action:'approve'});
+  await callRev(`/api/admin/sk-events/${encodeURIComponent(syncEvId)}/transition`,'POST',{action:'publish'});
+  await callRev(`/api/admin/sk-events/${encodeURIComponent(syncEvId)}/transition`,'POST',{action:'open_registration'});
+
+  // Public detail endpoint now returns 200
+  const pubDetail=await call(`/api/public/sk-events/${encodeURIComponent(syncEvId)}`,'GET');
+  assert.equal(pubDetail.httpStatus,200);
+  assert.equal(pubDetail.event.name,'Ngày hội Tình nguyện Số Sky First 2026');
+  checks+=2;
+
+  // Upload private proof asset for the event
+  const proofReq=new Request(`https://nghiepvu.skyfirst.io.vn/api/public/sk-events/${encodeURIComponent(syncEvId)}/upload-asset`,{method:'POST',headers:{origin:'https://nghiepvu.skyfirst.io.vn','content-type':'application/pdf'},body:validPdfBytes});
+  const proofRes=await api(proofReq,{DB,FILES},new URL(proofReq.url));
+  const proofBody=await proofRes.json();
+  assert.equal(proofRes.status,201);
+  assert.match(proofBody.url,/^\/files\/events\/private\//);
+  // Anonymous GET on private event proof asset is blocked (401)
+  const anonProofGet=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn'+proofBody.url),{DB,FILES});
+  assert.equal(anonProofGet.status,401);
+  checks+=3;
+
+  // Member registers on the public event detail page
+  const evReg=await call(`/api/public/sk-events/${encodeURIComponent(syncEvId)}/register`,'POST',{
+    full_name:'Test Member',
+    email:'member.sync@skyfirst.io.vn',
+    phone:'0909123456',
+    answers:{proof_asset_url:proofBody.url,confirmation_note:'Cam kết tham gia'}
+  });
+  assert.equal(evReg.httpStatus,201);
+  assert.equal(evReg.status,'approved');
+  checks+=2;
+
+  // Issue QR session and check in
+  const qrSes2=await call(`/api/admin/sk-events/${encodeURIComponent(syncEvId)}/qr-sessions`,'POST',{session_name:'Buổi sáng'});
+  assert.equal(qrSes2.httpStatus,201);
+  const chkRes=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes2.qr_token,email:'member.sync@skyfirst.io.vn',full_name:'Test Member'});
+  assert.equal(chkRes.httpStatus,201);
+  assert.equal(chkRes.attendance_status,'checked_in');
+
+  // Verify public status lookup reflects attendance
+  const stLookup=await call(`/api/public/sk-events/${encodeURIComponent(syncEvId)}/status-lookup`,'POST',{email:'member.sync@skyfirst.io.vn'});
+  assert.equal(stLookup.httpStatus,200);
+  assert.equal(stLookup.attended,true);
+
+  // Verify Member Activity History (/api/me/activities & /api/me/cv) was automatically synchronized!
+  const meActs=await call('/api/me/activities','GET');
+  assert.equal(meActs.httpStatus,200);
+  assert(meActs.items.some(a=>a.id===syncEvId&&a.verification_status==='confirmed'&&a.result==='Đã điểm danh tham dự'));
+  const meCv=await call('/api/me/cv','GET');
+  assert.equal(meCv.httpStatus,200);
+  assert(meCv.activities.some(a=>a.id===syncEvId));
+  checks+=6;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

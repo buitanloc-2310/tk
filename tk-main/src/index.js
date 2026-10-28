@@ -161,8 +161,19 @@ async function ensureAccountRequestExtended(env){
     request_id TEXT PRIMARY KEY REFERENCES account_requests(id) ON DELETE CASCADE,
     school_name TEXT NOT NULL,class_or_major TEXT NOT NULL,employment_status TEXT NOT NULL,
     workplace_name TEXT NOT NULL,work_department TEXT NOT NULL,job_title TEXT NOT NULL,
-    guardian_date_of_birth TEXT,guardian_id_number TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    guardian_date_of_birth TEXT,guardian_id_number TEXT,
+    confirmation_method TEXT NOT NULL DEFAULT 'drawn_signature',
+    signature_data_url TEXT,
+    confirmation_file_url TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
+  try{
+    const extInfo=await env.DB.prepare("PRAGMA table_info(account_request_extended)").all();
+    const extCols=new Set((extInfo.results||[]).map(c=>c.name));
+    if(!extCols.has('confirmation_method'))await env.DB.prepare("ALTER TABLE account_request_extended ADD COLUMN confirmation_method TEXT NOT NULL DEFAULT 'drawn_signature'").run();
+    if(!extCols.has('signature_data_url'))await env.DB.prepare("ALTER TABLE account_request_extended ADD COLUMN signature_data_url TEXT").run();
+    if(!extCols.has('confirmation_file_url'))await env.DB.prepare("ALTER TABLE account_request_extended ADD COLUMN confirmation_file_url TEXT").run();
+  }catch{}
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS account_request_orgs(
     request_id TEXT NOT NULL REFERENCES account_requests(id) ON DELETE CASCADE,
     org_node_id TEXT NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
@@ -221,7 +232,7 @@ async function ensureGovernanceTables(env){
     "CREATE TABLE IF NOT EXISTS registration_form_versions(id TEXT PRIMARY KEY,form_id TEXT NOT NULL REFERENCES registration_forms(id) ON DELETE CASCADE,version_no INTEGER NOT NULL,title TEXT NOT NULL,fields_json TEXT NOT NULL,config_snapshot_json TEXT NOT NULL,change_note TEXT,created_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(form_id,version_no))",
     "CREATE TABLE IF NOT EXISTS registration_submissions(id TEXT PRIMARY KEY,submission_code TEXT NOT NULL UNIQUE,form_id TEXT NOT NULL REFERENCES registration_forms(id),form_version INTEGER NOT NULL,form_snapshot_json TEXT NOT NULL,applicant_name TEXT NOT NULL,applicant_email TEXT NOT NULL,applicant_phone TEXT,requested_account_type TEXT,org_node_id TEXT,event_id TEXT,answers_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'submitted',assigned_account_id TEXT,reviewer_account_id TEXT,decision_reason TEXT,supplement_request_note TEXT,internal_notes_json TEXT NOT NULL DEFAULT '[]',history_json TEXT NOT NULL DEFAULT '[]',approved_account_id TEXT,idempotency_key TEXT UNIQUE,submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS registration_submission_files(id TEXT PRIMARY KEY,submission_id TEXT NOT NULL REFERENCES registration_submissions(id) ON DELETE CASCADE,field_code TEXT NOT NULL DEFAULT 'attachment',file_name TEXT NOT NULL,mime_type TEXT NOT NULL,byte_size INTEGER NOT NULL,storage_key TEXT NOT NULL,version_no INTEGER NOT NULL DEFAULT 1,check_status TEXT NOT NULL DEFAULT 'verified_header',review_note TEXT,uploaded_by_email TEXT,uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS signature_records(id TEXT PRIMARY KEY,submission_id TEXT NOT NULL REFERENCES registration_submissions(id) ON DELETE CASCADE,signer_name TEXT NOT NULL,signer_email TEXT NOT NULL,signature_type TEXT NOT NULL DEFAULT 'drawn_canvas',legal_classification TEXT NOT NULL DEFAULT 'electronic_confirmation_non_ca',legal_disclaimer TEXT NOT NULL DEFAULT 'Chữ ký vẽ tay/ảnh chữ ký gắn với hồ sơ và băm nội dung tại thời điểm nộp; không phải chữ ký số có chứng thư số công cộng.',content_version_hash TEXT NOT NULL,signed_payload_snapshot TEXT NOT NULL,signature_data_url TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'valid',resign_reason TEXT,ip_hint TEXT,user_agent TEXT,signed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS signature_records(id TEXT PRIMARY KEY,submission_id TEXT NOT NULL REFERENCES registration_submissions(id) ON DELETE CASCADE,signer_name TEXT NOT NULL,signer_email TEXT NOT NULL,signature_type TEXT NOT NULL DEFAULT 'drawn_canvas',legal_classification TEXT NOT NULL DEFAULT 'electronic_confirmation_non_ca',legal_disclaimer TEXT NOT NULL DEFAULT 'Xác nhận trực tiếp hoặc tệp xác nhận gắn với hồ sơ và mã băm nội dung tại thời điểm gửi.',content_version_hash TEXT NOT NULL,signed_payload_snapshot TEXT NOT NULL,signature_data_url TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'valid',resign_reason TEXT,ip_hint TEXT,user_agent TEXT,signed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS sk_events(id TEXT PRIMARY KEY,event_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,purpose TEXT NOT NULL,expected_outcomes TEXT,event_type TEXT NOT NULL DEFAULT 'community',domain_field TEXT NOT NULL DEFAULT 'Giáo dục & Cộng đồng',scale_label TEXT NOT NULL DEFAULT 'Cấp Mạng lưới',proposing_org_id TEXT NOT NULL,host_org_id TEXT NOT NULL,coordinating_orgs_json TEXT NOT NULL DEFAULT '[]',lead_person_name TEXT NOT NULL,contact_email TEXT NOT NULL,starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,milestones_json TEXT NOT NULL DEFAULT '[]',location_or_platform TEXT NOT NULL,target_participants TEXT,eligibility_criteria TEXT,expected_participants INTEGER NOT NULL DEFAULT 50,implementation_plan TEXT,communication_plan TEXT,risk_plan_json TEXT NOT NULL DEFAULT '[]',registration_form_id TEXT,registration_opens_at TEXT,registration_closes_at TEXT,max_registrations INTEGER NOT NULL DEFAULT 100,require_registration_approval INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'draft',registration_state TEXT NOT NULL DEFAULT 'closed',summary_report_state TEXT NOT NULL DEFAULT 'not_submitted',current_version INTEGER NOT NULL DEFAULT 1,version_history_json TEXT NOT NULL DEFAULT '[]',proposer_account_id TEXT NOT NULL,appraiser_account_id TEXT,appraisal_note TEXT,appraised_at TEXT,approver_account_id TEXT,approval_note TEXT,approved_at TEXT,publisher_account_id TEXT,published_at TEXT,rejected_reason TEXT,postponed_or_cancelled_reason TEXT,incident_report_json TEXT,summary_report_json TEXT,checklist_json TEXT NOT NULL DEFAULT '{\"approved\":false,\"venue_ready\":false,\"staff_ready\":false,\"logistics_ready\":false,\"form_ready\":false,\"comms_approved\":false}',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS sk_event_tasks(id TEXT PRIMARY KEY,event_id TEXT NOT NULL REFERENCES sk_events(id) ON DELETE CASCADE,title TEXT NOT NULL,category TEXT NOT NULL DEFAULT 'general',assignee_account_id TEXT,assignee_name TEXT,collaborators_json TEXT NOT NULL DEFAULT '[]',reviewer_account_id TEXT,priority TEXT NOT NULL DEFAULT 'normal',weight INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'not_started',due_at TEXT,evidence_note TEXT,updated_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS sk_event_staff(id TEXT PRIMARY KEY,event_id TEXT NOT NULL REFERENCES sk_events(id) ON DELETE CASCADE,account_id TEXT,person_name TEXT NOT NULL,role_in_event TEXT NOT NULL,team_or_shift TEXT,task_description TEXT,supervisor_name TEXT,is_backup INTEGER NOT NULL DEFAULT 0,assignment_status TEXT NOT NULL DEFAULT 'assigned',handover_note TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
@@ -378,8 +389,43 @@ async function reconcileGovernanceColumns(env){
     await env.DB.prepare("UPDATE support_ticket_assignments SET impact_level='medium' WHERE impact_level IS NULL OR TRIM(impact_level)=''").run();
     await env.DB.prepare("UPDATE support_ticket_assignments SET priority='normal' WHERE priority IS NULL OR TRIM(priority)=''").run();
   }catch{}
+  try{
+    await env.DB.prepare("UPDATE data_policies SET content_summary='Quy định trách nhiệm bảo mật tài khoản, không chia sẻ thông tin xác thực và sử dụng hệ thống đúng thẩm quyền.' WHERE policy_code='SFN-TERMS-USE' AND content_summary LIKE '%chữ ký số%'").run();
+  }catch{}
   if(added.length)env.__lastReconciledColumns=added;
   return added;
+}
+
+async function syncSkEventToMemberActivityHistory(env,eventId,participantEmail,participantName,attStatus,operatorAccountId){
+  try{
+    const ev=await env.DB.prepare("SELECT * FROM sk_events WHERE id=? LIMIT 1").bind(eventId).first();
+    if(!ev)return;
+    const actStatus=['completed','pending_summary','closed'].includes(ev.status)?'completed':'active';
+    await env.DB.prepare(`
+      INSERT INTO activities(id,code,name,org_node_id,starts_at,ends_at,status,description)
+      VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name,starts_at=excluded.starts_at,ends_at=excluded.ends_at,
+        status=excluded.status,description=excluded.description
+    `).bind(
+      ev.id,ev.event_code,ev.name,ev.host_org_id||'org_sfn',
+      ev.starts_at,ev.ends_at,actStatus,ev.purpose
+    ).run();
+    if(!participantEmail)return;
+    const person=await env.DB.prepare("SELECT id,full_name FROM people WHERE lower(email)=lower(?) LIMIT 1").bind(participantEmail).first();
+    if(!person)return;
+    const isAttended=['checked_in','manual_present','late'].includes(attStatus);
+    const resText=isAttended?'Đã điểm danh tham dự':(attStatus==='absent'?'Vắng mặt':'Đã đăng ký tham gia');
+    const verStatus=isAttended?'confirmed':'pending';
+    await env.DB.prepare(`
+      INSERT INTO activity_participants(activity_id,person_id,role_label,result,verification_status)
+      VALUES(?,?,'Thành viên tham gia',?,?)
+      ON CONFLICT(activity_id,person_id) DO UPDATE SET
+        result=excluded.result,verification_status=excluded.verification_status
+    `).bind(ev.id,person.id,resText,verStatus).run();
+  }catch(err){
+    console.error('SYNC_SK_EVENT_TO_HISTORY_ERROR',String(err?.message||err));
+  }
 }
 
 function normalizeAccountTypeCode(raw){
@@ -1381,6 +1427,25 @@ async function api(req,env,url){
   // PUBLIC ACCOUNT REQUEST
   // =========================================================
 
+  if(url.pathname==='/api/public/request-confirmation-file'&&req.method==='POST'){
+    const uploadRateKey=`request-confirm-file:${await sha256(clientHint(req))}`;
+    const uploadRate=await safeRateState(env,uploadRateKey,10,15);
+    if(uploadRate.blocked)return json({error:'UPLOAD_RATE_LIMITED',message:'Bạn đã tải tệp xác nhận quá nhiều lần. Vui lòng thử lại sau 15 phút.'},429,{'retry-after':'900'});
+    await safeRateFail(env,uploadRateKey,10,15);
+    const type=String(req.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const extMap={'application/pdf':'pdf','image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+    const ext=extMap[type];
+    if(!ext)return json({error:'UNSUPPORTED_CONFIRMATION_FILE_TYPE',message:'Chỉ hỗ trợ tệp xác nhận định dạng PDF, PNG, JPG hoặc WEBP.'},400);
+    const bytes=new Uint8Array(await req.arrayBuffer());
+    if(!bytes.byteLength||bytes.byteLength>5*1024*1024)return json({error:'CONFIRMATION_FILE_SIZE_INVALID',message:'Dung lượng tệp xác nhận phải lớn hơn 0 và không vượt quá 5MB.'},400);
+    if(!validUploadedAttachment(bytes,type))return json({error:'CONFIRMATION_FILE_CONTENT_MISMATCH',message:'Nội dung nhị phân của tệp xác nhận không khớp định dạng khai báo.'},400);
+    const key=`requests/confirmations/${uid('reqconf')}.${ext}`;
+    if(env.FILES&&typeof env.FILES.put==='function'){
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType:type,cacheControl:'private, no-store, max-age=0'}});
+    }
+    return json({ok:true,url:`/files/${key}`,mime_type:type,byte_size:bytes.byteLength},201,{'cache-control':'no-store'});
+  }
+
   if(url.pathname==='/api/public/request-avatar'&&req.method==='POST'){
     const uploadKey=`avatar-upload:${await sha256(clientHint(req))}`;const uploadRate=await safeRateState(env,uploadKey,12,60);if(uploadRate.blocked)return json({error:'UPLOAD_RATE_LIMITED'},429,{'retry-after':'3600'});await safeRateFail(env,uploadKey,12,60);
     const ct=(req.headers.get('content-type')||'').toLowerCase().split(';')[0].trim();
@@ -1807,8 +1872,14 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       id,educationType,clean(b.school_or_workplace,240),clean(b.class_or_major,240)||null,educationStatus
     )
   ]);
-  await env.DB.prepare(`INSERT INTO account_request_extended(request_id,school_name,class_or_major,employment_status,workplace_name,work_department,job_title,guardian_date_of_birth,guardian_id_number) VALUES(?,?,?,?,?,?,?,?,?)`).bind(
-    id,clean(b.school_name,240),clean(b.class_or_major,240),clean(b.employment_status,80),clean(b.workplace_name,240),clean(b.work_department,180),clean(b.job_title,180),age<18?clean(b.guardian_date_of_birth,20):null,age<18?clean(b.guardian_id_number,30):null
+  const confMethod=['drawn_signature','uploaded_file'].includes(b.confirmation_method)?b.confirmation_method:'drawn_signature';
+  const sigDataUrl=confMethod==='drawn_signature'?clean(b.signature_data_url,250000)||null:null;
+  const confFileUrl=confMethod==='uploaded_file'?clean(b.confirmation_file_url,1200)||null:null;
+  if(confMethod==='uploaded_file'&&confFileUrl&&(!/^\/files\/requests\/confirmations\/[A-Za-z0-9._/-]+\.(?:pdf|png|jpe?g|webp)$/i.test(confFileUrl)||confFileUrl.includes('..')||confFileUrl.includes('\\'))){
+    return json({error:'INVALID_CONFIRMATION_FILE_URL',message:'Tệp xác nhận phải được tải lên qua biểu mẫu đăng ký hợp lệ.'},400);
+  }
+  await env.DB.prepare(`INSERT INTO account_request_extended(request_id,school_name,class_or_major,employment_status,workplace_name,work_department,job_title,guardian_date_of_birth,guardian_id_number,confirmation_method,signature_data_url,confirmation_file_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+    id,clean(b.school_name,240),clean(b.class_or_major,240),clean(b.employment_status,80),clean(b.workplace_name,240),clean(b.work_department,180),clean(b.job_title,180),age<18?clean(b.guardian_date_of_birth,20):null,age<18?clean(b.guardian_id_number,30):null,confMethod,sigDataUrl,confFileUrl
   ).run();
   await env.DB.batch(requestedOrgIds.map(oid=>env.DB.prepare(`INSERT OR IGNORE INTO account_request_orgs(request_id,org_node_id,is_primary) VALUES(?,?,?)`).bind(id,oid,oid===primaryOrgId?1:0)));
   await env.DB.prepare(`INSERT INTO legal_consent_records(id,subject_type,subject_id,email,terms_version,privacy_version,read_acknowledged,terms_accepted,privacy_consent,accuracy_committed,is_minor,guardian_consent,email_verified,otp_token_id,purpose_scope,ip_hint,user_agent) VALUES(?,'account_request',?,?, '2026.10-SFN-TERMS','2026.10-SFN-PDPD',?,?,?,?,?,?,?,?, 'account_review_and_member_operations',?,?)`).bind(
@@ -2180,12 +2251,80 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(url.pathname==='/api/public/sk-events'&&req.method==='GET'){
     await ensureGovernanceTables(env);
     const r=await env.DB.prepare(`
-      SELECT id,event_code,name,purpose,expected_outcomes,event_type,domain_field,scale_label,proposing_org_id,host_org_id,lead_person_name,contact_email,starts_at,ends_at,location_or_platform,target_participants,eligibility_criteria,expected_participants,registration_opens_at,registration_closes_at,max_registrations,status,registration_state,published_at
-      FROM sk_events
-      WHERE status IN ('published','registration_open','registration_closed','ongoing','completed')
-      ORDER BY starts_at DESC LIMIT 100
+      SELECT e.id,e.event_code,e.name,e.purpose,e.expected_outcomes,e.event_type,e.domain_field,e.scale_label,e.proposing_org_id,e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,e.starts_at,e.ends_at,e.location_or_platform,e.target_participants,e.eligibility_criteria,e.expected_participants,e.registration_opens_at,e.registration_closes_at,e.max_registrations,e.status,e.registration_state,e.published_at
+      FROM sk_events e
+      LEFT JOIN org_nodes o ON o.id=e.host_org_id
+      WHERE e.status IN ('published','registration_open','registration_closed','ongoing','completed')
+      ORDER BY e.starts_at DESC LIMIT 100
     `).all();
     return json({items:r.results||[]});
+  }
+
+  const pubSkDetailMatch=url.pathname.match(/^\/api\/public\/sk-events\/([^/]+)$/);
+  if(pubSkDetailMatch&&req.method==='GET'){
+    await ensureGovernanceTables(env);
+    const eid=decodeURIComponent(pubSkDetailMatch[1]);
+    const ev=await env.DB.prepare(`
+      SELECT e.id,e.event_code,e.name,e.purpose,e.expected_outcomes,e.event_type,e.domain_field,e.scale_label,
+        e.proposing_org_id,e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,
+        e.starts_at,e.ends_at,e.location_or_platform,e.target_participants,e.eligibility_criteria,
+        e.expected_participants,e.implementation_plan,e.registration_form_id,e.registration_opens_at,
+        e.registration_closes_at,e.max_registrations,e.require_registration_approval,e.status,e.registration_state,e.published_at
+      FROM sk_events e
+      LEFT JOIN org_nodes o ON o.id=e.host_org_id
+      WHERE (e.id=? OR e.event_code=?)
+        AND e.status IN ('published','registration_open','registration_closed','ongoing','completed')
+      LIMIT 1
+    `).bind(eid,eid).first();
+    if(!ev)return json({error:'EVENT_NOT_FOUND_OR_NOT_PUBLIC',message:'Hoạt động chưa được công bố hoặc không tồn tại.'},404);
+    const comms=await env.DB.prepare("SELECT id,content_type,title,body,media_url,published_at,created_at FROM sk_event_communications WHERE event_id=? AND status='published' ORDER BY published_at DESC,created_at DESC LIMIT 20").bind(ev.id).all();
+    let customFields=[];
+    if(ev.registration_form_id){
+      const rf=await env.DB.prepare("SELECT fields_json FROM registration_forms WHERE id=? LIMIT 1").bind(ev.registration_form_id).first();
+      try{customFields=JSON.parse(rf?.fields_json||'[]')}catch{}
+    }
+    return json({ok:true,event:{...ev,custom_fields:customFields},communications:comms.results||[]});
+  }
+
+  const pubSkAssetMatch=url.pathname.match(/^\/api\/public\/sk-events\/([^/]+)\/upload-asset$/);
+  if(pubSkAssetMatch&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const eid=decodeURIComponent(pubSkAssetMatch[1]);
+    const ev=await env.DB.prepare("SELECT id,status FROM sk_events WHERE (id=? OR event_code=?) AND status IN ('published','registration_open','ongoing') LIMIT 1").bind(eid,eid).first();
+    if(!ev)return json({error:'EVENT_NOT_AVAILABLE_FOR_UPLOAD'},404);
+    const type=String(req.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const extMap={'application/pdf':'pdf','image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+    const ext=extMap[type];
+    if(!ext)return json({error:'UNSUPPORTED_ASSET_TYPE',message:'Chỉ hỗ trợ ảnh PNG, JPG, WEBP hoặc tệp PDF.'},400);
+    const bytes=new Uint8Array(await req.arrayBuffer());
+    if(!bytes.byteLength||bytes.byteLength>5*1024*1024)return json({error:'ASSET_SIZE_INVALID',message:'Dung lượng tệp minh chứng tối đa 5MB.'},400);
+    if(!validUploadedAttachment(bytes,type))return json({error:'ASSET_CONTENT_MISMATCH',message:'Nội dung tệp không khớp với định dạng khai báo.'},400);
+    const key=`events/private/${ev.id}/${uid('evasset')}.${ext}`;
+    if(env.FILES&&typeof env.FILES.put==='function'){
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType:type,cacheControl:'private, no-store, max-age=0'}});
+    }
+    return json({ok:true,url:`/files/${key}`,mime_type:type,byte_size:bytes.byteLength},201,{'cache-control':'no-store'});
+  }
+
+  const pubSkLookupMatch=url.pathname.match(/^\/api\/public\/sk-events\/([^/]+)\/status-lookup$/);
+  if(pubSkLookupMatch&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const eid=decodeURIComponent(pubSkLookupMatch[1]);
+    const b=await bodyJson(req);
+    const email=clean(b.email,200).toLowerCase();
+    if(!email)return json({error:'EMAIL_REQUIRED'},400);
+    const reg=await env.DB.prepare("SELECT id,registration_code,status,registered_at FROM sk_event_registrations WHERE event_id=? AND lower(email)=? LIMIT 1").bind(eid,email).first();
+    if(!reg)return json({error:'REGISTRATION_NOT_FOUND',message:'Không tìm thấy bản ghi đăng ký với email này cho hoạt động đã chọn.'},404);
+    const att=await env.DB.prepare("SELECT attendance_status,checked_in_at FROM sk_attendance_records WHERE event_id=? AND lower(participant_email)=? ORDER BY checked_in_at DESC LIMIT 1").bind(eid,email).first();
+    return json({
+      ok:true,
+      registration_code:reg.registration_code,
+      registration_status:reg.status,
+      registered_at:reg.registered_at,
+      attended:Boolean(att&&['checked_in','manual_present','late'].includes(att.attendance_status)),
+      attendance_status:att?.attendance_status||null,
+      checked_in_at:att?.checked_in_at||null
+    });
   }
 
   const pubSkRegisterMatch=url.pathname.match(/^\/api\/public\/sk-events\/([^/]+)\/register$/);
@@ -2213,6 +2352,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     await env.DB.prepare("INSERT INTO sk_event_registrations(id,registration_code,event_id,full_name,email,phone,org_name,answers_json,status) VALUES(?,?,?,?,?,?,?,?,?)").bind(
       regId,regCode,ev.id,fullName,email,phone,orgName,JSON.stringify(b.answers||{}),initStatus
     ).run();
+    await syncSkEventToMemberActivityHistory(env,ev.id,email,fullName,'registered',null);
     await safeAudit(env,null,'sk_event_participant_registered','sk_event_registration',regId,ev.host_org_id,{event_id:ev.id,status:initStatus});
     return json({ok:true,id:regId,registration_code:regCode,status:initStatus},201);
   }
@@ -6289,7 +6429,7 @@ env.DB.prepare(`
     const startedAt=new Date().toISOString();
     const probeId=uid('r2probe');
     const probeKey=`_system_health_probes/${probeId}.txt`;
-    const payloadText=`GFI-R2-SAFE-PROBE:${probeId}:${startedAt}`;
+    const payloadText=`SFN-R2-SAFE-PROBE:${probeId}:${startedAt}`;
     const payloadBytes=new TextEncoder().encode(payloadText);
     const expectedHash=await sha256(payloadText);
     const steps={
@@ -6934,7 +7074,7 @@ env.DB.prepare(`
     }
     const senderAddr=`${DEFAULT_SYSTEM_IDENTITY.siteName} <${env.EMAIL_FROM_NOREPLY||DEFAULT_SYSTEM_IDENTITY.noreplyEmail}>`;
     const replyToAddr=env.EMAIL_REPLY_TO||DEFAULT_SYSTEM_IDENTITY.supportEmail;
-    const subj=testType==='otp_simulation'?`[Sky First GFI] Kiểm tra luồng gửi mã xác thực OTP (${dateInVietnam()})`:`[Sky First GFI] Kiểm tra kết nối dịch vụ Email hệ thống (${dateInVietnam()})`;
+    const subj=testType==='otp_simulation'?`[Trung tâm Nghiệp vụ Số Sky First] Kiểm tra luồng gửi mã xác thực OTP (${dateInVietnam()})`:`[Trung tâm Nghiệp vụ Số Sky First] Kiểm tra kết nối dịch vụ Email hệ thống (${dateInVietnam()})`;
     const logId=uid('emlog');
     if(!env.RESEND_API_KEY){
       await env.DB.prepare(`INSERT INTO email_delivery_logs(id,template_code,recipient_email,sender_address,reply_to_address,subject,provider_name,status,error_detail,retry_count,related_entity_type,related_entity_id) VALUES(?,?,?,?,?,?,'resend','not_configured','MISSING_RESEND_API_KEY',0,'admin_diagnostic',?)`).bind(
@@ -7209,7 +7349,7 @@ env.DB.prepare(`
       timeline.push({timestamp:ticketRow.created_at,event:'Tạo phiếu hỗ trợ nghiệp vụ',source:`support_tickets (${ticketRow.ticket_code})`,detail:`${ticketRow.subject} (${ticketRow.status})`});
     }
     for(const c of (consents.results||[])){
-      timeline.push({timestamp:c.consented_at,event:'Ghi nhận bằng chứng đồng ý pháp lý & điều khoản',source:`legal_consent_records (${c.id})`,detail:`Phiên bản: ${c.terms_version} / ${c.privacy_version} · OTP verified: ${c.email_verified}`});
+      timeline.push({timestamp:c.consented_at,event:'Ghi nhận bằng chứng đồng ý pháp lý & điều khoản',source:`legal_consent_records (${c.id})`,detail:`Đã xác nhận điều khoản & bảo mật dữ liệu · OTP verified: ${c.email_verified}`});
     }
     for(const a of (audits.results||[])){
       timeline.push({timestamp:a.created_at,event:`Nhật ký kiểm toán: ${a.action}`,source:`audit_log (#${a.id} bởi ${a.username||'Hệ thống'})`,detail:`${a.entity_type} · ${a.entity_id||''}`});
@@ -8253,8 +8393,9 @@ env.DB.prepare(`
     await env.DB.prepare("INSERT INTO sk_attendance_records(id,event_id,session_id,registration_id,account_id,participant_name,participant_email,attendance_status,checkin_method,operator_account_id) VALUES(?,?,?,?,?,?,?,'checked_in','qr_scan',?)").bind(
       attId,qs.event_id,qs.id,regRow?.id||null,s.account_id,regRow?.full_name||fullName,email,s.account_id
     ).run();
-    await audit(env,s.account_id,'sk_attendance_qr_checked_in','sk_attendance',attId,qs.host_org_id,{event_id:qs.event_id,session_id:qs.id,email});
-    return json({ok:true,id:attId,event_id:qs.event_id,session_id:qs.id,participant_email:email,attendance_status:'checked_in'},201);
+    await syncSkEventToMemberActivityHistory(env,qs.event_id,email,regRow?.full_name||fullName,'checked_in',s?.account_id||null);
+    await audit(env,s?.account_id||null,'sk_attendance_qr_checked_in','sk_attendance',attId,qs.host_org_id,{event_id:qs.event_id,session_id:qs.id,email});
+    return json({ok:true,id:attId,event_id:qs.event_id,session_id:qs.id,participant_email:email,attendance_status:'checked_in',checked_in_at:new Date().toISOString()},201);
   }
 
   const skManualAttMatch=url.pathname.match(/^\/api\/admin\/sk-events\/([^/]+)\/attendance\/manual$/);
@@ -8287,7 +8428,7 @@ env.DB.prepare(`
   }
 
   // =========================================================
-  // SIÊU YÊU CẦU GFI II — HỆ THỐNG NHẮN TIN NỘI BỘ (1-1 & NHÓM, KHÔNG CÓ GỌI THOẠI/VIDEO)
+  // PHÂN HỆ NGHIỆP VỤ SKY FIRST II — HỆ THỐNG NHẮN TIN NỘI BỘ (1-1 & NHÓM, KHÔNG CÓ GỌI THOẠI/VIDEO)
   // =========================================================
   if(url.pathname==='/api/chat/conversations'&&['GET','POST'].includes(req.method)){
     await ensureGovernanceTables(env);
@@ -8473,7 +8614,7 @@ env.DB.prepare(`
   }
 
   // =========================================================
-  // SIÊU YÊU CẦU GFI III — MẠNG XÃ HỘI & CỘNG ĐỒNG NỘI BỘ
+  // PHÂN HỆ NGHIỆP VỤ SKY FIRST III — MẠNG XÃ HỘI & CỘNG ĐỒNG NỘI BỘ
   // =========================================================
   if(url.pathname==='/api/community/groups'&&['GET','POST'].includes(req.method)){
     await ensureGovernanceTables(env);
@@ -8673,7 +8814,7 @@ env.DB.prepare(`
       },
       {
         code:'IDENTITY_UNIFIED',
-        title:'Nhận diện Trung tâm Nghiệp vụ Số Sky First (GFI) & nghiepvu.skyfirst.io.vn',
+        title:'Nhận diện Trung tâm Nghiệp vụ Số Sky First & nghiepvu.skyfirst.io.vn',
         status:idOk?'passed':'failed',
         detail:`${DEFAULT_SYSTEM_IDENTITY.siteName} · ${DEFAULT_SYSTEM_IDENTITY.appUrl} · ${DEFAULT_SYSTEM_IDENTITY.systemEmail}`
       },
@@ -8757,7 +8898,7 @@ export default{
     if(url.pathname.startsWith('/files/')){
       let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return withSecurityHeaders(new Response('Bad request',{status:400}))}
       if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')||key.startsWith('_system_health_probes/')) return withSecurityHeaders(new Response('Bad request',{status:400}));
-      const isPrivate=/^(members|documents|certificates|requests\/avatars|submissions|chat)\//.test(key);
+      const isPrivate=/^(members|documents|certificates|requests\/avatars|requests\/confirmations|submissions|chat|events\/private)\//.test(key);
       if(isPrivate){
         const fs=await getSession(request,env);
         if(!fs)return withSecurityHeaders(new Response('Unauthorized',{status:401}));
