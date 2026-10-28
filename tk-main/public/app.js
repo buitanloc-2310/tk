@@ -18,13 +18,114 @@ const api=async(url,opt={})=>{
   try{
     const r=await fetch(url,{credentials:'same-origin',...opt,signal:controller.signal,
       headers:{...(opt.body?{'content-type':'application/json'}:{}),...(opt.headers||{})}});
-    const raw=await r.text();let d;try{d=JSON.parse(raw)}catch{const hint=raw.slice(0,180).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();const status=r.status?` (HTTP ${r.status})`:'';throw Object.assign(new Error(`Dữ liệu máy chủ không hợp lệ: không trả JSON hợp lệ${status}. Có thể Worker/API gặp lỗi hoặc D1 chưa cập nhật migration.${hint?` Chi tiết: ${hint}`:''}`),{status:r.status,nonJson:true})}
-    if(!d||typeof d!=='object'||Array.isArray(d))throw Object.assign(new Error(`Dữ liệu phản hồi không hợp lệ (HTTP ${r.status}). Kiểm tra API và phiên bản cơ sở dữ liệu.`),{status:r.status,nonJson:true});
-    if(!r.ok)throw Object.assign(new Error(d.message||d.detail||d.error||`Yêu cầu thất bại (HTTP ${r.status}).`),{status:r.status,data:d});
+    const raw=await r.text();let d;try{d=JSON.parse(raw)}catch{throw Object.assign(new Error('Phản hồi từ hệ thống không hợp lệ hoặc kết nối bị gián đoạn. Vui lòng tải lại trang và thử lại.'),{status:r.status,nonJson:true})}
+    if(!d||typeof d!=='object'||Array.isArray(d))throw Object.assign(new Error('Phản hồi từ hệ thống không hợp lệ. Vui lòng tải lại trang và thử lại.'),{status:r.status,nonJson:true});
+    if(!r.ok)throw Object.assign(new Error(friendlyErrorVi(d.message||d.detail||d.error,r.status)),{status:r.status,data:d});
     return d;
   }catch(e){if(e.name==='AbortError')throw new Error('Yêu cầu quá thời gian. Kiểm tra kết quả trước khi thử lại.');throw e}
   finally{clearTimeout(timeout)}
 };
+const ERROR_CODE_VI={
+  INVALID_LOGIN:'Tên đăng nhập hoặc mật khẩu không đúng.',
+  ACCOUNT_LOCKED:'Tài khoản đang tạm khóa. Vui lòng liên hệ bộ phận hỗ trợ.',
+  ACCOUNT_BANNED:'Tài khoản đang bị giới hạn truy cập. Vui lòng liên hệ support@skyfirst.io.vn.',
+  ACCOUNT_EXPIRED:'Tài khoản đã hết thời hạn sử dụng. Vui lòng liên hệ Quản trị viên để gia hạn.',
+  PASSWORD_CHANGE_REQUIRED:'Vui lòng thiết lập mật khẩu mới trước khi tiếp tục sử dụng.',
+  UNAUTHORIZED:'Phiên làm việc đã hết hạn hoặc bạn chưa đăng nhập.',
+  FORBIDDEN:'Bạn không có quyền thực hiện thao tác này.',
+  NOT_FOUND:'Không tìm thấy dữ liệu hoặc hồ sơ yêu cầu.',
+  RATE_LIMITED:'Bạn đã thao tác quá nhiều lần trong thời gian ngắn. Vui lòng thử lại sau ít phút.',
+  UPLOAD_FAILED:'Tải tệp lên hệ thống không thành công. Vui lòng kiểm tra lại định dạng và dung lượng tệp.',
+  FILE_TOO_LARGE:'Dung lượng tệp vượt quá giới hạn cho phép.',
+  INVALID_FILE_TYPE:'Định dạng tệp không được hỗ trợ.',
+  FILE_CONTENT_MISMATCH:'Nội dung tệp không khớp với định dạng khai báo.',
+  OTP_EXPIRED:'Mã xác thực OTP đã hết hạn. Vui lòng yêu cầu mã mới.',
+  OTP_INVALID:'Mã xác thực OTP không chính xác.',
+  OTP_REQUIRED:'Vui lòng xác minh mã OTP gửi qua email trước khi tiếp tục.',
+  CONSENT_REQUIRED:'Vui lòng xác nhận đồng ý với điều khoản và chính sách dữ liệu.',
+  MANDATORY_POLICY_CONSENT_MISSING:'Vui lòng đánh dấu đồng ý đầy đủ các mục cam kết bắt buộc.',
+  SCHEMA_MIGRATION_REQUIRED:'Hệ thống đang cập nhật dữ liệu. Vui lòng thử lại sau ít phút.',
+  SOD_SELF_APPROVAL_FORBIDDEN:'Theo quy tắc phân tách nhiệm vụ, người tạo không được tự phê duyệt hồ sơ do chính mình khởi tạo.',
+  SOD_CONFLICT_DETECTED:'Thao tác bị chặn theo quy tắc kiểm soát độc lập (người đề xuất không tự phê duyệt).',
+  BLOCKED_DETAILS_REQUIRED:'Vui lòng nhập đầy đủ nguyên nhân bị chặn, đơn vị phối hợp và thời hạn dự kiến.',
+  REMINDER_COOLDOWN_ACTIVE:'Đã gửi nhắc việc gần đây. Vui lòng đợi hết thời gian giãn cách trước khi gửi lại.',
+  EMAIL_ALREADY_SENT:'Thông báo email này đã được gửi trước đó.',
+  EMAIL_RETRY_COOLDOWN_ACTIVE:'Vui lòng đợi hết thời gian giãn cách trước khi thử gửi lại email.'
+};
+function friendlyErrorVi(raw,status=0){
+  const s=String(raw??'').trim();
+  if(!s)return status===401?'Phiên làm việc đã hết hạn.':status===403?'Bạn không có quyền thực hiện thao tác này.':status===404?'Không tìm thấy thông tin yêu cầu.':status===429?'Thao tác quá nhanh, vui lòng thử lại sau.':'Không thể thực hiện yêu cầu lúc này. Vui lòng thử lại.';
+  if(ERROR_CODE_VI[s])return ERROR_CODE_VI[s];
+  if(/^[A-Z0-9_]{3,}$/.test(s))return ERROR_CODE_VI[s]||'Yêu cầu chưa thể xử lý. Vui lòng kiểm tra lại thông tin đã nhập.';
+  return s;
+}
+function setMsg(el,text,kind='error'){
+  if(typeof el==='string')el=$(el);
+  if(!el)return;
+  const msgText=String(text??'').trim();
+  if(!msgText){el.textContent='';el.className='msg';return;}
+  el.textContent=friendlyErrorVi(msgText);
+  el.className='msg '+(kind||'error');
+}
+function sfAlert(message,type='info',title=''){
+  const clean=friendlyErrorVi(message);
+  const autoType=type!=='info'?type:/^(Đã |Thành công|✓)/i.test(clean)?'ok':/không thể|lỗi|thất bại|không hợp lệ|từ chối|bị chặn|quá hạn/i.test(clean)?'error':'info';
+  const heading=title||(autoType==='ok'?'Thông báo thành công':autoType==='error'?'Thông báo lỗi':autoType==='warn'?'Cảnh báo':'Thông báo hệ thống');
+  const icon=autoType==='ok'?'✓':autoType==='error'?'!':autoType==='warn'?'⚠':'i';
+  return new Promise(resolve=>{
+    document.querySelectorAll('#sfDialogBackdrop').forEach(x=>x.remove());
+    const wrap=document.createElement('div');
+    wrap.id='sfDialogBackdrop';
+    wrap.className='sf-dialog-backdrop';
+    wrap.innerHTML=`<div class="sf-dialog" role="alertdialog" aria-modal="true" aria-label="${esc(heading)}"><div class="sf-dialog-head"><span class="sf-dialog-icon ${esc(autoType)}" aria-hidden="true">${icon}</span><h3>${esc(heading)}</h3></div><div class="sf-dialog-body">${esc(clean)}</div><div class="sf-dialog-actions"><button type="button" class="primary" id="sfDialogOkBtn">Đã hiểu</button></div></div>`;
+    document.body.appendChild(wrap);
+    const done=()=>{wrap.remove();resolve(true)};
+    wrap.querySelector('#sfDialogOkBtn').onclick=done;
+    wrap.onclick=e=>{if(e.target===wrap)done()};
+    wrap.querySelector('#sfDialogOkBtn').focus();
+  });
+}
+function sfConfirm(message,opts={}){
+  const clean=String(message??'').trim();
+  const heading=opts.title||'Xác nhận thao tác';
+  const confirmText=opts.confirmText||'Xác nhận';
+  const cancelText=opts.cancelText||'Hủy bỏ';
+  return new Promise(resolve=>{
+    document.querySelectorAll('#sfDialogBackdrop').forEach(x=>x.remove());
+    const wrap=document.createElement('div');
+    wrap.id='sfDialogBackdrop';
+    wrap.className='sf-dialog-backdrop';
+    wrap.innerHTML=`<div class="sf-dialog" role="dialog" aria-modal="true" aria-label="${esc(heading)}"><div class="sf-dialog-head"><span class="sf-dialog-icon confirm" aria-hidden="true">?</span><h3>${esc(heading)}</h3></div><div class="sf-dialog-body">${esc(clean)}</div><div class="sf-dialog-actions"><button type="button" class="secondary" id="sfDialogCancelBtn">${esc(cancelText)}</button><button type="button" class="primary" id="sfDialogConfirmBtn">${esc(confirmText)}</button></div></div>`;
+    document.body.appendChild(wrap);
+    const finish=val=>{wrap.remove();resolve(val)};
+    wrap.querySelector('#sfDialogCancelBtn').onclick=()=>finish(false);
+    wrap.querySelector('#sfDialogConfirmBtn').onclick=()=>finish(true);
+    wrap.onclick=e=>{if(e.target===wrap)finish(false)};
+    wrap.querySelector('#sfDialogConfirmBtn').focus();
+  });
+}
+function sfPrompt(message,defaultValue='',opts={}){
+  const clean=String(message??'').trim();
+  const heading=opts.title||'Nhập thông tin xác nhận';
+  const confirmText=opts.confirmText||'Xác nhận';
+  const cancelText=opts.cancelText||'Hủy bỏ';
+  return new Promise(resolve=>{
+    document.querySelectorAll('#sfDialogBackdrop').forEach(x=>x.remove());
+    const wrap=document.createElement('div');
+    wrap.id='sfDialogBackdrop';
+    wrap.className='sf-dialog-backdrop';
+    wrap.innerHTML=`<form class="sf-dialog" id="sfDialogPromptForm" role="dialog" aria-modal="true" aria-label="${esc(heading)}"><div class="sf-dialog-head"><span class="sf-dialog-icon info" aria-hidden="true">✎</span><h3>${esc(heading)}</h3></div><label class="sf-dialog-body" style="display:block">${esc(clean)}<input class="sf-dialog-input" id="sfDialogInput" value="${esc(defaultValue??'')}" autocomplete="off"></label><div class="sf-dialog-actions"><button type="button" class="secondary" id="sfDialogCancelBtn">${esc(cancelText)}</button><button type="submit" class="primary" id="sfDialogConfirmBtn">${esc(confirmText)}</button></div></form>`;
+    document.body.appendChild(wrap);
+    const input=wrap.querySelector('#sfDialogInput');
+    const finish=val=>{wrap.remove();resolve(val)};
+    wrap.querySelector('#sfDialogCancelBtn').onclick=()=>finish(null);
+    wrap.querySelector('#sfDialogPromptForm').onsubmit=e=>{e.preventDefault();finish(input.value)};
+    wrap.onclick=e=>{if(e.target===wrap)finish(null)};
+    input.focus();
+    input.select();
+  });
+}
+
 const safeStore={get:k=>{try{return localStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
 
 let logo='/sfn-logo.png';
@@ -102,8 +203,11 @@ function toast(message,type='ok'){
   const text=String(message??'');const recent=[...host.children].find(x=>x.textContent===text);if(recent){recent.classList.add('toast-repeat');return}
   const el=document.createElement('div');el.className='toast '+type;el.textContent=text;host.append(el);while(host.children.length>4)host.firstElementChild?.remove();setTimeout(()=>el.remove(),3600);
 }
-function goView(view){
-  if(dirtyForm&&!confirm('Bạn có thay đổi chưa lưu. Rời trang này?'))return;
+async function goView(view){
+  if(dirtyForm){
+    const ok=await sfConfirm('Bạn có thông tin đang nhập chưa lưu. Bạn có chắc chắn muốn rời trang này không?');
+    if(!ok)return;
+  }
   dirtyForm=false;state.view=view;
   if(String(view).startsWith('admin-'))state.navOpen.admin=true;else state.navOpen.personal=true;
   renderApp();
@@ -124,9 +228,28 @@ function maybeShowOnboarding(){
 }
 
 function installWorkspaceUX(){
-  document.onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(state.me)openCommandPalette()}if(e.key==='Escape')$('#modal')?.remove()};
+  document.onkeydown=e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(state.me)openCommandPalette()}
+    if(e.key==='Escape'){
+      const dlg=$('#sfDialogBackdrop');
+      if(dlg){const cancelBtn=dlg.querySelector('#sfDialogCancelBtn,#sfDialogOkBtn');if(cancelBtn)cancelBtn.click();else dlg.remove();return;}
+      $('#modal')?.remove();
+    }
+  };
   window.onbeforeunload=e=>{if(dirtyForm){e.preventDefault();e.returnValue=''}};
-  document.addEventListener('input',e=>{if(e.target.closest('#content form'))dirtyForm=true});
+  const clearStaleFormError=e=>{
+    const t=e.target;
+    if(!t||!t.tagName)return;
+    t.classList?.remove('is-invalid');
+    const form=t.closest('form');
+    if(form){
+      form.querySelectorAll('.msg.error,.msg:not(.info):not(.ok),#requestMsg,#forcedPasswordMsg').forEach(m=>{if(m.textContent)m.textContent=''});
+      const sec=form.parentElement;
+      if(sec){const sibMsg=sec.querySelector('#msg.msg');if(sibMsg&&sibMsg.textContent)sibMsg.textContent='';}
+    }
+  };
+  document.addEventListener('input',e=>{if(e.target.closest('#content form'))dirtyForm=true;clearStaleFormError(e)});
+  document.addEventListener('change',e=>{clearStaleFormError(e)});
   document.addEventListener('submit',e=>{if(e.target.closest('#content form'))dirtyForm=false});
   const net=()=>document.body.classList.toggle('offline',!navigator.onLine);addEventListener('online',()=>{net();toast('Đã kết nối lại.')});addEventListener('offline',()=>{net();toast('Mất kết nối mạng. Dữ liệu chưa gửi sẽ được giữ trên trang.','warn')});net();
 }
@@ -238,10 +361,14 @@ async function boot(){
 }
 
 function routePublic(path){
-  if(!['/login','/register','/registration-status'].includes(path))return;
-  if(location.pathname!==path)history.pushState({publicPath:path},'',path);
-  if(path==='/register')renderAccountRequest();
-  else if(path==='/registration-status')renderRegistrationStatus();
+  const raw=String(path||'').trim();
+  let clean=raw;
+  if(raw.startsWith('https://nghiepvu.skyfirst.io.vn'))clean=raw.slice('https://nghiepvu.skyfirst.io.vn'.length)||'/';
+  if(!['/','/login','/register','/registration-status','/su-kien-cong-khai'].includes(clean))return;
+  if(location.pathname!==clean)history.pushState({publicPath:clean},'',clean);
+  if(clean==='/register')renderAccountRequest();
+  else if(clean==='/registration-status')renderRegistrationStatus();
+  else if(clean==='/su-kien-cong-khai')renderPublicEventsHome();
   else renderLogin();
   scrollTo({top:0,behavior:'instant'});
 }
@@ -310,6 +437,7 @@ async function loadPublicStats(){
 function renderLogin(){
   if(location.pathname==='/register'){renderAccountRequest();return}
   if(location.pathname==='/registration-status'){renderRegistrationStatus();return}
+  if(location.pathname==='/su-kien-cong-khai'){renderPublicEventsHome();return}
   $('#app').innerHTML=`
     <main class="identity-gate">
       <section class="gate-story" aria-label="Sky First Network">
@@ -320,6 +448,16 @@ function renderLogin(){
           <p>Không gian định danh số dành cho thành viên: vai trò, đơn vị, hoạt động, hồ sơ, thành tích và những đóng góp được kết nối trong cùng một nơi.</p>
           <div class="impact-row"><span>GIÁO DỤC</span><span>CỘNG ĐỒNG</span><span>TÌNH NGUYỆN</span></div>
           <div id="impactNumbers" class="impact-numbers" aria-live="polite"><span class="muted">Đang tải số liệu hoạt động…</span></div><p class="impact-tagline" id="impactTagline"></p>
+          <div class="home-events-showcase" id="homeEventsShowcase">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div>
+                <b style="color:#082b4b;font-size:14px">Hoạt động &amp; Sự kiện Công khai Sky First</b>
+                <div style="font-size:12px;color:#285777;margin-top:2px">Các chương trình, chiến dịch và sự kiện chính thức đang mở cho thành viên và cộng đồng.</div>
+              </div>
+              <a class="btn primary sm" href="https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai" data-public-path="/su-kien-cong-khai" style="text-decoration:none">Xem Hoạt động &amp; Sự kiện Công khai →</a>
+            </div>
+            <div id="homeEventsPreviewList" style="margin-top:10px"></div>
+          </div>
         </div>
         <div class="gate-art" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <div class="gate-foot">MẠNG LƯỚI GIÁO DỤC &amp; PHÁT TRIỂN CỘNG ĐỒNG SKY FIRST</div>
@@ -355,12 +493,20 @@ function renderLogin(){
   $('#startRegistration').onclick=()=>routePublic('/register');
   $('#checkRequest').onclick=()=>routePublic('/registration-status');
   $('#checkRequestRegister').onclick=()=>routePublic('/registration-status');
+  wirePublicLinks();
   loadPublicStats();
-  $('#forgotPassword').onclick=()=>{modal('Đặt lại mật khẩu',`<form id="forgotForm" class="form-grid"><p class="muted">Nhập tên đăng nhập hoặc email. Nếu tài khoản hợp lệ, hệ thống sẽ gửi liên kết đặt lại mật khẩu.</p><label>Tên đăng nhập / Email<input name="login" required autocomplete="username"></label><button class="primary">Gửi liên kết bảo mật</button><div id="forgotMsg" class="msg"></div></form>`);$('#forgotForm').onsubmit=async e=>{e.preventDefault();const login=new FormData(e.target).get('login');await api('/api/public/password/forgot',{method:'POST',body:JSON.stringify({login})}).catch(()=>null);$('#forgotMsg').textContent='Nếu tài khoản tồn tại, hướng dẫn đã được gửi đến email đăng ký.'}};
+  api('/api/public/sk-events').then(r=>{
+    const box=$('#homeEventsPreviewList');if(!box)return;
+    const items=(r.items||[]).slice(0,3);
+    if(!items.length){box.innerHTML='<div class="meta" style="color:#315c7e">Bấm "Xem Hoạt động &amp; Sự kiện Công khai →" để tra cứu các chương trình và điểm danh QR.</div>';return;}
+    box.innerHTML=items.map(ev=>`<div style="padding:8px 10px;margin-top:6px;border-radius:10px;background:rgba(255,255,255,.78);border:1px solid rgba(23,82,128,.12);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div><b style="font-size:13px;color:#0b2e4e">${esc(ev.name)}</b><div style="font-size:11px;color:#476782">${esc(ev.starts_at||'')} · ${esc(ev.location_or_platform||'Sky First Network')}</div></div><a class="btn secondary sm" href="https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai" data-public-path="/su-kien-cong-khai" style="text-decoration:none;font-size:11px">Chi tiết →</a></div>`).join('');
+    wirePublicLinks();
+  }).catch(()=>{});
+  $('#forgotPassword').onclick=()=>{modal('Đặt lại mật khẩu',`<form id="forgotForm" class="form-grid"><p class="muted">Nhập tên đăng nhập hoặc email. Nếu tài khoản hợp lệ, hệ thống sẽ gửi liên kết đặt lại mật khẩu.</p><label>Tên đăng nhập / Email<input name="login" required autocomplete="username"></label><button class="primary">Gửi liên kết bảo mật</button><div id="forgotMsg" class="msg"></div></form>`);$('#forgotForm').onsubmit=async e=>{e.preventDefault();const login=new FormData(e.target).get('login');setMsg('#forgotMsg','Đang gửi yêu cầu khôi phục mật khẩu...','info');await api('/api/public/password/forgot',{method:'POST',body:JSON.stringify({login})}).catch(()=>null);setMsg('#forgotMsg','Nếu tài khoản tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi đến email đăng ký.','ok')}};
   $('#togglePassword').onclick=()=>{const i=$('#loginForm').elements.password;i.type=i.type==='password'?'text':'password'};
-  $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const b=Object.fromEntries(new FormData(e.target));msg.textContent='Đang xác minh...';try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});await boot()}catch(err){const code=err?.data?.error||'';msg.textContent=code==='INVALID_LOGIN'?'Tên đăng nhập hoặc mật khẩu không đúng.':code==='ACCOUNT_LOCKED'?'Tài khoản đang bị khóa.':code==='ACCOUNT_BANNED'?'Tài khoản bị giới hạn truy cập. Vui lòng liên hệ support@skyfirst.io.vn.':'Không thể đăng nhập lúc này. Vui lòng thử lại.'}};
+  $('#loginForm').onsubmit=async e=>{e.preventDefault();const msg=$('#msg');const submitBtn=e.target.querySelector('button[type="submit"],.auth-submit');if(submitBtn)submitBtn.disabled=true;setMsg(msg,'Đang xác minh thông tin đăng nhập...','info');const b=Object.fromEntries(new FormData(e.target));try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(b)});setMsg(msg,'');await boot()}catch(err){const code=err?.data?.error||'';setMsg(msg,code?friendlyErrorVi(code):(err.message||'Không thể đăng nhập lúc này. Vui lòng thử lại.'),'error')}finally{if(submitBtn)submitBtn.disabled=false}};
   const resetToken=new URLSearchParams(location.search).get('reset_token');
-  if(resetToken){history.replaceState({},'',location.pathname);modal('Tạo mật khẩu mới',`<form id="resetForm" class="form-grid"><label>Mật khẩu mới (ít nhất 10 ký tự)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label><button class="primary">Cập nhật mật khẩu</button><div id="resetMsg" class="msg"></div></form>`);$('#resetForm').onsubmit=async e=>{e.preventDefault();const password=new FormData(e.target).get('password');try{await api('/api/public/password/reset',{method:'POST',body:JSON.stringify({token:resetToken,password})});history.replaceState({},'',location.pathname);$('#resetMsg').textContent='Đã đổi mật khẩu. Bạn có thể đăng nhập ngay.'}catch{$('#resetMsg').textContent='Liên kết không hợp lệ hoặc đã hết hạn.'}}}
+  if(resetToken){history.replaceState({},'',location.pathname);modal('Tạo mật khẩu mới',`<form id="resetForm" class="form-grid"><label>Mật khẩu mới (ít nhất 10 ký tự)<input type="password" name="password" minlength="10" required autocomplete="new-password"></label><button class="primary">Cập nhật mật khẩu</button><div id="resetMsg" class="msg"></div></form>`);$('#resetForm').onsubmit=async e=>{e.preventDefault();const password=new FormData(e.target).get('password');setMsg('#resetMsg','Đang cập nhật mật khẩu...','info');try{await api('/api/public/password/reset',{method:'POST',body:JSON.stringify({token:resetToken,password})});history.replaceState({},'',location.pathname);setMsg('#resetMsg','Đã đổi mật khẩu thành công. Bạn có thể đăng nhập ngay.','ok')}catch{setMsg('#resetMsg','Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.','error')}}}
 }
 
 /* =========================================================
@@ -381,9 +527,8 @@ async function renderAccountRequest(){
   showRegistrationPage(
     'Hồ sơ Đăng ký',
     `
-    <div class="row" id="publicRegHeaderBar" style="justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap">
-      <span class="badge info">Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước)</span>
-      <button type="button" class="btn ghost sm" id="togglePubEventsViewBtn" data-pub-reg-mode="public_events">Xem Hoạt động &amp; Sự kiện Công khai →</button>
+    <div class="row" id="publicRegHeaderBar" style="justify-content:flex-end;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+      <a class="btn ghost sm" id="togglePubEventsViewBtn" href="https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai" data-pub-reg-mode="public_events" style="text-decoration:none">Xem Hoạt động &amp; Sự kiện Công khai →</a>
     </div>
     <div id="pubRegDynamicHost" style="display:none"></div>
     <div id="pubRegStandardWrap">
@@ -1682,7 +1827,7 @@ async function refreshMe(){
 
 
 function modal(title,body){
-
+  document.querySelectorAll('#modal').forEach(x=>x.remove());
   document.body.insertAdjacentHTML(
     'beforeend',
     `
@@ -2975,8 +3120,8 @@ async function renderList(
 }
 
 
-function printOnePageCV({p,memberships,activities,certificates,achievements}){
-  const includeContact=confirm('Có đưa email và số điện thoại vào bản PDF?\nOK: Có · Hủy: Ẩn thông tin liên hệ (khuyến nghị nếu chia sẻ công khai).');
+async function printOnePageCV({p,memberships,activities,certificates,achievements}){
+  const includeContact=await sfConfirm('Có đưa email và số điện thoại vào bản PDF?\nOK: Có · Hủy: Ẩn thông tin liên hệ (khuyến nghị nếu chia sẻ công khai).');
   const w=window.open('','_blank','width=900,height=750');
   if(!w){toast('Trình duyệt chặn cửa sổ in. Hãy bật cửa sổ bật lên để lưu PDF.','warn');return}
   const list=(items,map,limit=3)=>items.slice(0,limit).map(map).join('')||'<p class="note">Chưa có dữ liệu được ghi nhận.</p>';
@@ -3424,10 +3569,10 @@ function renderSupport(c){
     e.preventDefault();
     try{
       await api('/api/me/password',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
-      alert('Đã đổi mật khẩu.');
+      sfAlert('Đã đổi mật khẩu.');
       e.target.reset();
     }catch(err){
-      alert(err.data?.error||err.message);
+      sfAlert(err.data?.error||err.message);
     }
   };
 
@@ -3439,7 +3584,7 @@ function renderSupport(c){
       e.target.reset();
       await loadMyTickets();
     }catch(err){
-      alert(err.data?.message||err.data?.error||err.message);
+      sfAlert(err.data?.message||err.data?.error||err.message);
     }
   };
   const ticketHistoryCard=document.createElement('div');
@@ -3454,20 +3599,20 @@ function renderSupport(c){
       const items=r.items||[];
       box.outerHTML=`<div id="myTicketsBox">${items.length?`<div class="table-wrap"><table><thead><tr><th>Mã phiếu &amp; SLA</th><th>Danh mục &amp; Ảnh hưởng</th><th>Tiêu đề &amp; Trao đổi</th><th>Trạng thái</th><th>Phản hồi / Xử lý</th><th>Thao tác</th></tr></thead><tbody>${items.map(x=>`<tr><td><b>${esc(x.ticket_code)}</b><div class="meta">Tạo: ${esc(x.created_at)}</div><div class="meta">Hạn xử lý: ${esc(x.sla_resolution_due_at||'—')}</div>${x.duplicate_of_ticket_id?`<div class="meta">Liên kết trùng: ${esc(x.duplicate_of_ticket_id)}</div>`:''}</td><td>${esc(x.category)}<div class="meta">Ảnh hưởng: <b>${esc(x.impact_level||'medium')}</b></div></td><td><b>${esc(x.subject)}</b><div class="meta">${esc(x.body)}</div>${(x.messages||[]).length?`<div class="meta" style="margin-top:6px"><b>Trao đổi (${x.messages.length}):</b> ${x.messages.map(m=>`<div>• [${esc(m.sender_role)}] ${esc(m.body)}</div>`).join('')}</div>`:''}</td><td><span class="badge ${x.status==='completed'?'ok':'warn'}">${esc(statusVi(x.status))}</span>${x.reopen_count?`<div class="meta">Đã mở lại ${x.reopen_count} lần</div>`:''}</td><td>${esc(x.resolution_note||x.closed_reason||'Đang chờ bộ phận phụ trách phản hồi')}${x.satisfaction_score?`<div class="meta">Đánh giá: <b>${x.satisfaction_score}/5</b> · ${esc(x.satisfaction_comment||'')}</div>`:''}</td><td><div class="toolbar"><button type="button" class="secondary" data-my-ticket-reply="${esc(x.id)}">Phản hồi thêm</button>${['completed','closed','rejected'].includes(x.status)?`<button type="button" class="secondary" data-my-ticket-reopen="${esc(x.id)}">Mở lại phiếu</button><button type="button" class="primary" data-my-ticket-rate="${esc(x.id)}">Đánh giá</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Bạn chưa gửi yêu cầu hỗ trợ nào.</div>'}</div>`;
       $$('[data-my-ticket-reply]').forEach(btn=>btn.onclick=async()=>{
-        const body=prompt('Nhập nội dung phản hồi hoặc thông tin bổ sung cho phiếu hỗ trợ:');
+        const body=await sfPrompt('Nhập nội dung phản hồi hoặc thông tin bổ sung cho phiếu hỗ trợ:');
         if(!body)return;
-        try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketReply)}/reply`,{method:'POST',body:JSON.stringify({body})});toast('Đã gửi phản hồi bổ sung.');await loadMyTickets()}catch(e){alert(e.data?.message||e.message)}
+        try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketReply)}/reply`,{method:'POST',body:JSON.stringify({body})});toast('Đã gửi phản hồi bổ sung.');await loadMyTickets()}catch(e){sfAlert(e.data?.message||e.message)}
       });
       $$('[data-my-ticket-reopen]').forEach(btn=>btn.onclick=async()=>{
-        const reason=prompt('Nhập lý do mở lại phiếu hỗ trợ (ví dụ: sự cố vẫn còn tái diễn):');
+        const reason=await sfPrompt('Nhập lý do mở lại phiếu hỗ trợ (ví dụ: sự cố vẫn còn tái diễn):');
         if(!reason)return;
-        try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketReopen)}/reopen`,{method:'POST',body:JSON.stringify({reason})});toast('Đã mở lại phiếu hỗ trợ.');await loadMyTickets()}catch(e){alert(e.data?.message||e.message)}
+        try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketReopen)}/reopen`,{method:'POST',body:JSON.stringify({reason})});toast('Đã mở lại phiếu hỗ trợ.');await loadMyTickets()}catch(e){sfAlert(e.data?.message||e.message)}
       });
       $$('[data-my-ticket-rate]').forEach(btn=>btn.onclick=()=>{
         modal('Đánh giá kết quả hỗ trợ',`<form id="rateTicketForm" class="form-grid"><label>Mức độ hài lòng (1 đến 5 sao)<select name="score"><option value="5">5 — Rất hài lòng</option><option value="4">4 — Hài lòng</option><option value="3">3 — Bình thường</option><option value="2">2 — Chưa hài lòng</option><option value="1">1 — Cần cải thiện gấp</option></select></label><label>Nhận xét chi tiết<textarea name="comment" rows="3" placeholder="Ghi nhận thêm ý kiến của bạn..."></textarea></label><button class="primary">Gửi đánh giá</button></form>`);
         $('#rateTicketForm').onsubmit=async e=>{
           e.preventDefault();
-          try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketRate)}/feedback`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$('#modal')?.remove();toast('Cảm ơn bạn đã gửi đánh giá chất lượng hỗ trợ.');await loadMyTickets()}catch(err){alert(err.data?.message||err.message)}
+          try{await api(`/api/me/support/${encodeURIComponent(btn.dataset.myTicketRate)}/feedback`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$('#modal')?.remove();toast('Cảm ơn bạn đã gửi đánh giá chất lượng hỗ trợ.');await loadMyTickets()}catch(err){sfAlert(err.data?.message||err.message)}
         };
       });
     }catch{box.textContent='Chưa tải được lịch sử phiếu hỗ trợ.'}
@@ -3655,14 +3800,14 @@ async function renderCalendar(
         const syncCalendarBulk=()=>{const n=$$('[data-calendar-check]:checked').length;$('#calendarSelectedCount')?.replaceChildren(document.createTextNode(String(n)));const b=$('#calendarBulkDelete');if(b)b.disabled=n===0};
         $$('[data-calendar-check]').forEach(x=>x.addEventListener('change',syncCalendarBulk));
         $('#calendarSelectAll')?.addEventListener('click',()=>{$$('[data-calendar-check]').forEach(x=>x.checked=true);syncCalendarBulk()});
-        $('#calendarBulkDelete')?.addEventListener('click',async()=>{const ids=$$('[data-calendar-check]:checked').map(x=>x.dataset.calendarCheck);if(!ids.length||!confirm(`Xóa ${ids.length} lịch đã chọn?`))return;for(const id of ids){try{await api(`/api/admin/calendar/${encodeURIComponent(id)}`,{method:'DELETE'})}catch{}}toast(`Đã xử lý ${ids.length} lịch.`);await load()});syncCalendarBulk();
+        $('#calendarBulkDelete')?.addEventListener('click',async()=>{const ids=$$('[data-calendar-check]:checked').map(x=>x.dataset.calendarCheck);if(!ids.length||!await sfConfirm(`Xóa ${ids.length} lịch đã chọn?`))return;for(const id of ids){try{await api(`/api/admin/calendar/${encodeURIComponent(id)}`,{method:'DELETE'})}catch{}}toast(`Đã xử lý ${ids.length} lịch.`);await load()});syncCalendarBulk();
 
         $$('[data-cal-del]').forEach(
 
           b=>b.onclick=async()=>{
 
             if(
-              !confirm(
+              !await sfConfirm(
                 'Xóa lịch này?'
               )
             ){
@@ -3682,7 +3827,7 @@ async function renderCalendar(
 
             }catch(err){
 
-              alert(
+              sfAlert(
                 err.data?.error||
                 err.message
               );
@@ -3846,7 +3991,7 @@ async function renderCalendar(
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -4096,7 +4241,7 @@ async function renderAdminRequests(c){
       const syncReqBulk=()=>{const n=requestIds().length;const host=$('#reqList');let bar=$('#requestBulkBar');if(!bar){bar=document.createElement('div');bar.id='requestBulkBar';bar.className='bulk-bar';bar.innerHTML='<div><b id="requestSelectedCount">0</b> yêu cầu đã chọn</div><div class="toolbar"><button id="bulkReqApprove" class="primary">Phê duyệt</button><button id="bulkReqSupplement" class="secondary">Yêu cầu bổ sung</button><button id="bulkReqReject" class="danger">Từ chối</button></div>';host.parentNode.insertBefore(bar,host)}$('#requestSelectedCount').textContent=n;['#bulkReqApprove','#bulkReqSupplement','#bulkReqReject'].forEach(sel=>{const b=$(sel);if(b)b.disabled=n===0})};
       $('#selectAllRequests')?.addEventListener('change',e=>{$$('[data-request-check]').forEach(x=>x.checked=e.target.checked);syncReqBulk()});
       $$('[data-request-check]').forEach(x=>x.addEventListener('change',syncReqBulk));
-      const bulkReq=async(action)=>{const ids=requestIds();if(!ids.length)return;let note=prompt(action==='approve'?'Ghi chú phê duyệt:':action==='supplement'?'Nội dung cần bổ sung:':'Lý do từ chối:');if(note===null||!note.trim())return;let send=false;if(action==='approve'){const choice=prompt('Gửi email sau phê duyệt?\n1 = Có\n2 = Không','1');if(choice===null)return;send=choice==='1'}if(!confirm(`Xử lý ${ids.length} yêu cầu đã chọn?`))return;const results=[];for(const id of ids){try{const x=await api(`/api/admin/account-requests/${encodeURIComponent(id)}/${action==='approve'?'approve':action==='supplement'?'supplement':'reject'}`,{method:'POST',body:JSON.stringify({admin_note:note,send_email:send})});results.push({ok:true,x})}catch(err){results.push({ok:false,error:err.data?.error||err.message})}}toast(`Đã xử lý ${results.filter(x=>x.ok).length}/${ids.length} yêu cầu.`,results.some(x=>!x.ok)?'warn':'ok');await load()};
+      const bulkReq=async(action)=>{const ids=requestIds();if(!ids.length)return;let note=await sfPrompt(action==='approve'?'Ghi chú phê duyệt:':action==='supplement'?'Nội dung cần bổ sung:':'Lý do từ chối:');if(note===null||!note.trim())return;let send=false;if(action==='approve'){const choice=await sfPrompt('Gửi email sau phê duyệt?\n1 = Có\n2 = Không','1');if(choice===null)return;send=choice==='1'}if(!await sfConfirm(`Xử lý ${ids.length} yêu cầu đã chọn?`))return;const results=[];for(const id of ids){try{const x=await api(`/api/admin/account-requests/${encodeURIComponent(id)}/${action==='approve'?'approve':action==='supplement'?'supplement':'reject'}`,{method:'POST',body:JSON.stringify({admin_note:note,send_email:send})});results.push({ok:true,x})}catch(err){results.push({ok:false,error:err.data?.error||err.message})}}toast(`Đã xử lý ${results.filter(x=>x.ok).length}/${ids.length} yêu cầu.`,results.some(x=>!x.ok)?'warn':'ok');await load()};
       $('#bulkReqApprove')?.addEventListener('click',()=>bulkReq('approve'));$('#bulkReqSupplement')?.addEventListener('click',()=>bulkReq('supplement'));$('#bulkReqReject')?.addEventListener('click',()=>bulkReq('reject'));syncReqBulk();
 
       $$('[data-open-req]').forEach(
@@ -4322,7 +4467,7 @@ async function renderAdminRequests(c){
 
 
     if($('#sendApprovalLater'))$('#sendApprovalLater').onclick=async()=>{
-      if(!confirm('Gửi thông báo phê duyệt tài khoản đến email đã đăng ký?'))return;
+      if(!await sfConfirm('Gửi thông báo phê duyệt tài khoản đến email đã đăng ký?'))return;
       const button=$('#sendApprovalLater');button.disabled=true;
       try{const x=await api(`/api/admin/account-requests/${r.id}/send-approval`,{method:'POST',body:'{}'});toast(x.email_sent?'Đã gửi email thông báo.':'Không gửi được email: '+(x.email_error||'Kiểm tra cấu hình email'),x.email_sent?'ok':'warn')}
       catch(err){toast(err.data?.error||err.message,'warn')}finally{button.disabled=false}
@@ -4334,7 +4479,7 @@ async function renderAdminRequests(c){
       async()=>{
 
         const note=
-          prompt(
+          await sfPrompt(
             'Ghi chú phê duyệt:',
             'Đã phê duyệt yêu cầu cấp tài khoản.'
           );
@@ -4343,7 +4488,7 @@ async function renderAdminRequests(c){
           return;
         }
 
-        const emailChoice=prompt('Chọn gửi email sau phê duyệt:\n1 = Gửi tự động ngay\n2 = Phê duyệt trước, quản trị gửi sau\n3 = Không gửi email','1');
+        const emailChoice=await sfPrompt('Chọn gửi email sau phê duyệt:\n1 = Gửi tự động ngay\n2 = Phê duyệt trước, quản trị gửi sau\n3 = Không gửi email','1');
         if(emailChoice===null)return;
         if(!['1','2','3'].includes(emailChoice)){toast('Vui lòng chọn 1, 2 hoặc 3.','warn');return}
         const sendEmail=emailChoice==='1';
@@ -4362,7 +4507,7 @@ async function renderAdminRequests(c){
             );
 
 
-          alert(
+          sfAlert(
             `Đã tạo ${z.member_code}. `+
             `Tên đăng nhập: ${z.username}. `+
             `Mật khẩu tạm chỉ hiển thị lần này: ${z.temporary_password}`
@@ -4375,7 +4520,7 @@ async function renderAdminRequests(c){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -4387,7 +4532,7 @@ async function renderAdminRequests(c){
       async()=>{
 
         const note=
-          prompt(
+          await sfPrompt(
             'Nội dung cần bổ sung:'
           );
 
@@ -4413,7 +4558,7 @@ async function renderAdminRequests(c){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -4425,7 +4570,7 @@ async function renderAdminRequests(c){
       async()=>{
 
         const note=
-          prompt(
+          await sfPrompt(
             'Lý do từ chối:'
           );
 
@@ -4451,7 +4596,7 @@ async function renderAdminRequests(c){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -4808,12 +4953,12 @@ async function renderAdminMembers(c){
       const runBulk=async(action,extra={})=>{
         const ids=selectedIds(); if(!ids.length)return;
         const names={lock:'Khóa tài khoản',unlock:'Mở khóa tài khoản',ban:'Cấm tài khoản',unban:'Gỡ cấm tài khoản',issue_card:'Tạo thẻ'};
-        if(!confirm(`${names[action]||'Xử lý'} cho ${ids.length} thành viên đã chọn?`))return;
+        if(!await sfConfirm(`${names[action]||'Xử lý'} cho ${ids.length} thành viên đã chọn?`))return;
         let payload={ids,action,...extra};
         if(action==='ban'){
-          const reason=prompt('Lý do cấm tài khoản:'); if(!reason)return;
+          const reason=await sfPrompt('Lý do cấm tài khoản:'); if(!reason)return;
           payload.reason=reason;
-          const ends=prompt('Ngày hết hạn (YYYY-MM-DD), để trống nếu vô thời hạn:',''); if(ends)payload.ends_at=ends;
+          const ends=await sfPrompt('Ngày hết hạn (YYYY-MM-DD), để trống nếu vô thời hạn:',''); if(ends)payload.ends_at=ends;
         }
         const btn=document.querySelector(`[id="${action==='issue_card'?'bulkCard':action==='lock'?'bulkLock':action==='unlock'?'bulkUnlock':action==='ban'?'bulkBan':'bulkUnban'}"]`); if(btn)btn.disabled=true;
         try{const r=await api('/api/admin/members/bulk',{method:'POST',body:JSON.stringify(payload)});toast(`Đã xử lý ${r.success}/${r.processed} thành viên.`,r.failed?'warn':'ok');await load(page)}catch(err){toast(err.data?.error||err.message,'warn')}finally{syncBulk()}
@@ -5032,7 +5177,7 @@ async function newMemberModal(
           );
 
 
-        alert(
+        sfAlert(
           'Đã tạo '+
           d.member_code
         );
@@ -5044,7 +5189,7 @@ async function newMemberModal(
 
       }catch(err){
 
-        alert(
+        sfAlert(
           err.data?.error||
           err.message
         );
@@ -5173,7 +5318,7 @@ async function openAdminMember(id){
 
   }catch(err){
 
-    alert(
+    sfAlert(
       err.data?.error||
       err.message
     );
@@ -5296,13 +5441,13 @@ function renderAdminMemberTab(
           );
 
 
-          alert(
+          sfAlert(
             'Đã cập nhật hồ sơ.'
           );
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -5554,7 +5699,7 @@ if(tab==='membership'){
             }
           );
 
-          alert(
+          sfAlert(
             'Đã thêm đơn vị / vai trò.'
           );
 
@@ -5564,7 +5709,7 @@ if(tab==='membership'){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -5703,7 +5848,7 @@ if(tab==='membership'){
               }
             );
 
-            alert(
+            sfAlert(
               'Đã cập nhật đơn vị / vai trò.'
             );
 
@@ -5713,7 +5858,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -5741,7 +5886,7 @@ if(tab==='membership'){
 
 
       const ok=
-        confirm(
+        await sfConfirm(
           'Ngừng hiệu lực vai trò này?\n\n'+
           'Bản ghi vẫn được giữ lại trong lịch sử công tác.'
         );
@@ -5760,7 +5905,7 @@ if(tab==='membership'){
           }
         );
 
-        alert(
+        sfAlert(
           'Đã ngừng hiệu lực vai trò.'
         );
 
@@ -5768,7 +5913,7 @@ if(tab==='membership'){
 
       }catch(err){
 
-        alert(
+        sfAlert(
           err.data?.error||
           err.message
         );
@@ -5795,7 +5940,7 @@ if(tab==='membership'){
 
 
       const ok=
-        confirm(
+        await sfConfirm(
           'Ẩn đơn vị / vai trò này khỏi hồ sơ thành viên?\n\n'+
           'Dữ liệu vẫn được giữ trong hệ thống.'
         );
@@ -5814,7 +5959,7 @@ if(tab==='membership'){
           }
         );
 
-        alert(
+        sfAlert(
           'Đã ẩn đơn vị / vai trò.'
         );
 
@@ -5822,7 +5967,7 @@ if(tab==='membership'){
 
       }catch(err){
 
-        alert(
+        sfAlert(
           err.data?.error||
           err.message
         );
@@ -5857,7 +6002,7 @@ if(tab==='membership'){
           }
         );
 
-        alert(
+        sfAlert(
           'Đã hiện lại đơn vị / vai trò.'
         );
 
@@ -5865,7 +6010,7 @@ if(tab==='membership'){
 
       }catch(err){
 
-        alert(
+        sfAlert(
           err.data?.error||
           err.message
         );
@@ -6028,7 +6173,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -6212,7 +6357,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -6373,7 +6518,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -6570,7 +6715,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -6818,7 +6963,7 @@ if(tab==='membership'){
             }
           );
 
-          alert(
+          sfAlert(
             'Đã xác minh chứng nhận.'
           );
 
@@ -6826,7 +6971,7 @@ if(tab==='membership'){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -6850,7 +6995,7 @@ if(tab==='membership'){
             }
           );
 
-          alert(
+          sfAlert(
             'Đã từ chối xác minh.'
           );
 
@@ -6858,7 +7003,7 @@ if(tab==='membership'){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -7049,7 +7194,7 @@ if(tab==='membership'){
               );
 
 
-            alert(
+            sfAlert(
               'Đã cấp GCN. Mã xác minh: '+
               r.verify_code
             );
@@ -7059,7 +7204,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -7336,7 +7481,7 @@ if(tab==='membership'){
             );
 
 
-            alert(
+            sfAlert(
               'Đã cấp thẻ.'
             );
 
@@ -7345,7 +7490,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -7546,7 +7691,7 @@ if(tab==='membership'){
       async()=>{
 
         const password=
-          prompt(
+          await sfPrompt(
             'Mật khẩu tạm mới (tối thiểu 10 ký tự):'
           );
 
@@ -7569,13 +7714,13 @@ if(tab==='membership'){
           );
 
 
-          alert(
+          sfAlert(
             'Đã cấp mật khẩu tạm. Thành viên sẽ được yêu cầu đổi mật khẩu.'
           );
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -7599,7 +7744,7 @@ if(tab==='membership'){
           );
 
 
-          alert(
+          sfAlert(
             'Đã cập nhật tài khoản.'
           );
 
@@ -7608,7 +7753,7 @@ if(tab==='membership'){
 
         }catch(err){
 
-          alert(
+          sfAlert(
             err.data?.error||
             err.message
           );
@@ -7775,7 +7920,7 @@ if(tab==='membership'){
             );
 
 
-            alert(
+            sfAlert(
               'Đã cấp phạm vi.'
             );
 
@@ -7784,7 +7929,7 @@ if(tab==='membership'){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -7807,7 +7952,7 @@ async function refreshAdminMemberTab(pid,tab){
     state.adminMember=d;
     renderAdminMemberTab(tab,d,meta);
   }catch(err){
-    alert(err.data?.error||err.message);
+    sfAlert(err.data?.error||err.message);
   }
 }
 
@@ -7824,11 +7969,11 @@ function lifecycleToolbar(el,buttons){
 }
 
 async function adminRecordAction(pid,tab,kind,id,action,label){
-  if(!confirm(label+'?'))return;
+  if(!await sfConfirm(label+'?'))return;
   try{
     await api(`/api/admin/members/${pid}/${kind}/${id}/${action}`,{method:'POST',body:'{}'});
     await refreshAdminMemberTab(pid,tab);
-  }catch(err){alert(err.data?.error||err.message)}
+  }catch(err){sfAlert(err.data?.error||err.message)}
 }
 
 function editAdminRecordModal(pid,tab,kind,x,meta){
@@ -7893,7 +8038,7 @@ function editAdminRecordModal(pid,tab,kind,x,meta){
       await api(`/api/admin/members/${pid}/${kind}/${x.id}`,{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
       $('#modal')?.remove();
       await refreshAdminMemberTab(pid,tab);
-    }catch(err){alert(err.data?.error||err.message)}
+    }catch(err){sfAlert(err.data?.error||err.message)}
   };
 }
 
@@ -7990,7 +8135,7 @@ function simplePostModal(
         );
 
 
-        alert(
+        sfAlert(
           'Đã lưu.'
         );
 
@@ -7999,7 +8144,7 @@ function simplePostModal(
 
       }catch(err){
 
-        alert(
+        sfAlert(
           err.data?.error||
           err.message
         );
@@ -8218,7 +8363,7 @@ async function renderIssuanceStudio(c){
   const renderQrTable=(rows,compact=false)=>`<div class="table-wrap"><table><thead><tr><th>Mã hồ sơ</th><th>Người được xác minh</th><th>Loại thẻ / giấy xác nhận</th><th>Hiệu lực</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>{const st=x.effective_status||x.status;return `<tr><td><b>${esc(x.reference_number)}</b></td><td>${esc(x.full_name)}</td><td>${esc(x.credential_title)}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td><span class="badge ${st==='active'?'ok':'off'}">${esc(statusLabel(st))}</span></td><td><div class="toolbar"><a class="secondary" href="/verify?code=${encodeURIComponent(x.verify_token)}" target="_blank" rel="noopener">Xem xác minh</a><button class="secondary" data-vqr-download="${esc(x.verify_token)}" data-vqr-filename="${esc(x.reference_number)}-QR.png">Tải QR PNG</button>${st==='active'?`<button class="danger" data-vqr-revoke="${esc(x.id)}">Thu hồi</button>`:''}</div></td></tr>`}).join('')||`<tr><td colspan="6" class="empty">${compact?'Chưa có bản ghi QR xác minh.':'Chưa có hồ sơ QR xác minh nào.'}</td></tr>`}</tbody></table></div>`;
   const bindQrRevoke=async()=>{
     $$('[data-vqr-download]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await downloadQrPng(b.dataset.vqrDownload,b.dataset.vqrFilename);toast('Đã tải QR PNG.')}catch(e){toast(e.message||'Không tải được QR PNG.','warn')}finally{b.disabled=false}});
-    $$('[data-vqr-revoke]').forEach(b=>b.onclick=async()=>{if(!confirm('Thu hồi QR này? Khi thu hồi, mọi bản QR đã in sẽ không còn xác minh hợp lệ.'))return;b.disabled=true;try{await api(`/api/admin/verification-qr/${encodeURIComponent(b.dataset.vqrRevoke)}/revoke`,{method:'POST',body:'{}'});toast('Đã thu hồi hồ sơ QR.');await showTab('qr')}catch(e){toast(e.data?.message||e.data?.detail||e.data?.message||e.data?.detail||e.data?.error||e.message,'warn')}finally{b.disabled=false}})
+    $$('[data-vqr-revoke]').forEach(b=>b.onclick=async()=>{if(!await sfConfirm('Thu hồi QR này? Khi thu hồi, mọi bản QR đã in sẽ không còn xác minh hợp lệ.'))return;b.disabled=true;try{await api(`/api/admin/verification-qr/${encodeURIComponent(b.dataset.vqrRevoke)}/revoke`,{method:'POST',body:'{}'});toast('Đã thu hồi hồ sơ QR.');await showTab('qr')}catch(e){toast(e.data?.message||e.data?.detail||e.data?.message||e.data?.detail||e.data?.error||e.message,'warn')}finally{b.disabled=false}})
   };
   const showQr=async()=>{
     body.innerHTML=`<div class="section-title"><div><h2>Tạo QR xác minh độc lập</h2><p class="muted">Dành cho thẻ được thiết kế bên ngoài, ví dụ bằng Canva. Không tạo tài khoản, Member ID hoặc thẻ PDF.</p></div></div>
@@ -8242,7 +8387,7 @@ async function renderIssuanceStudio(c){
     body.innerHTML=`<div class="section-title"><div><h2>Lịch sử cấp phát</h2><p class="muted">Mỗi nhóm nghiệp vụ được hiển thị riêng; thu hồi một QR không làm thay đổi thẻ thành viên khác.</p></div><button class="primary" id="createEventCredential">Tạo thẻ sự kiện một lần</button></div><div id="eventCreateHost"></div><section class="card"><h3>A. Hồ sơ QR xác minh độc lập</h3><div id="historyQrRows" class="empty">Đang tải…</div></section><section class="card" style="margin-top:12px"><h3>B. Thẻ sự kiện / cấp phát một lần</h3><div id="historyEventRows" class="empty">Đang tải…</div></section><section class="card" style="margin-top:12px"><h3>C. Thẻ thành viên chính thức</h3><div id="historyMemberRows" class="empty">Đang tải…</div></section>`;
     $('#createEventCredential').onclick=()=>renderEventCreate($('#eventCreateHost'));
     try{const q=await loadQr();$('#historyQrRows').innerHTML=renderQrTable(q,true);await bindQrRevoke()}catch(e){$('#historyQrRows').textContent='Không tải được lịch sử QR: '+(e.data?.message||e.data?.detail||e.data?.error||e.message)}
-    try{const rows=await loadOneTime();$('#historyEventRows').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Sự kiện</th><th>Số thẻ</th><th>Hiệu lực</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.full_name)}</td><td>${esc(x.event_name)}</td><td>${esc(x.card_number)}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td>${esc(statusLabel(x.status))}</td><td><button class="secondary" data-ot-pdf="${esc(x.id)}">Tải PDF hai mặt</button>${x.status==='active'?`<button class="danger" data-ot-revoke="${esc(x.id)}">Thu hồi</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có thẻ sự kiện.</td></tr>'}</tbody></table></div>`;$$('[data-ot-pdf]').forEach(b=>b.onclick=async()=>{const x=rows.find(v=>v.id===b.dataset.otPdf);if(!x)return;const type={name:x.card_type_name||'Thẻ sự kiện',template_json:x.card_template_json||'{}'};b.disabled=true;try{await downloadCardPdf(x,templateFor(type))}catch(e){toast(e.message||'Không thể xuất PDF.','warn')}finally{b.disabled=false}});$$('[data-ot-revoke]').forEach(b=>b.onclick=async()=>{if(!confirm('Thu hồi thẻ sự kiện này?'))return;try{await api(`/api/admin/one-time-credentials/${encodeURIComponent(b.dataset.otRevoke)}/revoke`,{method:'POST',body:'{}'});toast('Đã thu hồi thẻ.');await showHistory()}catch(e){toast(e.data?.message||e.data?.detail||e.data?.error||e.message,'warn')}})}catch(e){$('#historyEventRows').textContent='Không tải được lịch sử thẻ sự kiện: '+(e.data?.message||e.data?.detail||e.data?.error||e.message)}
+    try{const rows=await loadOneTime();$('#historyEventRows').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Sự kiện</th><th>Số thẻ</th><th>Hiệu lực</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.full_name)}</td><td>${esc(x.event_name)}</td><td>${esc(x.card_number)}</td><td>${esc(x.issued_at||'—')} → ${esc(x.expires_at||'Không thời hạn')}</td><td>${esc(statusLabel(x.status))}</td><td><button class="secondary" data-ot-pdf="${esc(x.id)}">Tải PDF hai mặt</button>${x.status==='active'?`<button class="danger" data-ot-revoke="${esc(x.id)}">Thu hồi</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có thẻ sự kiện.</td></tr>'}</tbody></table></div>`;$$('[data-ot-pdf]').forEach(b=>b.onclick=async()=>{const x=rows.find(v=>v.id===b.dataset.otPdf);if(!x)return;const type={name:x.card_type_name||'Thẻ sự kiện',template_json:x.card_template_json||'{}'};b.disabled=true;try{await downloadCardPdf(x,templateFor(type))}catch(e){toast(e.message||'Không thể xuất PDF.','warn')}finally{b.disabled=false}});$$('[data-ot-revoke]').forEach(b=>b.onclick=async()=>{if(!await sfConfirm('Thu hồi thẻ sự kiện này?'))return;try{await api(`/api/admin/one-time-credentials/${encodeURIComponent(b.dataset.otRevoke)}/revoke`,{method:'POST',body:'{}'});toast('Đã thu hồi thẻ.');await showHistory()}catch(e){toast(e.data?.message||e.data?.detail||e.data?.error||e.message,'warn')}})}catch(e){$('#historyEventRows').textContent='Không tải được lịch sử thẻ sự kiện: '+(e.data?.message||e.data?.detail||e.data?.error||e.message)}
     try{const rows=await loadMemberCards();$('#historyMemberRows').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Thành viên</th><th>Số thẻ</th><th>Ngày cấp</th><th>Trạng thái</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.full_name)} <span class="meta">${esc(x.member_code||'')}</span></td><td>${esc(x.card_number)}</td><td>${esc(x.issued_at||'—')}</td><td>${esc(statusLabel(x.status))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Chưa có thẻ thành viên.</td></tr>'}</tbody></table></div>`}catch(e){$('#historyMemberRows').textContent='Không tải được lịch sử thẻ thành viên: '+(e.data?.message||e.data?.detail||e.data?.error||e.message)}
   };
   function renderEventCreate(host){
@@ -8330,7 +8475,7 @@ async function renderPortalStudio(c){
         const rows=gov.config_history||[];
         hbox.innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>Phiên bản</th><th>Khóa cấu hình</th><th>Lý do thay đổi</th><th>Thời gian</th><th>Thao tác</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>#${r.version_no}</b></td><td><code>${esc(r.config_key)}</code></td><td>${esc(r.change_reason||'—')}</td><td>${esc(r.created_at)}</td><td><button type="button" class="secondary" data-cfg-rollback="${esc(r.id)}" data-cfg-ver="${r.version_no}">Khôi phục bản #${r.version_no}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Chưa có lịch sử phiên bản cấu hình.</div>';
         $$('[data-cfg-rollback]').forEach(btn=>btn.onclick=async()=>{
-          if(!confirm(`Khôi phục cấu hình giao diện về phiên bản #${btn.dataset.cfgVer}?`))return;
+          if(!await sfConfirm(`Khôi phục cấu hình giao diện về phiên bản #${btn.dataset.cfgVer}?`))return;
           btn.disabled=true;
           try{
             await api('/api/admin/config-history/'+encodeURIComponent(btn.dataset.cfgRollback)+'/rollback',{method:'POST',body:JSON.stringify({change_reason:`Khôi phục thủ công về bản #${btn.dataset.cfgVer}`})});
@@ -8469,7 +8614,7 @@ async function renderAdminOrg(c){
 
 
           if(
-            !confirm(
+            !await sfConfirm(
               'Ngưng hoạt động/xóa đơn vị này?'
             )
           ){
@@ -8493,7 +8638,7 @@ async function renderAdminOrg(c){
 
           }catch(err){
 
-            alert(
+            sfAlert(
               err.data?.error||
               err.message
             );
@@ -8707,7 +8852,7 @@ async function renderAdminOrg(c){
 
               }catch(err){
 
-                alert(
+                sfAlert(
                   err.data?.error||
                   err.message
                 );
@@ -8877,7 +9022,7 @@ async function renderAdminOrg(c){
 
             }catch(err){
 
-              alert(err.data?.error||err.message);
+              sfAlert(err.data?.error||err.message);
               submit.disabled=false;
             }
           };
@@ -8885,7 +9030,7 @@ async function renderAdminOrg(c){
 
       }catch(err){
 
-        alert(
+        sfAlert(
           err.data?.error||
           err.message
         );
@@ -8999,19 +9144,19 @@ async function renderAdminWork(c){
       if(selAll)selAll.onchange=()=>$$('[data-wq-check]').forEach(cb=>{cb.checked=selAll.checked});
       const getSelectedKeys=()=>$$('[data-wq-check]:checked').map(cb=>cb.dataset.wqCheck);
       $('#wqBulkClaimBtn').onclick=async()=>{
-        const keys=getSelectedKeys();if(!keys.length)return alert('Hãy chọn ít nhất 1 công việc trong bảng.');
-        try{const r=await api('/api/admin/work-center/bulk',{method:'POST',body:JSON.stringify({item_keys:keys,action:'claim',handover_note:'Nhận việc hàng loạt từ hàng đợi'})});toast(`Đã nhận ${r.updated_count} công việc.`);await load()}catch(e){alert(e.data?.message||e.message)}
+        const keys=getSelectedKeys();if(!keys.length)return sfAlert('Hãy chọn ít nhất 1 công việc trong bảng.');
+        try{const r=await api('/api/admin/work-center/bulk',{method:'POST',body:JSON.stringify({item_keys:keys,action:'claim',handover_note:'Nhận việc hàng loạt từ hàng đợi'})});toast(`Đã nhận ${r.updated_count} công việc.`);await load()}catch(e){sfAlert(e.data?.message||e.message)}
       };
       $('#wqBulkInProgressBtn').onclick=async()=>{
-        const keys=getSelectedKeys();if(!keys.length)return alert('Hãy chọn ít nhất 1 công việc trong bảng.');
-        try{const r=await api('/api/admin/work-center/bulk',{method:'POST',body:JSON.stringify({item_keys:keys,action:'set_status',status:'in_progress',handover_note:'Chuyển trạng thái đang xử lý hàng loạt'})});toast(`Đã cập nhật ${r.updated_count} công việc.`);await load()}catch(e){alert(e.data?.message||e.message)}
+        const keys=getSelectedKeys();if(!keys.length)return sfAlert('Hãy chọn ít nhất 1 công việc trong bảng.');
+        try{const r=await api('/api/admin/work-center/bulk',{method:'POST',body:JSON.stringify({item_keys:keys,action:'set_status',status:'in_progress',handover_note:'Chuyển trạng thái đang xử lý hàng loạt'})});toast(`Đã cập nhật ${r.updated_count} công việc.`);await load()}catch(e){sfAlert(e.data?.message||e.message)}
       };
       $$('[data-work-view]').forEach(b=>b.onclick=()=>goView(b.dataset.workView));
       $$('[data-wq-remind]').forEach(b=>b.onclick=async()=>{
         try{
           await api('/api/admin/work-center/'+encodeURIComponent(b.dataset.wqRemind),{method:'PATCH',body:JSON.stringify({action:'remind',handover_note:'Gửi nhắc việc có kiểm soát tần suất'})});
           toast('Đã ghi nhận nhắc việc.');await load();
-        }catch(e){alert(e.data?.message||e.data?.error||e.message)}
+        }catch(e){sfAlert(e.data?.message||e.data?.error||e.message)}
       });
       $$('[data-wq-manage]').forEach(b=>b.onclick=async()=>{
         const key=b.dataset.wqManage;
@@ -9059,7 +9204,7 @@ async function renderAdminWork(c){
           try{
             await api('/api/admin/work-center/'+encodeURIComponent(key),{method:'PATCH',body:JSON.stringify(fd)});
             $('#modal')?.remove();toast('Đã lưu điều phối công việc.');await load();
-          }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+          }catch(err){sfAlert(err.data?.message||err.data?.error||err.message)}
         };
       });
     }else if(activeWTab==='support'){
@@ -9163,7 +9308,7 @@ async function renderAdminWork(c){
             const payload=Object.fromEntries(new FormData(e.target));
             await api('/api/admin/support-tickets/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify(payload)});
             $('#modal')?.remove();toast('Đã cập nhật phiếu hỗ trợ.');await load();
-          }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+          }catch(err){sfAlert(err.data?.message||err.data?.error||err.message)}
         };
         $('#ticketMsgForm').onsubmit=async e=>{
           e.preventDefault();
@@ -9171,7 +9316,7 @@ async function renderAdminWork(c){
             const payload=Object.fromEntries(new FormData(e.target));
             await api(`/api/admin/support-tickets/${encodeURIComponent(row.id)}/messages`,{method:'POST',body:JSON.stringify(payload)});
             $('#modal')?.remove();toast('Đã lưu trao đổi vào phiếu hỗ trợ.');await load();
-          }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+          }catch(err){sfAlert(err.data?.message||err.data?.error||err.message)}
         };
       });
     }else if(activeWTab==='workflows'){
@@ -9278,7 +9423,7 @@ function openGovernanceEditModal(row,onDone){
     try{
       await api('/api/admin/governance/registry/'+encodeURIComponent(row.id),{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
       $('#modal')?.remove();toast('Đã cập nhật mục quản trị.');if(onDone)await onDone();
-    }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+    }catch(err){sfAlert(err.data?.message||err.data?.error||err.message)}
   };
 }
 
@@ -9289,7 +9434,7 @@ function openGovernanceModal(domains,onDone){
     try{
       await api('/api/admin/governance/registry',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
       $('#modal')?.remove();toast('Đã lưu mục quản trị mới.');if(onDone)await onDone();
-    }catch(err){alert(err.data?.message||err.data?.error||err.message)}
+    }catch(err){sfAlert(err.data?.message||err.data?.error||err.message)}
   };
 }
 
@@ -9368,7 +9513,7 @@ async function renderAdminSystem(c){
       ?(diagEmail?.status==='sent'?`Nhà cung cấp đã tiếp nhận thư kiểm tra (ID: ${diagEmail.provider_message_id||'OK'})`:diagEmail?.status==='failed'?`Gửi kiểm tra thất bại (${diagEmail.error_detail||'Lỗi nhà cung cấp'})`:'Đã khai báo khóa · chưa kiểm tra gửi thực tế')
       :'Chưa cấu hình (thiếu RESEND_API_KEY)';
     $('#healthBox').innerHTML=`<div class="list-row"><span>Cơ sở dữ liệu</span><b class="${h.database==='ok'?'status-ok':'status-bad'}">${dbLabel}</b></div><div class="list-row"><span>Phiên bản lược đồ ghi nhận</span><b>${esc(h.schema_version??'Chưa xác định')} (mục tiêu: ${targetVer})</b></div><div class="list-row"><span>Phiên bản yêu cầu tối thiểu</span><b>${required}</b></div><div class="list-row"><span>Đối chiếu cấu trúc bảng &amp; cột</span><b class="${migrationBehind?'status-bad':'status-ok'}">${migrationBehind?'Chưa đạt yêu cầu':`Đã đối chiếu đủ ${h.verified_tables_count||63}/${h.total_required_tables||63} bảng &amp; cột bắt buộc`}</b></div>${missing.length?`<div class="service-warning"><b>Thiếu ${missing.length} bảng bắt buộc:</b><div class="health-table-list">${missing.map(esc).join(' · ')}</div></div>`:''}${missingColumns.length?`<div class="service-warning"><b>Thiếu ${missingColumns.length} cột bắt buộc:</b><div class="health-table-list">${missingColumns.map(esc).join(' · ')}</div></div>`:''}<div class="list-row"><span>Kho tệp R2</span><b class="${probe?.status==='passed'?'status-ok':''}">${esc(r2Label)}</b></div><div class="list-row"><span>Email &amp; OTP</span><b>${esc(emailLabel)}</b></div>${migrationBehind?'<div class="service-warning"><b>Cần cập nhật cơ sở dữ liệu.</b> Một số bảng hoặc cột còn thiếu. Bấm "Đồng bộ &amp; Kiểm tra D1" hoặc áp dụng migration 0018.</div>':''}${healthError?`<div class="service-warning">Không đọc được tình trạng hệ thống: ${esc(healthError)}</div>`:''}<div class="meta health-footnote">Trạng thái đọc R2 chỉ chuyển sang ĐẠT toàn diện sau khi chạy kiểm tra Đọc/Ghi/Đọc lại SHA-256/Xóa; trạng thái email phân biệt rõ giữa khai báo khóa, nhà cung cấp tiếp nhận (provider_accepted) và thư vào hộp thư đến.</div>`;
-    $$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()});
+    $$('[data-filter-del]').forEach(b=>b.onclick=async()=>{if(!await sfConfirm('Xóa bộ lọc này?'))return;await api('/api/admin/saved-filters/'+encodeURIComponent(b.dataset.filterDel),{method:'DELETE'});await refresh()});
     $$('[data-filter-apply]').forEach(b=>b.onclick=async()=>{
       const item=filterItems.find(x=>x.id===b.dataset.filterApply);
       if(!item)return;
@@ -9488,7 +9633,7 @@ async function renderAdminSystem(c){
       try{
         await api('/api/admin/governance/legal-signoff',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(ev.target)))});
         $('#modal')?.remove();toast('Đã cập nhật trạng thái thẩm định pháp lý.');await refresh();
-      }catch(e){alert(e.data?.message||e.message)}
+      }catch(e){sfAlert(e.data?.message||e.message)}
     };
   };
 
@@ -9674,24 +9819,35 @@ function renderError(msg){
 /* =========================================================
    PUBLIC REGISTRATION MODES (TRIAL 24H/48H, DYNAMIC FORMS + SIGNATURE PAD, PUBLIC SK EVENTS)
    ========================================================= */
+function renderPublicEventsHome(){
+  $('#app').innerHTML=`
+    <main class="standalone">
+      <header class="standalone-header">
+        <a href="/login" data-public-path="/login"><img src="${logo}" data-brand-logo alt="Sky First Network"> <span data-site-name>Trung tâm Nghiệp vụ Số Sky First</span></a>
+        <div class="toolbar" style="margin:0;gap:10px">
+          <a class="btn ghost sm" id="backToRegFourStepsLink" href="/register" data-public-path="/register" style="text-decoration:none">← Quay lại Hồ sơ Đăng ký (04 bước)</a>
+          <a class="btn secondary sm" href="/login" data-public-path="/login" style="text-decoration:none">Trang chủ &amp; Đăng nhập</a>
+        </div>
+      </header>
+      <section class="standalone-panel" style="max-width:1050px">
+        <div class="eyebrow">TRUNG TÂM NGHIỆP VỤ SỐ SKY FIRST · TRANG CHỦ HOẠT ĐỘNG</div>
+        <h1>Hoạt động &amp; Sự kiện Công khai</h1>
+        <p class="muted">Tra cứu thông tin chi tiết, đăng ký tham gia, nộp minh chứng và thực hiện điểm danh QR cho các chương trình, hoạt động cộng đồng của Sky First Network.</p>
+        <div id="pubEventsHomeHost" style="margin-top:18px"></div>
+      </section>
+    </main>
+  `;
+  wirePublicLinks();
+  const host=$('#pubEventsHomeHost');
+  if(host)renderPublicActivitiesList(host);
+}
+
 function bindPublicRegModes(){
   const toggleBtn=$('#togglePubEventsViewBtn');
-  const stdWrap=$('#pubRegStandardWrap');
-  const dynHost=$('#pubRegDynamicHost');
-  if(!toggleBtn||!stdWrap||!dynHost)return;
-  let showingEvents=false;
-  toggleBtn.onclick=async()=>{
-    showingEvents=!showingEvents;
-    if(!showingEvents){
-      stdWrap.style.display='block';
-      dynHost.style.display='none';
-      toggleBtn.textContent='Xem Hoạt động & Sự kiện Công khai →';
-      return;
-    }
-    stdWrap.style.display='none';
-    dynHost.style.display='block';
-    toggleBtn.textContent='← Quay lại Hồ sơ Đăng ký (04 bước)';
-    await renderPublicActivitiesList(dynHost);
+  if(!toggleBtn)return;
+  toggleBtn.onclick=e=>{
+    e.preventDefault();
+    routePublic('/su-kien-cong-khai');
   };
 }
 
@@ -9890,7 +10046,7 @@ async function renderAdminAccountLifecycle(c){
         <div class="card stat"><span>Tổng số tài khoản</span><strong>${Number(st.total||0)}</strong></div>
         <div class="card stat"><span>Đang hoạt động</span><strong>${Number(st.active||0)}</strong></div>
         <div class="card stat"><span>Sắp hết hạn (&le; 72h)</span><strong class="status-warn">${Number(st.expiring_soon||0)}</strong></div>
-        <div class="card stat"><span>Đã hết hạn / Thu hồi</span><strong class="status-bad">${Number((st.expired||0)+(st.locked_or_revoked||0))}</strong></div>
+        <div class="card stat"><span>Đã hết hạn / Thu hồi</span><strong class="${Number((st.expired||0)+(st.locked_or_revoked||0))>0?'status-bad':''}">${Number((st.expired||0)+(st.locked_or_revoked||0))}</strong></div>
       </div>
       <div class="toolbar" style="margin-bottom:12px">
         <input id="alcSearch" placeholder="Tìm username, họ tên, mã thành viên, email..." value="${esc(filters.q)}" style="min-width:240px">
@@ -9971,7 +10127,7 @@ async function renderAdminAccountLifecycle(c){
         try{
           await api('/api/admin/accounts-center/'+encodeURIComponent(aid)+'/lifecycle',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
           $('#modal')?.remove();toast('Đã cập nhật thời hạn tài khoản.');await load();
-        }catch(err){alert(err.data?.message||err.message)}
+        }catch(err){sfAlert(err.data?.message||err.message)}
       };
     });
   };
@@ -9998,7 +10154,7 @@ async function renderAdminAccountLifecycle(c){
       try{
         await api('/api/admin/accounts-center',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
         $('#modal')?.remove();toast('Đã tạo tài khoản kèm thời hạn.');await load();
-      }catch(err){alert(err.data?.message||err.message)}
+      }catch(err){sfAlert(err.data?.message||err.message)}
     };
   };
   await load();
@@ -10069,7 +10225,7 @@ async function renderAdminFormsAndSubmissions(c){
         $('#newDynFormModal').onsubmit=async e=>{
           e.preventDefault();
           const fd=Object.fromEntries(new FormData(e.target));
-          let fields=[];try{fields=JSON.parse(fd.fields_json)}catch{return alert('JSON danh sách trường không hợp lệ.')}
+          let fields=[];try{fields=JSON.parse(fd.fields_json)}catch{return sfAlert('JSON danh sách trường không hợp lệ.')}
           await api('/api/admin/forms',{method:'POST',body:JSON.stringify({...fd,fields,require_attachment:Boolean(fd.require_attachment),require_signature:Boolean(fd.require_signature)})});
           $('#modal')?.remove();toast('Đã tạo biểu mẫu mới.');await load();
         };
@@ -10099,7 +10255,7 @@ async function renderAdminFormsAndSubmissions(c){
         $('#editDynFormModal').onsubmit=async e=>{
           e.preventDefault();
           const fd=Object.fromEntries(new FormData(e.target));
-          let fields=[];try{fields=JSON.parse(fd.fields_json)}catch{return alert('JSON không hợp lệ.')}
+          let fields=[];try{fields=JSON.parse(fd.fields_json)}catch{return sfAlert('JSON không hợp lệ.')}
           await api('/api/admin/forms/'+encodeURIComponent(f.id),{method:'PATCH',body:JSON.stringify({...fd,fields})});
           $('#modal')?.remove();toast('Đã lưu phiên bản biểu mẫu mới.');await load();
         };
@@ -10167,7 +10323,7 @@ async function renderAdminFormsAndSubmissions(c){
           try{
             await api('/api/admin/submissions/'+encodeURIComponent(sub.id),{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
             $('#modal')?.remove();toast('Đã cập nhật trạng thái hồ sơ.');await load();
-          }catch(err){alert(err.data?.message||err.message)}
+          }catch(err){sfAlert(err.data?.message||err.message)}
         };
       });
     }else if(activeTab==='policies'){
@@ -10221,7 +10377,7 @@ async function renderAdminFormsAndSubmissions(c){
             const fd=Object.fromEntries(new FormData(e.target));
             await api('/api/admin/policies',{method:'POST',body:JSON.stringify({...fd,requires_reconsent:Boolean(fd.requires_reconsent)})});
             $('#modal')?.remove();toast('Đã ban hành phiên bản chính sách mới.');await load();
-          }catch(err){alert(err.data?.message||err.message)}
+          }catch(err){sfAlert(err.data?.message||err.message)}
         };
       };
     }
@@ -10298,7 +10454,7 @@ async function renderAdminSkEvents(c){
       try{
         await api('/api/admin/sk-events',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
         $('#modal')?.remove();toast('Đã tạo hồ sơ bản nháp sự kiện.');await load();
-      }catch(err){alert(err.data?.message||err.message)}
+      }catch(err){sfAlert(err.data?.message||err.message)}
     };
   };
   await load();
@@ -10352,7 +10508,7 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
     try{
       await api('/api/admin/sk-events/'+encodeURIComponent(ev.id)+'/transition',{method:'POST',body:JSON.stringify({action,note})});
       $('#modal')?.remove();toast(`Đã thực hiện bước: ${action}`);if(onRefresh)await onRefresh();
-    }catch(e){alert(e.data?.message||e.message)}
+    }catch(e){sfAlert(e.data?.message||e.message)}
   });
   $('#skAddTaskForm').onsubmit=async e=>{
     e.preventDefault();
@@ -10368,7 +10524,7 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
     try{
       await api('/api/admin/sk-events/'+encodeURIComponent(ev.id)+'/qr-sessions',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
       $('#modal')?.remove();await openSkEventWorkspaceModal(ev.id,onRefresh);if(onRefresh)await onRefresh();
-    }catch(err){alert(err.data?.message||err.message)}
+    }catch(err){sfAlert(err.data?.message||err.message)}
   };
   $$('[data-sk-qr-revoke]').forEach(b=>b.onclick=async()=>{
     await api('/api/admin/sk-events/'+encodeURIComponent(ev.id)+'/qr-sessions/'+encodeURIComponent(b.dataset.skQrRevoke)+'/revoke',{method:'POST',body:JSON.stringify({reason:'Thu hồi mã QR từ bàn điều hành'})});
@@ -10557,7 +10713,7 @@ async function renderInternalCommunity(c){
       toast('Đã cập nhật kiểm duyệt bài viết.');await load();
     });
     $$('[data-post-report]').forEach(b=>b.onclick=async()=>{
-      const reason=prompt('Nhập lý do báo cáo bài viết vi phạm quy chế nội bộ:');
+      const reason=await sfPrompt('Nhập lý do báo cáo bài viết vi phạm quy chế nội bộ:');
       if(!reason)return;
       await api('/api/community/posts/'+encodeURIComponent(b.dataset.postReport)+'/report',{method:'POST',body:JSON.stringify({reason})});
       toast('Đã gửi báo cáo nội dung tới bộ phận kiểm duyệt.');
@@ -10610,7 +10766,7 @@ async function renderInternalCommunity(c){
       try{
         const r=await api('/api/community/posts',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
         $('#modal')?.remove();toast(r.moderation_status==='published'?'Đã đăng bài viết.':'Đã gửi nội dung vào hàng đợi chờ phê duyệt xuất bản.');await load();
-      }catch(err){alert(err.data?.message||err.message)}
+      }catch(err){sfAlert(err.data?.message||err.message)}
     };
   };
   await load();

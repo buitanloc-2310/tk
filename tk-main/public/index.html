@@ -25,7 +25,7 @@
     if (window.__SFN_APP_STARTED__) return;
     var app = document.getElementById('app');
     if (!app) return;
-    app.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Arial,sans-serif;background:#f7fbff"><section style="max-width:680px;width:100%;background:#fff;border:1px solid #dbe7f0;border-radius:18px;padding:24px;box-shadow:0 18px 50px rgba(15,50,80,.08)"><h1 style="margin:0 0 10px;color:#123b5a">Không thể khởi động Trung tâm Nghiệp vụ Số Sky First</h1><p style="color:#526b7e;line-height:1.6">Trình duyệt đã gặp lỗi khi tải giao diện. Hãy tải lại trang; nếu lỗi vẫn còn, mở DevTools → Console và gửi lỗi hiển thị cho quản trị hệ thống.</p><p style="font-size:12px;color:#7890a2">Lỗi: ' + String(e.message || 'JavaScript startup error').replace(/[&<>]/g, function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])}) + '</p></section></main>';
+    app.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Arial,sans-serif;background:#f7fbff"><section style="max-width:680px;width:100%;background:#fff;border:1px solid #dbe7f0;border-radius:18px;padding:24px;box-shadow:0 18px 50px rgba(15,50,80,.08)"><h1 style="margin:0 0 10px;color:#123b5a">Không thể khởi động Trung tâm Nghiệp vụ Số Sky First</h1><p style="color:#526b7e;line-height:1.6">Hệ thống gặp gián đoạn khi tải giao diện. Vui lòng tải lại trang hoặc liên hệ bộ phận hỗ trợ qua support@skyfirst.io.vn nếu sự cố tiếp diễn.</p><p style="font-size:12px;color:#7890a2">Lỗi: ' + String('Vui lòng tải lại trang để tiếp tục sử dụng.').replace(/[&<>]/g, function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])}) + '</p></section></main>';
   });
 </script>
 <script defer src="/app.js?v=20261009-member-v11-chainfix"></script>
@@ -35,7 +35,7 @@
       if (window.__SFN_APP_STARTED__) return;
       var app = document.getElementById('app');
       if (app && !app.innerHTML.trim()) {
-        app.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Arial,sans-serif;background:#f7fbff"><section style="max-width:680px;width:100%;background:#fff;border:1px solid #dbe7f0;border-radius:18px;padding:24px"><h1 style="margin:0 0 10px;color:#123b5a">Giao diện chưa khởi động</h1><p style="color:#526b7e;line-height:1.6">Tệp giao diện chưa được trình duyệt thực thi. Hãy tải lại trang hoặc kiểm tra cache/CDN của <code>/app.js</code>.</p></section></main>';
+        app.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Arial,sans-serif;background:#f7fbff"><section style="max-width:680px;width:100%;background:#fff;border:1px solid #dbe7f0;border-radius:18px;padding:24px"><h1 style="margin:0 0 10px;color:#123b5a">Giao diện chưa khởi động</h1><p style="color:#526b7e;line-height:1.6">Hệ thống đang tải giao diện. Vui lòng tải lại trang sau ít giây hoặc liên hệ support@skyfirst.io.vn.</p></section></main>';
       }
     }, 1200);
   });

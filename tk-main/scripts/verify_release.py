@@ -353,10 +353,25 @@ else:
 # 3. Registration Form Remediation & Login Download Removal
 if 'Hồ sơ Thành viên (12 tháng / 01 năm)' in front:
     fail('renamed Hồ sơ Đăng ký', 'old label Hồ sơ Thành viên (12 tháng / 01 năm) still present')
-elif 'Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước)' in front and "['Thông tin cá nhân','Học tập & công việc','Hồ sơ Đăng ký','Xác nhận & gửi']" in front:
+elif "showRegistrationPage(\n    'Hồ sơ Đăng ký'" in front and "['Thông tin cá nhân','Học tập & công việc','Hồ sơ Đăng ký','Xác nhận & gửi']" in front:
     ok('renamed Hồ sơ Thành viên to Hồ sơ Đăng ký with 4 canonical steps')
 else:
     fail('renamed Hồ sơ Đăng ký', 'expected Hồ sơ Đăng ký label or 4 steps missing')
+
+if 'Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước)' in front:
+    fail('removed redundant (04 bước) badge', 'Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước) still present')
+else:
+    ok('removed Biểu mẫu chuẩn: Hồ sơ Đăng ký (04 bước) badge from website')
+
+if 'href="https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai"' in front and '← Quay lại Hồ sơ Đăng ký (04 bước)' in front and '/su-kien-cong-khai' in back:
+    ok('public events link points to https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai and preserves ← Quay lại Hồ sơ Đăng ký (04 bước)')
+else:
+    fail('public events link & back link', 'missing exact https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai href or ← Quay lại Hồ sơ Đăng ký (04 bước)')
+
+if re.search(r'(?<![a-zA-Z0-9_])(alert|confirm|prompt)\s*\(', front):
+    fail('custom dialog replacement', 'native alert(), confirm(), or prompt() still present in public/app.js')
+else:
+    ok('replaced all native alert(), confirm(), prompt() dialogs with custom Sky First dialog (sfAlert/sfConfirm/sfPrompt)')
 
 if 'data-pub-reg-mode="trial"' in front or 'data-pub-reg-mode="dynamic_forms"' in front:
     fail('removed public trial & dynamic_forms tabs', 'trial or dynamic_forms tab still present on public registration')

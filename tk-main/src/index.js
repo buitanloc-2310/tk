@@ -9003,6 +9003,14 @@ export default{
       ));
     }
 
+    if(['/login','/register','/registration-status','/su-kien-cong-khai'].includes(url.pathname)){
+      const u=new URL(request.url);
+      u.pathname='/index.html';
+      return withSecurityHeaders(await env.ASSETS.fetch(
+        new Request(u.toString(),{method:'GET',headers:request.headers})
+      ));
+    }
+
     return withSecurityHeaders(await env.ASSETS.fetch(request));
   }
 };
