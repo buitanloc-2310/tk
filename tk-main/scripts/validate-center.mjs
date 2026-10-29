@@ -1419,7 +1419,7 @@ function buildTestZip(entries){
   });
   assert.equal((await worker.fetch(unprivFileReq, { DB, FILES })).status, 403);
   const adminFileReq = new Request('https://nghiepvu.skyfirst.io.vn' + okEvBody.evidence_photo_url, {
-    headers: { cookie: 'sfn_session=test_session_token' }
+    headers: { cookie: 'sfn_session=test' }
   });
   assert.equal((await worker.fetch(adminFileReq, { DB, FILES })).status, 200);
   checks += 3;

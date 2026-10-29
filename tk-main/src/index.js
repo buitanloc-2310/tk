@@ -412,8 +412,10 @@ async function reconcileGovernanceColumns(env){
     const existing=new Set((info.results||[]).map(c=>c.name));
     for(const [colName,colDef] of colSpecs){
       if(!existing.has(colName)){
-        await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${colName} ${colDef}`).run();
-        added.push(`${table}.${colName}`);
+        try{
+          await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${colName} ${colDef}`).run();
+          added.push(`${table}.${colName}`);
+        }catch{}
       }
     }
   }
@@ -2301,7 +2303,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
   if(url.pathname==='/api/public/sk-events'&&req.method==='GET'){
     await ensureGovernanceTables(env);
     const r=await env.DB.prepare(`
-      SELECT e.id,e.event_code,e.name,e.purpose,e.expected_outcomes,e.event_type,e.domain_field,e.scale_label,e.proposing_org_id,e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,e.starts_at,e.ends_at,e.location_or_platform,e.target_participants,e.eligibility_criteria,e.expected_participants,e.registration_opens_at,e.registration_closes_at,e.max_registrations,e.status,e.registration_state,e.published_at
+      SELECT e.id,e.event_code,e.slug,e.name,e.purpose,e.expected_outcomes,e.event_type,e.domain_field,e.scale_label,e.proposing_org_id,e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,e.starts_at,e.ends_at,e.location_or_platform,e.target_participants,e.eligibility_criteria,e.expected_participants,e.registration_opens_at,e.registration_closes_at,e.max_registrations,e.status,e.registration_state,e.published_at
       FROM sk_events e
       LEFT JOIN org_nodes o ON o.id=e.host_org_id
       WHERE e.status IN ('published','registration_open','registration_closed','ongoing','completed')
@@ -2315,7 +2317,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     await ensureGovernanceTables(env);
     const eid=decodeURIComponent(pubSkDetailMatch[1]);
     const ev=await env.DB.prepare(`
-      SELECT e.id,e.event_code,e.name,e.purpose,e.expected_outcomes,e.event_type,e.domain_field,e.scale_label,
+      SELECT e.id,e.event_code,e.slug,e.name,e.purpose,e.expected_outcomes,e.event_type,e.domain_field,e.scale_label,
         e.proposing_org_id,e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,
         e.starts_at,e.ends_at,e.location_or_platform,e.target_participants,e.eligibility_criteria,
         e.expected_participants,e.implementation_plan,e.registration_form_id,e.registration_opens_at,
@@ -2446,12 +2448,29 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(['draft','pending_appraisal','pending_approval','revision_requested','rejected'].includes(ev.status)){
       return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',event_name:ev.name,status:ev.status,message:'Hoạt động hiện chưa mở điểm danh chính thức.'},403);
     }
-    const sessions=(await env.DB.prepare(`
+    let sessions=(await env.DB.prepare(`
       SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status,
         CASE WHEN ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
         CASE WHEN starts_at>datetime('now') THEN 1 ELSE 0 END not_started
       FROM sk_qr_sessions WHERE event_id=? ORDER BY created_at DESC
     `).bind(ev.id).all()).results||[];
+    if(!sessions.length&&['approved','published','registration_open','registration_closed','ongoing'].includes(ev.status)){
+      const autoQid=uid('skqr');
+      const autoCode=`SKM-${String(ev.event_code||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(-6)||'2026'}`;
+      const autoTok=`SKQR_${String(ev.event_code||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase()}`;
+      const mgr=ev.attendance_manager_name||ev.lead_person_name||'Ban Tổ chức';
+      await env.DB.prepare(`
+        INSERT OR IGNORE INTO sk_qr_sessions(
+          id,session_code,event_id,session_name,qr_token,manual_code,attendance_manager_name,
+          starts_at,ends_at,status,require_approved_registration,allow_duplicate_checkin,created_by_account_id
+        ) VALUES(?,?,?,?,?,?,?,'2025-01-01 00:00:00','2030-12-31 23:59:59','active',0,0,'system')
+      `).bind(autoQid,`SK-QR-${ev.event_code}`,ev.id,'Phiên điểm danh chính thức',autoTok,autoCode,mgr).run();
+      sessions=(await env.DB.prepare(`
+        SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status,
+          0 is_expired, 0 not_started
+        FROM sk_qr_sessions WHERE event_id=? ORDER BY created_at DESC
+      `).bind(ev.id).all()).results||[];
+    }
     const activeSessions=sessions.filter(s=>s.status==='active'&&!s.is_expired&&!s.not_started);
     const tokenParam=clean(url.searchParams.get('t'),200);
     let tokenState=null;
@@ -2489,6 +2508,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       },
       checkin_open:activeSessions.length>0,
       active_session_name:activeSessions[0]?.session_name||null,
+      active_qr_token:(!tokenParam&&activeSessions[0])?activeSessions[0].qr_token:null,
       token_state:tokenState,
       qr_path:`/q-r/${canonicalSlug}`,
       qr_url:`https://nghiepvu.skyfirst.io.vn/q-r/${canonicalSlug}`
@@ -2592,9 +2612,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         CASE WHEN q.starts_at>datetime('now') THEN 1 ELSE 0 END not_started
       FROM sk_qr_sessions q
       JOIN sk_events e ON e.id=q.event_id
-      WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) OR upper(q.session_code)=upper(?)
+      WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) OR upper(q.session_code)=upper(?) OR (e.id=? AND upper(e.event_code)=upper(?))
       LIMIT 1
-    `).bind(codeInput,codeInput,codeInput).first();
+    `).bind(codeInput,codeInput,codeInput,targetEv?.id||'',codeInput).first();
 
     if(!qs){
       await safeRateFail(env,rateKey,600,8);
@@ -9225,11 +9245,9 @@ export default{
     }
 
     if(['/login','/register','/registration-status','/su-kien-cong-khai'].includes(url.pathname)||url.pathname.startsWith('/q-r/')){
-      const u=new URL(request.url);
-      u.pathname='/index.html';
-      return withSecurityHeaders(await env.ASSETS.fetch(
-        new Request(u.toString(),{method:'GET',headers:request.headers})
-      ));
+      const u=new URL('/index.html',request.url);
+      const idxRes=await env.ASSETS.fetch(new Request(u.toString(),{method:'GET'}));
+      if(idxRes&&idxRes.status===200)return withSecurityHeaders(idxRes);
     }
 
     return withSecurityHeaders(await env.ASSETS.fetch(request));

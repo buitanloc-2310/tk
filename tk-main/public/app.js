@@ -9859,6 +9859,7 @@ async function renderPublicQrCheckinPage(slug){
     const d=await api(infoUrl);
     const ev=d.event||{};
     const tokState=d.token_state;
+    const effectiveQrToken=(Boolean(effectiveQrToken))?scannedToken:(d.active_qr_token||'');
     const idemKey='chk_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
 
     panel.innerHTML=`
@@ -9893,19 +9894,19 @@ async function renderPublicQrCheckinPage(slug){
           <div style="font-weight:800;margin-bottom:8px;color:#0d2d49">Phương thức xác thực điểm danh *</div>
           <div class="toolbar" style="margin:0 0 10px;gap:16px">
             <label style="display:flex;align-items:center;gap:6px;font-weight:700;cursor:pointer">
-              <input type="radio" name="checkin_method" value="qr_scan" ${scannedToken&&(!tokState||tokState.valid)?'checked':''} style="width:auto">
+              <input type="radio" name="checkin_method" value="qr_scan" ${Boolean(effectiveQrToken)?'checked':''} style="width:auto">
               <span>1. Quét mã QR của hoạt động</span>
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-weight:700;cursor:pointer">
-              <input type="radio" name="checkin_method" value="manual_code" ${!scannedToken||(tokState&&!tokState.valid)?'checked':''} style="width:auto">
+              <input type="radio" name="checkin_method" value="manual_code" ${!effectiveQrToken?'checked':''} style="width:auto">
               <span>2. Nhập mã điểm danh thủ công</span>
             </label>
           </div>
-          <div id="qrScanMethodBox" style="display:${scannedToken&&(!tokState||tokState.valid)?'block':'none'}">
-            <input type="hidden" name="qr_token" id="qrScannedTokenInput" value="${esc(scannedToken&&(!tokState||tokState.valid)?scannedToken:'')}">
+          <div id="qrScanMethodBox" style="display:${Boolean(effectiveQrToken)?'block':'none'}">
+            <input type="hidden" name="qr_token" id="qrScannedTokenInput" value="${esc(effectiveQrToken)}">
             <div class="meta" style="color:#166534;font-weight:700">✓ Đã nhận diện mã QR điểm danh của hoạt động: <b>${esc(d.active_session_name||ev.name)}</b></div>
           </div>
-          <div id="manualCodeMethodBox" style="display:${!scannedToken||(tokState&&!tokState.valid)?'block':'none'}">
+          <div id="manualCodeMethodBox" style="display:${!effectiveQrToken?'block':'none'}">
             <label>Mã điểm danh hoạt động (do Người phụ trách điểm danh cung cấp) *
               <input name="manual_code" id="qrManualCodeInput" placeholder="Ví dụ: SKM-1234AB hoặc mã phiên điểm danh" value="${esc(!scannedToken?qsParams.get('code')||'':'')}" autocomplete="off">
             </label>
@@ -10198,8 +10199,7 @@ async function renderPublicActivitiesList(host){
         <p class="muted">${esc(ev.purpose)}</p>
         <div class="meta">Đơn vị tổ chức: <b>${esc(ev.host_org_name||'Sky First Network')}</b> · Thời gian: <b>${esc(ev.starts_at)} → ${esc(ev.ends_at)}</b> · Địa điểm: <b>${esc(ev.location_or_platform)}</b>${ev.registration_closes_at?` · Hạn đăng ký: <b>${esc(ev.registration_closes_at)}</b>`:''}</div>
         <div class="toolbar" style="margin-top:10px">
-          <button type="button" class="primary" data-open-pub-ev-detail="${esc(ev.id)}">Xem chi tiết &amp; Đăng ký</button>
-          <a class="btn secondary" href="/q-r/${esc(ev.slug||ev.event_code.toLowerCase())}" data-public-path="/q-r/${esc(ev.slug||ev.event_code.toLowerCase())}" style="text-decoration:none">Điểm danh QR / Nhập mã (/q-r/${esc(ev.slug||ev.event_code.toLowerCase())}) →</a>
+          <button type="button" class="primary" data-open-pub-ev-detail="${esc(ev.id)}">Xem chi tiết &amp; Đăng ký →</button>
         </div>
       </div>`).join('')||'<div class="empty">Hiện chưa có hoạt động hoặc sự kiện công khai nào đang mở.</div>'}
     </div>
@@ -10266,17 +10266,9 @@ async function renderPublicActivityDetail(host,eventId){
         </div>
 
         <div class="card">
-          <h3>Điểm danh QR &amp; Tra cứu Trạng thái Tham gia</h3>
-          <p class="muted">Hướng dẫn điểm danh: Nhập mã phiên QR do Ban Tổ chức cung cấp tại buổi sinh hoạt kèm địa chỉ Email đã đăng ký để ghi nhận điểm danh trực tiếp trên máy chủ.</p>
-          <form id="pubEvCheckinForm" class="form-grid">
-            <label>Mã QR phiên điểm danh *<input name="qr_token" required placeholder="Nhập mã QR phiên điểm danh"></label>
-            <label>Email đã đăng ký *<input type="email" name="email" required placeholder="Nhập email của bạn"></label>
-            <label style="grid-column:1/-1">Họ và tên<input name="full_name" placeholder="Nhập họ và tên"></label>
-            <button class="primary" style="grid-column:1/-1">Xác nhận Điểm danh QR</button>
-            <div id="pubEvCheckinResult" style="grid-column:1/-1"></div>
-          </form>
-          <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
-            <b>Tra cứu trạng thái đăng ký &amp; điểm danh của tôi:</b>
+          <h3>Tra cứu Trạng thái Đăng ký Tham gia</h3>
+          <p class="muted">Nhập địa chỉ Email đã đăng ký để kiểm tra mã đăng ký và trạng thái ghi nhận tham gia hoạt động của bạn.</p>
+          <div style="margin-top:10px">
             <div class="toolbar" style="margin-top:8px">
               <input id="pubEvLookupEmail" type="email" placeholder="Nhập email đã đăng ký">
               <button type="button" class="secondary" id="pubEvLookupBtn">Tra cứu</button>
