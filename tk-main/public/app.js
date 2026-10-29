@@ -9955,7 +9955,7 @@ async function renderPublicQrCheckinPage(slug){
         </div>
       </header>
       <section class="standalone-panel" style="max-width:780px" id="qrCheckinPanel">
-        <div class="empty">Đang tải thông tin điểm danh hoạt động...</div>
+        <div class="empty">Đang kiểm tra hoạt động và trạng thái phiên điểm danh...</div>
       </section>
     </main>
   `;
@@ -9969,37 +9969,49 @@ async function renderPublicQrCheckinPage(slug){
     const infoUrl='/api/public/q-r/'+encodeURIComponent(cleanSlug)+(scannedToken?'?t='+encodeURIComponent(scannedToken):'');
     const d=await api(infoUrl);
     const ev=d.event||{};
+    const cState=d.checkin_state||{
+      state_no:d.checkin_open?3:2,
+      state_code:d.checkin_open?'SESSION_ACTIVE_OPEN':'EVENT_ONGOING_NO_ACTIVE_SESSION',
+      can_checkin:Boolean(d.checkin_open),
+      badge_label:d.checkin_open?'Phiên điểm danh đang hoạt động':'Chưa mở phiên điểm danh',
+      badge_class:d.checkin_open?'ok':'warn',
+      message:d.checkin_open?'Đang mở tiếp nhận điểm danh.':'Hoạt động hiện chưa mở phiên điểm danh.'
+    };
     const tokState=d.token_state;
-    const hasValidScannedToken=Boolean(scannedToken&&(!tokState||tokState.valid));
-    const effectiveQrToken=hasValidScannedToken?scannedToken:(d.active_qr_token||'');
+    const hasValidScannedToken=Boolean(scannedToken&&tokState&&tokState.valid);
+    const effectiveQrToken=hasValidScannedToken?scannedToken:(cState.can_checkin?(d.active_qr_token||''):'');
     const qrImgSrc=d.qr_image_url||(`/api/public/q-r/${encodeURIComponent(ev.slug||cleanSlug)}/qr-image`+(effectiveQrToken?`?t=${encodeURIComponent(effectiveQrToken)}`:''));
     const idemKey='chk_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
+
+    // Unified single status banner (never contradictory!)
+    const statusBoxStyle=cState.can_checkin
+      ?'background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d'
+      :(cState.badge_class==='warn'?'background:#fffbeb;border:1px solid #fde68a;color:#92400e':'background:#fff5f5;border:1px solid #fecaca;color:#991b1b');
 
     panel.innerHTML=`
       <div class="eyebrow">CỔNG ĐIỂM DANH HOẠT ĐỘNG CÔNG KHAI · KHÔNG YÊU CẦU ĐĂNG NHẬP</div>
       <h1 style="margin:6px 0 8px">${esc(ev.name)}</h1>
       <p class="muted" style="margin:0 0 16px">${esc(ev.purpose||'Xác nhận tham dự hoạt động chính thức của Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First.')}</p>
 
-      <div class="request-note" style="margin-bottom:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-        <img src="${esc(qrImgSrc)}" alt="Mã QR Điểm danh ${esc(ev.name)}" width="112" height="112" style="border:1px solid #dbe7f3;border-radius:12px;background:#fff;padding:4px;flex:0 0 112px;object-fit:contain">
+      <div class="request-note" style="margin-bottom:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        ${cState.can_checkin?`<img src="${esc(qrImgSrc)}" alt="Mã QR Điểm danh ${esc(ev.name)}" width="112" height="112" style="border:1px solid #dbe7f3;border-radius:12px;background:#fff;padding:4px;flex:0 0 112px;object-fit:contain">`:''}
         <div class="grid" style="flex:1;min-width:240px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
-          <div><b>Mã hoạt động:</b> <code>${esc(ev.event_code)}</code><br><b>Đường dẫn QR:</b> <code>/q-r/${esc(ev.slug)}</code><br><b>Cổng điểm danh:</b> <span class="badge ${d.checkin_open?'ok':'warn'}">${d.checkin_open?'Đang mở điểm danh':'Chưa mở phiên'}</span></div>
-          <div><b>Thời gian:</b> ${esc(ev.starts_at||'—')} → ${esc(ev.ends_at||'—')}<br><b>Địa điểm:</b> ${esc(ev.location_or_platform||'—')}${d.active_manual_code?`<br><b>Mã điểm danh:</b> <code>${esc(d.active_manual_code)}</code>`:''}</div>
+          <div><b>Mã hoạt động:</b> <code>${esc(ev.event_code)}</code><br><b>Đường dẫn QR:</b> <code>/q-r/${esc(ev.slug)}</code><br><b>Trạng thái phiên:</b> <span class="badge ${esc(cState.badge_class||'warn')}">${esc(cState.badge_label)}</span></div>
+          <div><b>Thời gian hoạt động:</b> ${esc(ev.starts_at||'—')} → ${esc(ev.ends_at||'—')}<br><b>Địa điểm:</b> ${esc(ev.location_or_platform||'—')}${cState.can_checkin&&d.active_manual_code?`<br><b>Mã điểm danh thủ công:</b> <code>${esc(d.active_manual_code)}</code>`:''}</div>
           <div><b>Đơn vị tổ chức:</b> ${esc(ev.host_org_name||'Sky First Network')}<br><b>Người phụ trách điểm danh:</b> <b>${esc(ev.attendance_manager_name||ev.lead_person_name||'Ban Tổ chức')}</b></div>
         </div>
       </div>
 
-      ${!d.checkin_open?`
-        <div class="service-warning">
-          <b>Thông báo trạng thái điểm danh:</b> Hoạt động này hiện chưa mở phiên điểm danh hoặc phiên điểm danh đã kết thúc.
-        </div>
-      `:''}
-      ${tokState&&!tokState.valid?`
-        <div class="service-warning">
-          <b>Cảnh báo mã QR:</b> ${esc(tokState.message||'Mã QR không hợp lệ hoặc đã hết hạn. Vui lòng nhập mã điểm danh thủ công bên dưới.')}
-        </div>
-      `:''}
+      <div class="request-note" style="margin-bottom:18px;${statusBoxStyle}" id="qrUnifiedStatusBanner">
+        <b>Trạng thái điểm danh (${esc(cState.badge_label)}):</b> ${esc(cState.message)}
+        ${(!cState.can_checkin&&scannedToken&&d.has_any_active_session)?`
+          <div style="margin-top:10px">
+            <button type="button" class="secondary" id="qrSwitchToManualActiveBtn">Chuyển sang nhập mã điểm danh thủ công của phiên đang mở →</button>
+          </div>
+        `:''}
+      </div>
 
+      ${cState.can_checkin?`
       <form id="publicQrCheckinForm" class="form-grid" novalidate>
         <input type="hidden" name="idempotency_key" value="${esc(idemKey)}">
         <input type="hidden" name="evidence_photo_url" id="qrEvidencePhotoUrl" value="">
@@ -10018,11 +10030,11 @@ async function renderPublicQrCheckinPage(slug){
           </div>
           <div id="qrScanMethodBox" style="display:${Boolean(effectiveQrToken)?'block':'none'}">
             <input type="hidden" name="qr_token" id="qrScannedTokenInput" value="${esc(effectiveQrToken)}">
-            <div class="meta" style="color:#166534;font-weight:700">✓ Đã nhận diện mã QR điểm danh của hoạt động: <b>${esc(d.active_session_name||ev.name)}</b></div>
+            <div class="meta" style="color:#166534;font-weight:700">✓ Đã xác thực phiên điểm danh đang mở: <b>${esc(d.active_session_name||ev.name)}</b></div>
           </div>
           <div id="manualCodeMethodBox" style="display:${!effectiveQrToken?'block':'none'}">
             <label>Mã điểm danh hoạt động (do Người phụ trách điểm danh cung cấp) *
-              <input name="manual_code" id="qrManualCodeInput" placeholder="Ví dụ: SKM-1234AB hoặc mã phiên điểm danh" value="${esc(!scannedToken?qsParams.get('code')||'':'')}" autocomplete="off">
+              <input name="manual_code" id="qrManualCodeInput" placeholder="Ví dụ: SKM-1234AB hoặc mã phiên điểm danh" value="${esc(!scannedToken?(qsParams.get('code')||d.active_manual_code||''):'')}" autocomplete="off">
             </label>
           </div>
         </div>
@@ -10046,14 +10058,14 @@ async function renderPublicQrCheckinPage(slug){
 
         <div class="card" style="padding:14px;border:1px dashed #93c5fd;background:#fbfdff">
           <div style="font-weight:800;color:#0d2d49;margin-bottom:4px">5. Ảnh minh chứng tham dự hoạt động *</div>
-          <div class="meta" style="margin-bottom:10px">Định dạng cho phép: <b>PNG, JPG, WEBP</b> · Dung lượng tối đa: <b>5MB</b>. Bắt buộc tải ảnh lên và lưu thành công trước khi hoàn tất điểm danh.</div>
+          <div class="meta" style="margin-bottom:10px">Định dạng cho phép: <b>PNG, JPG, WEBP</b> · Dung lượng tối đa: <b>5MB</b>. Bắt buộc tải ảnh lên và được máy chủ xác nhận lưu thành công trước khi gửi điểm danh.</div>
           <div class="toolbar" style="gap:10px;align-items:center;flex-wrap:wrap">
             <input type="file" id="qrEvidenceFileInput" accept="image/png,image/jpeg,image/webp" style="flex:1;min-width:220px">
             <button type="button" class="secondary" id="qrEvidenceUploadBtn">Tải ảnh minh chứng lên</button>
-            <button type="button" class="ghost" id="qrEvidenceReselectBtn" style="display:none">Chọn lại ảnh khác</button>
+            <button type="button" class="ghost" id="qrEvidenceReselectBtn" style="display:none">Thay ảnh khác</button>
           </div>
           <div id="qrEvidencePreviewWrap" style="display:none;margin-top:12px;padding:10px;border:1px solid #dbe7f3;border-radius:12px;background:#fff">
-            <div class="meta" style="margin-bottom:6px;font-weight:700;color:#1e3a8a">Xem trước ảnh minh chứng:</div>
+            <div class="meta" style="margin-bottom:6px;font-weight:700;color:#1e3a8a">Xem trước ảnh minh chứng đã chọn:</div>
             <img id="qrEvidencePreviewImg" alt="Xem trước ảnh minh chứng" style="max-width:100%;max-height:220px;border-radius:10px;object-fit:contain;display:block">
           </div>
           <div id="qrEvidenceStatusMsg" class="msg" role="status" aria-live="polite"></div>
@@ -10063,7 +10075,26 @@ async function renderPublicQrCheckinPage(slug){
 
         <button type="submit" class="primary" id="qrCheckinSubmitBtn" style="width:100%;padding:14px;font-size:15px">XÁC NHẬN ĐIỂM DANH THAM DỰ</button>
       </form>
+      `:`
+      <div class="card" style="padding:18px;background:#f8fafc;border:1px solid #e2e8f0;text-align:center">
+        <b style="color:#0f172a;display:block;margin-bottom:6px">Biểu mẫu điểm danh hiện đang khóa</b>
+        <div class="meta" style="margin-bottom:14px">Hệ thống chỉ mở biểu mẫu nhập thông tin và tải ảnh minh chứng khi phiên điểm danh đang hoạt động và mã QR hợp lệ.</div>
+        <div class="toolbar" style="justify-content:center;margin:0">
+          <button type="button" class="secondary" id="qrReloadStateBtn">Kiểm tra lại trạng thái phiên</button>
+          <a class="primary" href="/su-kien-cong-khai" data-public-path="/su-kien-cong-khai" style="text-decoration:none;padding:10px 14px;border-radius:12px">Xem danh sách Hoạt động &amp; Sự kiện</a>
+        </div>
+      </div>
+      `}
     `;
+
+    wirePublicLinks();
+    if($('#qrReloadStateBtn'))$('#qrReloadStateBtn').onclick=()=>renderPublicQrCheckinPage(cleanSlug);
+    if($('#qrSwitchToManualActiveBtn'))$('#qrSwitchToManualActiveBtn').onclick=()=>{
+      history.replaceState({},'',`/q-r/${encodeURIComponent(ev.slug||cleanSlug)}`);
+      renderPublicQrCheckinPage(ev.slug||cleanSlug);
+    };
+
+    if(!cState.can_checkin)return;
 
     const form=$('#publicQrCheckinForm');
     const fileInput=$('#qrEvidenceFileInput');
@@ -10081,52 +10112,88 @@ async function renderPublicQrCheckinPage(slug){
       $('#manualCodeMethodBox').style.display=m==='manual_code'?'block':'none';
     });
 
-    const uploadEvidenceFile=async(file)=>{
+    const clearPreviewAndSavedState=()=>{
+      photoUrlField.value='';
+      previewImg.removeAttribute('src');
+      previewWrap.style.display='none';
+      reselectBtn.style.display='none';
+      uploadBtn.textContent='Tải ảnh minh chứng lên';
+      uploadBtn.disabled=false;
+    };
+
+    const validateSelectedFile=(file)=>{
       if(!file){
+        clearPreviewAndSavedState();
+        fileInput.classList.add('is-invalid');
         setMsg(evStatusMsg,'Vui lòng chọn tệp ảnh minh chứng (PNG, JPG hoặc WEBP).','error');
-        return null;
+        return false;
       }
-      if(!['image/png','image/jpeg','image/webp'].includes(file.type)){
+      const fType=String(file.type||'').toLowerCase();
+      if(!['image/png','image/jpeg','image/jpg','image/webp'].includes(fType)){
+        clearPreviewAndSavedState();
+        fileInput.classList.add('is-invalid');
         setMsg(evStatusMsg,'Định dạng tệp không hợp lệ. Chỉ chấp nhận ảnh PNG, JPG hoặc WEBP.','error');
-        return null;
+        return false;
+      }
+      if(file.size<=0){
+        clearPreviewAndSavedState();
+        fileInput.classList.add('is-invalid');
+        setMsg(evStatusMsg,'Tệp ảnh minh chứng rỗng (0 byte). Vui lòng chọn tệp ảnh hợp lệ.','error');
+        return false;
       }
       if(file.size>5*1024*1024){
+        clearPreviewAndSavedState();
+        fileInput.classList.add('is-invalid');
         setMsg(evStatusMsg,'Dung lượng ảnh vượt quá 5MB. Vui lòng chọn ảnh có dung lượng nhỏ hơn 5MB.','error');
-        return null;
+        return false;
       }
+      fileInput.classList.remove('is-invalid');
+      return true;
+    };
+
+    const uploadEvidenceFile=async(file)=>{
+      if(!validateSelectedFile(file))return null;
       uploadBtn.disabled=true;
-      setMsg(evStatusMsg,'Đang kiểm tra và lưu ảnh minh chứng lên hệ thống...','info');
+      uploadBtn.textContent='Đang tải ảnh lên...';
+      setMsg(evStatusMsg,'Đang tải ảnh lên và xác minh lưu trữ trên hệ thống...','info');
       try{
         const buf=await file.arrayBuffer();
-        const r=await fetch('/api/public/q-r/'+encodeURIComponent(cleanSlug)+'/upload-evidence',{
+        const normType=file.type==='image/jpg'?'image/jpeg':file.type;
+        const activeCode=effectiveQrToken||String(form.elements.manual_code?.value||'').trim();
+        const upUrl='/api/public/q-r/'+encodeURIComponent(cleanSlug)+'/upload-evidence'+(activeCode?'?t='+encodeURIComponent(activeCode):'');
+        const r=await fetch(upUrl,{
           method:'POST',
-          headers:{'content-type':file.type},
+          headers:{'content-type':normType,'x-checkin-code':activeCode},
           body:buf
         });
         const resData=await r.json().catch(()=>({}));
-        if(!r.ok)throw new Error(resData.message||resData.error||'Tải ảnh minh chứng thất bại.');
-        photoUrlField.value=resData.evidence_photo_url||'';
+        if(!r.ok||!resData.ok||!resData.evidence_photo_url){
+          throw new Error(resData.message||resData.error||'Tải ảnh minh chứng thất bại.');
+        }
+        photoUrlField.value=resData.evidence_photo_url;
         reselectBtn.style.display='inline-flex';
-        setMsg(evStatusMsg,`✓ Đã tải và lưu ảnh minh chứng thành công (${Math.max(1,Math.round((resData.byte_size||file.size)/1024))} KB).`,'ok');
+        uploadBtn.textContent='✓ Đã lưu ảnh minh chứng';
+        uploadBtn.disabled=false;
+        setMsg(evStatusMsg,`✓ Đã tải và lưu ảnh minh chứng thành công (${Math.max(1,Math.round((resData.byte_size||file.size)/1024))} KB · SHA-256: ${String(resData.sha256||'').slice(0,12)}...).`,'ok');
         return resData.evidence_photo_url;
       }catch(e){
         photoUrlField.value='';
-        setMsg(evStatusMsg,e.message||'Không thể tải ảnh minh chứng lên hệ thống.','error');
-        return null;
-      }finally{
+        uploadBtn.textContent='Tải ảnh thất bại — Thử lại';
         uploadBtn.disabled=false;
+        fileInput.classList.add('is-invalid');
+        setMsg(evStatusMsg,e.message||'Không thể tải ảnh minh chứng lên hệ thống. Vui lòng thử lại.','error');
+        return null;
       }
     };
 
     fileInput.onchange=async()=>{
       const f=fileInput.files?.[0];
-      photoUrlField.value='';
       if(!f){
-        previewWrap.style.display='none';
-        reselectBtn.style.display='none';
+        clearPreviewAndSavedState();
         setMsg(evStatusMsg,'');
         return;
       }
+      if(!validateSelectedFile(f))return;
       const reader=new FileReader();
       reader.onload=()=>{
         previewImg.src=String(reader.result||'');
@@ -10143,9 +10210,7 @@ async function renderPublicQrCheckinPage(slug){
 
     reselectBtn.onclick=()=>{
       fileInput.value='';
-      photoUrlField.value='';
-      previewWrap.style.display='none';
-      reselectBtn.style.display='none';
+      clearPreviewAndSavedState();
       setMsg(evStatusMsg,'Đã xóa ảnh cũ. Vui lòng chọn ảnh minh chứng mới.','info');
       fileInput.click();
     };
@@ -10197,13 +10262,13 @@ async function renderPublicQrCheckinPage(slug){
       }
       if(!savedEvidenceUrl){
         fileInput.classList.add('is-invalid');
-        setMsg(formMsg,'Bắt buộc tải lên và lưu thành công Ảnh minh chứng trước khi hoàn tất điểm danh.','error');
+        setMsg(formMsg,'Bắt buộc tải lên và lưu thành công Ảnh minh chứng trên hệ thống trước khi xác nhận điểm danh.','error');
         return;
       }
 
       const subBtn=$('#qrCheckinSubmitBtn');
       subBtn.disabled=true;
-      setMsg(formMsg,'Đang xác nhận và lưu dữ liệu điểm danh...','info');
+      setMsg(formMsg,'Đang kiểm tra điều kiện phiên và ghi nhận điểm danh...','info');
       try{
         const payload={
           checkin_method:method,
@@ -10250,20 +10315,22 @@ async function renderPublicQrCheckinPage(slug){
   }catch(err){
     const msg=err.data?.message||err.message||'Không tìm thấy hoạt động hoặc hoạt động hiện không mở điểm danh.';
     const evName=err.data?.event_name?`<h2 style="margin:6px 0">${esc(err.data.event_name)}</h2>`:'';
+    const badgeLabel=err.data?.checkin_state?.badge_label||err.data?.error||'Đóng cổng điểm danh';
     panel.innerHTML=`
       <div class="eyebrow">CỔNG ĐIỂM DANH HOẠT ĐỘNG SKY FIRST</div>
       ${evName}
       <div class="service-warning" style="margin-top:14px">
-        <b>Không thể thực hiện điểm danh cho đường dẫn <code>/q-r/${esc(cleanSlug)}</code>:</b><br>
+        <b>Trạng thái hoạt động (<code>/q-r/${esc(cleanSlug)}</code> — ${esc(badgeLabel)}):</b><br>
         ${esc(msg)}
       </div>
       <div class="toolbar" style="margin-top:16px">
-        <a class="btn secondary" href="https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai" data-public-path="/su-kien-cong-khai" style="text-decoration:none">Xem danh sách Hoạt động &amp; Sự kiện Công khai →</a>
+        <a class="btn primary" href="https://nghiepvu.skyfirst.io.vn/su-kien-cong-khai" data-public-path="/su-kien-cong-khai" style="text-decoration:none">Xem danh sách Hoạt động &amp; Sự kiện Công khai →</a>
       </div>
     `;
     wirePublicLinks();
   }
 }
+
 
 function renderPublicEventsHome(){
   $('#app').innerHTML=`
@@ -10296,6 +10363,7 @@ function bindPublicRegModes(){
     routePublic('/su-kien-cong-khai');
   };
 }
+
 
 async function renderPublicActivitiesList(host){
   host.innerHTML='<div class="empty">Đang tải danh sách hoạt động và sự kiện công khai...</div>';
@@ -10511,7 +10579,7 @@ async function renderAdminAccountLifecycle(c){
           <tbody>
             ${items.map(x=>`<tr>
               <td><b>${esc(x.full_name||x.username)}</b><div class="meta">${esc(x.username)} · ${esc(x.member_code||'—')} · ${esc(x.email||'')}</div></td>
-              <td><b>${esc(x.duration_label)}</b><div class="meta">Mã gói: <code>${esc(x.account_type_code)}</code></div></td>
+              <td><b>${esc((x.account_type_code==='annual_12m_1y'||String(x.duration_label||'').includes('01 năm'))?'12 tháng':(x.duration_label||'12 tháng'))}</b><div class="meta">Phân loại: ${esc(({trial_24h:'Ngắn hạn 24 giờ',trial_48h:'Ngắn hạn 48 giờ',annual_12m_1y:'12 tháng',staff_custom:'Nhân sự có thời hạn'})[x.account_type_code]||'12 tháng')}</div></td>
               <td><span class="badge">${esc(x.roles_list||'MEMBER')}</span><div class="meta">${esc(x.primary_org_name||'Sky First Network')}</div></td>
               <td><div>Bắt đầu: ${esc((x.activated_at||'—').slice(0,16).replace('T',' '))}</div><div class="meta">Hết hạn: <b>${esc((x.expires_at||'Theo nhiệm vụ').slice(0,16).replace('T',' '))}</b></div></td>
               <td><b>${x.remaining_hours!=null?(x.remaining_hours>0?`${x.remaining_hours} giờ`:'Đã hết hạn'):'Không giới hạn cứng'}</b></td>
@@ -10885,8 +10953,8 @@ async function renderAdminSkEvents(c){
         <label style="grid-column:1/-1">Tên hoạt động / sự kiện *<input name="name" required placeholder="Diễn đàn Kỹ năng Số & Phát triển Cộng đồng Sky First 2026"></label>
         <label>Mã định danh đường dẫn QR (tenhd) *<input name="slug" placeholder="dien-dan-ky-nang-so-2026 (để trống sẽ tự tạo)"></label>
         <label>Mã hoạt động (Event Code)<input name="event_code" placeholder="Để trống hệ thống tự cấp mã SK-EVT-..."></label>
-        <label>Thời gian bắt đầu *<input name="starts_at" required value="2026-11-15 08:00:00"></label>
-        <label>Thời gian kết thúc *<input name="ends_at" required value="2026-11-15 17:00:00"></label>
+        <label>Thời gian bắt đầu *<input name="starts_at" required value="${new Date(Date.now()-3600000).toISOString().slice(0,19).replace('T',' ')}"></label>
+        <label>Thời gian kết thúc *<input name="ends_at" required value="${new Date(Date.now()+86400000*7).toISOString().slice(0,19).replace('T',' ')}"></label>
         <label style="grid-column:1/-1">Địa điểm trực tiếp / Nền tảng trực tuyến *<input name="location_or_platform" required placeholder="Hội trường Trung tâm TP. Hồ Chí Minh"></label>
         <label>Người phụ trách hoạt động *<input name="lead_person_name" required value="${esc(state.me?.person?.full_name||'Ban Tổ chức')}"></label>
         <label>Người phụ trách điểm danh *<input name="attendance_manager_name" required value="${esc(state.me?.person?.full_name||'Ban Tổ chức')}"></label>
@@ -10953,8 +11021,8 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
               <option value="closed" ${ev.checkin_gate_state==='closed'?'selected':''}>Đã đóng cổng điểm danh</option>
             </select>
           </label>
-          <label>Thời gian mở cổng điểm danh<input name="checkin_opens_at" placeholder="YYYY-MM-DD HH:MM:SS" value="${esc(ev.checkin_opens_at||ev.starts_at||'')}"></label>
-          <label>Thời gian đóng cổng điểm danh<input name="checkin_closes_at" placeholder="YYYY-MM-DD HH:MM:SS" value="${esc(ev.checkin_closes_at||ev.ends_at||'')}"></label>
+          <label>Thời gian mở cổng điểm danh (tùy chọn)<input name="checkin_opens_at" placeholder="Để trống sẽ theo thời gian phiên QR" value="${esc(ev.checkin_opens_at||'')}"></label>
+          <label>Thời gian đóng cổng điểm danh (tùy chọn)<input name="checkin_closes_at" placeholder="Để trống sẽ theo thời gian phiên QR" value="${esc(ev.checkin_closes_at||'')}"></label>
           <label>Người phụ trách điểm danh *<input name="attendance_manager_name" required value="${esc(ev.attendance_manager_name||ev.lead_person_name||'')}"></label>
           <label>Email người phụ trách<input type="email" name="attendance_manager_email" value="${esc(ev.attendance_manager_email||ev.contact_email||'')}"></label>
           <label style="grid-column:1/-1">SĐT người phụ trách<input name="attendance_manager_phone" value="${esc(ev.attendance_manager_phone||'')}"></label>
@@ -10967,8 +11035,8 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
         <form id="skAddQrForm" class="form-grid two" style="margin-top:10px">
           <label>Tên phiên điểm danh *<input name="session_name" required value="Phiên điểm danh chính thức"></label>
           <label>Mã thủ công (tùy chọn)<input name="manual_code" placeholder="Để trống tự sinh mã SKM-..."></label>
-          <label>Thời gian mở phiên<input name="starts_at" value="${esc(ev.checkin_opens_at||ev.starts_at||'2025-01-01 00:00:00')}"></label>
-          <label>Thời gian đóng phiên<input name="ends_at" value="${esc(ev.checkin_closes_at||ev.ends_at||'2030-12-31 23:59:59')}"></label>
+          <label>Thời gian mở phiên *<input name="starts_at" required value="${esc(new Date(Date.now()-3600000).toISOString().slice(0,19).replace('T',' '))}"></label>
+          <label>Thời gian đóng phiên *<input name="ends_at" required value="${esc(new Date(Date.now()+86400000*7).toISOString().slice(0,19).replace('T',' '))}"></label>
           <input type="hidden" name="attendance_manager_name" value="${esc(ev.attendance_manager_name||ev.lead_person_name||'')}">
           <div style="grid-column:1/-1"><button class="primary" style="width:100%">Phát hành Phiên QR &amp; Mã Thủ công</button></div>
         </form>

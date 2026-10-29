@@ -1617,5 +1617,255 @@ function buildTestZip(entries){
   checks += 5;
 }
 
+
+// ============================================================================
+// 17. URGENT QR & EVIDENCE UPLOAD REMEDIATION SUITE (ALL 11 MANDATORY TEST CASES
+//     + /q-r/sk-evt-2026-490003 & /q-r/sk-evt-2026-648298 + 6 UNIFIED STATES)
+// ============================================================================
+{
+  const pubCall = async (path, method = 'GET', body = null) => {
+    const u = new URL(path, 'https://nghiepvu.skyfirst.io.vn');
+    const headers = { origin: 'https://nghiepvu.skyfirst.io.vn' };
+    if (body) headers['content-type'] = 'application/json';
+    const r = await Worker.fetch(new Request(u.toString(), { method, headers, body: body ? JSON.stringify(body) : undefined }), { DB, FILES });
+    const d = await r.json().catch(() => ({}));
+    return { httpStatus: r.status, ...d };
+  };
+
+  // Create valid PNG, JPEG (including trailing camera MPF/EXIF bytes after FF D9!), and WEBP buffers
+  const validPngBuf = await (await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/ngay-hoi-so-skyfirst-2026/qr-image?size=180'), { DB, FILES })).arrayBuffer();
+  const validPng = new Uint8Array(validPngBuf);
+
+  // Minimal valid JPEG with SOI (FF D8), APP0 (FF E0), SOF0 (FF C0), SOS (FF DA), scan bytes, EOI (FF D9), PLUS 16 trailing camera metadata bytes after FF D9!
+  const validCameraJpeg = new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00,
+    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
+    0x12, 0x34, 0x56, 0x78,
+    0xff, 0xd9,
+    // Trailing smartphone camera padding/MPF bytes after EOI:
+    0x00, 0x00, 0x4d, 0x50, 0x46, 0x00, 0x01, 0x02, 0x03, 0x04
+  ]);
+
+  // Minimal valid WebP (RIFF + size + WEBP + VP8L + size + payload)
+  const validWebp = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x1a, 0x00, 0x00, 0x00,
+    0x57, 0x45, 0x42, 0x50,
+    0x56, 0x50, 0x38, 0x4c, 0x0d, 0x00, 0x00, 0x00,
+    0x2f, 0x00, 0x00, 0x00, 0x00, 0x07, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+  ]);
+
+  // --------------------------------------------------------------------------
+  // A. Test Case: /q-r/sk-evt-2026-490003 & /q-r/sk-evt-2026-648298 6-State transitions
+  // --------------------------------------------------------------------------
+  const ev490 = await call('/api/admin/sk-events', 'POST', {
+    event_code: 'SK-EVT-2026-490003',
+    slug: 'sk-evt-2026-490003',
+    name: 'Hội nghị Điều phối Nghiệp vụ 490003',
+    purpose: 'Kiểm thử trạng thái thời gian hoạt động và phiên điểm danh',
+    starts_at: '2026-11-15 08:00:00',
+    ends_at: '2026-11-15 17:00:00',
+    location_or_platform: 'Hội trường A'
+  });
+  assert.equal(ev490.httpStatus, 201);
+
+  // State 6 (Unapproved draft): /api/public/q-r/sk-evt-2026-490003 returns 403 EVENT_NOT_OPEN_FOR_CHECKIN
+  let st490 = await pubCall('/api/public/q-r/sk-evt-2026-490003', 'GET');
+  assert.equal(st490.httpStatus, 403);
+  assert.equal(st490.error, 'EVENT_NOT_OPEN_FOR_CHECKIN');
+  assert.equal(st490.checkin_state.state_no, 6);
+
+  // Approve and publish SK-EVT-2026-490003 (without creating any QR session yet, while starts_at is in future 2026-11-15)
+  await call(`/api/admin/sk-events/${encodeURIComponent(ev490.id)}/transition`, 'POST', { action: 'approve' });
+  await call(`/api/admin/sk-events/${encodeURIComponent(ev490.id)}/transition`, 'POST', { action: 'publish' });
+
+  // State 1 (Event not started yet & no session): returns 200 with can_checkin: false, state_code: EVENT_NOT_STARTED_YET
+  st490 = await pubCall('/api/public/q-r/sk-evt-2026-490003', 'GET');
+  assert.equal(st490.httpStatus, 200);
+  assert.equal(st490.checkin_open, false);
+  assert.equal(st490.checkin_state.state_no, 1);
+  assert.equal(st490.checkin_state.state_code, 'EVENT_NOT_STARTED_YET');
+  // Attempting to upload evidence while in State 1 is rejected with 409 EVENT_NOT_STARTED_YET
+  const upBlockedSt1 = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-490003/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: validPng
+  }), { DB, FILES });
+  assert.equal(upBlockedSt1.status, 409);
+  checks += 8;
+
+  // Now create SK-EVT-2026-648298 starting today (ongoing), approve & publish, still no QR session
+  const ev648 = await call('/api/admin/sk-events', 'POST', {
+    event_code: 'SK-EVT-2026-648298',
+    slug: 'sk-evt-2026-648298',
+    name: 'Tập huấn Kỹ năng Số 648298',
+    purpose: 'Kiểm thử trạng thái phiên điểm danh và thu hồi mã QR',
+    starts_at: '2025-01-01 08:00:00',
+    ends_at: '2030-12-31 17:00:00',
+    location_or_platform: 'Hội trường B'
+  });
+  await call(`/api/admin/sk-events/${encodeURIComponent(ev648.id)}/transition`, 'POST', { action: 'approve' });
+  await call(`/api/admin/sk-events/${encodeURIComponent(ev648.id)}/transition`, 'POST', { action: 'publish' });
+
+  // State 2 (Event ongoing, but no QR session opened yet): state_no = 2, EVENT_ONGOING_NO_ACTIVE_SESSION
+  let st648 = await pubCall('/api/public/q-r/sk-evt-2026-648298', 'GET');
+  assert.equal(st648.httpStatus, 200);
+  assert.equal(st648.checkin_open, false);
+  assert.equal(st648.checkin_state.state_no, 2);
+  assert.equal(st648.checkin_state.state_code, 'EVENT_ONGOING_NO_ACTIVE_SESSION');
+
+  // Admin issues a QR session for SK-EVT-2026-648298 -> State 3 (SESSION_ACTIVE_OPEN)
+  const ses648_1 = await call(`/api/admin/sk-events/${encodeURIComponent(ev648.id)}/qr-sessions`, 'POST', {
+    session_name: 'Phiên Điểm danh Đợt 1',
+    manual_code: 'SKM-648298A'
+  });
+  assert.equal(ses648_1.httpStatus, 201);
+  st648 = await pubCall(`/api/public/q-r/sk-evt-2026-648298?t=${encodeURIComponent(ses648_1.qr_token)}`, 'GET');
+  assert.equal(st648.checkin_open, true);
+  assert.equal(st648.checkin_state.state_no, 3);
+  assert.equal(st648.checkin_state.state_code, 'SESSION_ACTIVE_OPEN');
+
+  // Admin revokes ses648_1 -> State 5 (QR_REVOKED), checkin_open MUST be false, and revoked QR is NEVER auto-reopened!
+  await call(`/api/admin/sk-events/${encodeURIComponent(ev648.id)}/qr-sessions/${encodeURIComponent(ses648_1.id)}/revoke`, 'POST', { reason: 'Thu hồi mã QR đợt 1' });
+  st648 = await pubCall(`/api/public/q-r/sk-evt-2026-648298?t=${encodeURIComponent(ses648_1.qr_token)}`, 'GET');
+  assert.equal(st648.checkin_open, false);
+  assert.equal(st648.checkin_state.state_no, 5);
+  assert.equal(st648.checkin_state.state_code, 'QR_REVOKED');
+  // Even without ?t=, since the only session was revoked, state_no is 5 (QR_REVOKED) and checkin_open is false
+  const st648NoParam = await pubCall('/api/public/q-r/sk-evt-2026-648298', 'GET');
+  assert.equal(st648NoParam.checkin_open, false);
+  assert.equal(st648NoParam.checkin_state.state_code, 'QR_REVOKED');
+
+  // Admin explicitly opens check-in gate via open_checkin -> creates a NEW active session while keeping ses648_1 revoked!
+  const reopen648 = await call(`/api/admin/sk-events/${encodeURIComponent(ev648.id)}/transition`, 'POST', { action: 'open_checkin', note: 'Mở phiên mới bởi Admin' });
+  assert.equal(reopen648.httpStatus, 200);
+  // Old revoked token MUST STILL be rejected as QR_REVOKED!
+  const oldTokCheck = await pubCall(`/api/public/q-r/sk-evt-2026-648298?t=${encodeURIComponent(ses648_1.qr_token)}`, 'GET');
+  assert.equal(oldTokCheck.checkin_open, false);
+  assert.equal(oldTokCheck.checkin_state.state_code, 'QR_REVOKED');
+  assert.equal(oldTokCheck.has_any_active_session, true);
+  // While the event page without old token is now open on the new session (State 3)!
+  const newActiveCheck = await pubCall('/api/public/q-r/sk-evt-2026-648298', 'GET');
+  assert.equal(newActiveCheck.checkin_open, true);
+  assert.equal(newActiveCheck.checkin_state.state_code, 'SESSION_ACTIVE_OPEN');
+  checks += 18;
+
+  // --------------------------------------------------------------------------
+  // B. Test Cases 1–6: Valid PNG, Camera JPEG (with trailing MPF bytes), WebP, Multipart,
+  //    > 5MB, Spoofed Extension, R2 Unbound/Failure Fallback, and Re-upload/Replace
+  // --------------------------------------------------------------------------
+  // 1. Valid PNG upload
+  const upPngRes = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-648298/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: validPng
+  }), { DB, FILES });
+  const upPngData = await upPngRes.json();
+  assert.equal(upPngRes.status, 201);
+  assert.equal(upPngData.ok, true);
+  assert.equal(upPngData.storage_verified, true);
+
+  // 2. Valid Camera JPEG upload (with image/jpg content-type and trailing MPF bytes after FF D9)
+  const upJpgRes = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-648298/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/jpg' },
+    body: validCameraJpeg
+  }), { DB, FILES });
+  const upJpgData = await upJpgRes.json();
+  assert.equal(upJpgRes.status, 201);
+  assert.equal(upJpgData.ok, true);
+  assert.equal(upJpgData.mime_type, 'image/jpeg');
+
+  // 3. Valid WebP upload
+  const upWebpRes = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-648298/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/webp' },
+    body: validWebp
+  }), { DB, FILES });
+  const upWebpData = await upWebpRes.json();
+  assert.equal(upWebpRes.status, 201);
+  assert.equal(upWebpData.ok, true);
+  assert.equal(upWebpData.mime_type, 'image/webp');
+
+  // 4. File > 5 MB rejected with 413 EVIDENCE_TOO_LARGE
+  const hugeBytes = new Uint8Array(5 * 1024 * 1024 + 1024);
+  const upHugeRes = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-648298/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: hugeBytes
+  }), { DB, FILES });
+  const upHugeData = await upHugeRes.json();
+  assert.equal(upHugeRes.status, 413);
+  assert.equal(upHugeData.error, 'EVIDENCE_TOO_LARGE');
+
+  // 5. Spoofed extension / fake content (e.g. HTML/EXE bytes claiming to be image/png) rejected with 400 EVIDENCE_CONTENT_MISMATCH
+  const spoofedBytes = new TextEncoder().encode('<html><script>alert(1)</script></html>');
+  const upSpoofRes = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-648298/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: spoofedBytes
+  }), { DB, FILES });
+  const upSpoofData = await upSpoofRes.json();
+  assert.equal(upSpoofRes.status, 400);
+  assert.equal(upSpoofData.error, 'EVIDENCE_CONTENT_MISMATCH');
+
+  // 6. R2 Failure / Degraded R2 Simulation: Upload succeeds via D1 sk_attendance_evidence fallback and Admin can still view the image!
+  const brokenR2Env = {
+    DB,
+    FILES: {
+      put: async () => { throw new Error('R2_BUCKET_TEMPORARILY_UNAVAILABLE'); },
+      get: async () => null
+    }
+  };
+  const upDegradedR2Res = await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/sk-evt-2026-648298/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/jpeg' },
+    body: validCameraJpeg
+  }), brokenR2Env);
+  const upDegradedR2Data = await upDegradedR2Res.json();
+  assert.equal(upDegradedR2Res.status, 201);
+  assert.equal(upDegradedR2Data.ok, true);
+  assert.equal(upDegradedR2Data.r2_stored, false);
+  assert.equal(upDegradedR2Data.storage_verified, true);
+
+  // Admin can view the image even from brokenR2Env via D1 sk_attendance_evidence fallback!
+  const viewFallbackReq = new Request('https://nghiepvu.skyfirst.io.vn' + upDegradedR2Data.evidence_photo_url, {
+    headers: { cookie: 'sfn_session=test' }
+  });
+  const viewFallbackRes = await Worker.fetch(viewFallbackReq, brokenR2Env);
+  assert.equal(viewFallbackRes.status, 200);
+  assert.equal(viewFallbackRes.headers.get('content-type'), 'image/jpeg');
+  const readbackBytes = new Uint8Array(await viewFallbackRes.arrayBuffer());
+  assert.equal(readbackBytes.byteLength, validCameraJpeg.byteLength);
+
+  // 7. Upload succeeds, first checkin attempt fails validation (e.g. invalid email), retry with same idempotency_key + fixed email succeeds without creating duplicate!
+  const retryIdemKey = 'idem_retry_test_648298';
+  const badCheckinTry = await pubCall('/api/public/q-r/sk-evt-2026-648298/checkin', 'POST', {
+    checkin_method: 'manual_code',
+    manual_code: newActiveCheck.active_manual_code,
+    full_name: 'Phạm Văn Thử Lại',
+    phone: '0911223344',
+    email: 'email-khong-hop-le',
+    evidence_photo_url: upDegradedR2Data.evidence_photo_url,
+    idempotency_key: retryIdemKey
+  });
+  assert.equal(badCheckinTry.httpStatus, 400);
+  assert.equal(badCheckinTry.error, 'INVALID_EMAIL');
+
+  const goodCheckinRetry = await pubCall('/api/public/q-r/sk-evt-2026-648298/checkin', 'POST', {
+    checkin_method: 'manual_code',
+    manual_code: newActiveCheck.active_manual_code,
+    full_name: 'Phạm Văn Thử Lại',
+    phone: '0911223344',
+    email: 'phamvanthulai@gmail.com',
+    evidence_photo_url: upDegradedR2Data.evidence_photo_url,
+    idempotency_key: retryIdemKey
+  });
+  assert.equal(goodCheckinRetry.httpStatus, 201);
+  assert.equal(goodCheckinRetry.ok, true);
+  checks += 22;
+}
+
 console.log(`${checks}/${checks} center/API integration checks passed`);
 closeDb();

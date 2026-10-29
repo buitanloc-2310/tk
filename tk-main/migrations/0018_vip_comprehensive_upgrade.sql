@@ -35,3 +35,20 @@ WHERE id='gov_law_91' AND (payload_json IS NULL OR payload_json='{}');
 UPDATE governance_registry
 SET payload_json='{"doc_number":"356/2025/NĐ-CP","source_name":"Hệ thống Văn bản Quy phạm Pháp luật Chính phủ (vanban.chinhphu.vn)","official_url":"https://vanban.chinhphu.vn/?pageid=27160&docid=216387","issued_date":"2025-12-31","effective_date":"2026-01-01","legal_status":"Còn hiệu lực","sync_source_type":"auto_sync","approval_state":"approved_published","last_synced_at":"2026-10-28T00:00:00Z"}'
 WHERE id='gov_dec_356' AND (payload_json IS NULL OR payload_json='{}');
+
+-- 5. Dedicated attendance evidence table with D1/R2 resilience
+CREATE TABLE IF NOT EXISTS sk_attendance_evidence(
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  session_id TEXT,
+  file_key TEXT NOT NULL UNIQUE,
+  file_url TEXT NOT NULL UNIQUE,
+  mime_type TEXT NOT NULL,
+  byte_size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  r2_stored INTEGER NOT NULL DEFAULT 0,
+  data_base64 TEXT,
+  uploaded_ip_hint TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sk_attendance_evidence_url ON sk_attendance_evidence(file_url, event_id);
