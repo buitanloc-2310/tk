@@ -1,3 +1,4 @@
+import worker from '../src/index.js';
 import {readFileSync,readdirSync,existsSync} from 'node:fs';
 import {createHash, webcrypto} from 'node:crypto';
 import {deflateSync} from 'node:zlib';
@@ -777,21 +778,22 @@ function buildTestZip(entries){
   r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'appraise',note:'Hồ sơ đầy đủ, khả thi'});
   assert.equal(r.status,'pending_approval');checks++;
 
-  // Proposer 'a' attempting to self-approve their own event is BLOCKED by SoD!
-  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve'});
-  assert.equal(r.httpStatus,409);assert.equal(r.error,'SOD_SELF_APPROVAL_FORBIDDEN');checks+=2;
+  // Section V.2: Account without approval permission ('t24') CANNOT approve event (403 FORBIDDEN)
+  const unauthApproveReq=new Request(`https://nghiepvu.skyfirst.io.vn/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,{method:'POST',headers:{cookie:'sfn_session=t24_active_tok','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:JSON.stringify({action:'approve'})});
+  assert.equal((await api(unauthApproveReq,{DB,FILES},new URL(unauthApproveReq.url))).status,403);checks++;
 
-  // Independent approver ('a_rev' created earlier) approves the event
+  // Section V.2: Authorized Admin ('a') who created the event CAN self-approve their own event without waiting for another user!
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve',note:'Quản trị viên phê duyệt chủ trương tổ chức'});
+  assert.equal(r.httpStatus,200);assert.equal(r.status,'approved');assert.equal(r.registration_state,'closed');checks+=3;
+
   const callAsRev=async(path,method='GET',b)=>{const rq=new Request('https://nghiepvu.skyfirst.io.vn'+path,{method,headers:{cookie:'sfn_session=rev_session_token','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:b?JSON.stringify(b):undefined});const rs=await api(rq,{DB,FILES},new URL(rq.url));const j=await rs.json();return {httpStatus:rs.status,status:rs.status,...j}};
-  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve',note:'Phê duyệt chủ trương tổ chức'});
-  assert.equal(r.status,'approved');assert.equal(r.registration_state,'closed');checks+=2;
 
   // Approved event STILL does not appear on public portal until explicitly published! (Separation of Approve vs Publish)
   pubEvs=await call('/api/public/sk-events','GET');
   assert(!pubEvs.items.some(x=>x.id===skEvId));checks++;
 
-  // Publish event -> Now appears on public portal, but registration is still closed (Separation of Publish vs Open Registration)
-  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
+  // Admin 'a' publishes event -> Now appears on public portal, but registration is still closed
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
   assert.equal(r.status,'published');assert.equal(r.registration_state,'closed');checks+=2;
   pubEvs=await call('/api/public/sk-events','GET');
   assert(pubEvs.items.some(x=>x.id===skEvId));checks++;
@@ -799,30 +801,26 @@ function buildTestZip(entries){
   assert.equal(r.httpStatus,403);assert.equal(r.error,'EVENT_REGISTRATION_NOT_OPEN');checks+=2;
 
   // Open registration -> Participant registers -> Admin approves registration
-  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'open_registration'});
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'open_registration'});
   assert.equal(r.status,'registration_open');assert.equal(r.registration_state,'open');checks+=2;
   const pReg=await call(`/api/public/sk-events/${encodeURIComponent(skEvId)}/register`,'POST',{full_name:'Nguyễn Tham Gia',email:'nguyentg@skyfirst.io.vn',phone:'0909998888'});
   assert.equal(pReg.httpStatus,201);const evRegId=pReg.id;checks++;
   r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/registrations/${encodeURIComponent(evRegId)}`,'PATCH',{status:'approved'});
   assert.equal(r.status,'approved');checks++;
 
-  // Tasks, Logistics conflict detection & Budget SoD check
+  // Tasks & Budget approval by authorized Admin 'a'
   await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/tasks`,'POST',{title:'Chuẩn bị hội trường',weight:2,status:'completed'});
   await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/tasks`,'POST',{title:'Đón tiếp đại biểu',weight:2,status:'not_started'});
   const budCreate=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/budgets`,'POST',{category:'Âm thanh ánh sáng',description:'Thuê hệ thống âm thanh',estimated_amount:5000000});
   assert.equal(budCreate.httpStatus,201);
-  // Self-approval of budget item blocked by SoD
   r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/budgets/${encodeURIComponent(budCreate.id)}`,'PATCH',{status:'approved',approved_amount:5000000});
-  assert.equal(r.httpStatus,409);assert.equal(r.error,'SOD_BUDGET_SELF_APPROVAL_FORBIDDEN');checks+=2;
-  // Independent approver approves budget item
-  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/budgets/${encodeURIComponent(budCreate.id)}`,'PATCH',{status:'approved',approved_amount:5000000});
-  assert.equal(r.status,'approved');checks++;
+  assert.equal(r.httpStatus,200);assert.equal(r.status,'approved');checks+=2;
 
-  // Issue QR session -> Check-in valid participant -> Block duplicate check-in -> Manual override requires reason -> Revoked QR blocked
-  const qrSes=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/qr-sessions`,'POST',{session_name:'Phiên Khai mạc'});
-  assert.equal(qrSes.httpStatus,201);assert(qrSes.qr_token);checks+=2;
+  // Issue QR session with require_approved_registration: true for closed-registration test, plus verify manual_code & /q-r/tenhd URL
+  const qrSes=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/qr-sessions`,'POST',{session_name:'Phiên Khai mạc',require_approved_registration:true});
+  assert.equal(qrSes.httpStatus,201);assert(qrSes.qr_token);assert(qrSes.manual_code);assert(qrSes.qr_path.startsWith('/q-r/'));checks+=4;
 
-  // Unapproved/unregistered participant blocked from QR check-in
+  // Unapproved/unregistered participant blocked when require_approved_registration=true on legacy endpoint
   r=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes.qr_token,email:'stranger@skyfirst.io.vn',full_name:'Người Lạ'});
   assert.equal(r.httpStatus,403);assert.equal(r.error,'PARTICIPANT_NOT_ELIGIBLE');checks+=2;
 
@@ -847,16 +845,16 @@ function buildTestZip(entries){
   r=await call('/api/sk-attendance/checkin','POST',{qr_token:qrSes.qr_token,email:'nguyentg@skyfirst.io.vn'});
   assert.equal(r.httpStatus,410);assert.equal(r.error,'QR_REVOKED');checks+=2;
 
-  // Major change after approval (changing location_or_platform) automatically triggers re-approval!
+  // Major change after approval (changing location_or_platform) triggers re-approval, and Admin 'a' can immediately re-approve!
   r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}`,'PATCH',{location_or_platform:'Địa điểm mới thay đổi trọng yếu'});
   assert.equal(r.status,'pending_approval');assert.equal(r.triggered_reapproval,true);assert.equal(r.registration_state,'closed');checks+=3;
 
-  // Re-approve, publish, complete, submit summary report grounded in real DB counts, and close event
-  await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve'});
-  await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
-  await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'complete'});
+  // Admin 'a' re-approves, publishes, completes, submits summary report grounded in real DB counts, and closes event
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve'});
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'publish'});
+  await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'complete'});
   await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'submit_summary',note:'Đã hoàn thành hội nghị tốt đẹp'});
-  r=await callAsRev(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve_summary_and_close'});
+  r=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}/transition`,'POST',{action:'approve_summary_and_close'});
   assert.equal(r.status,'closed');assert.equal(r.summary_report_state,'approved');checks+=2;
 
   const evFinal=await call(`/api/admin/sk-events/${encodeURIComponent(skEvId)}`,'GET');
@@ -867,34 +865,20 @@ function buildTestZip(entries){
 }
 
 // =========================================================
-// 12. GFI II & III: INTERNAL MESSAGING (1-1 & GROUP, NO CALLS) & COMMUNITY FEED
+// 12. TWO-WAY CHAT RETIRED (410 GONE) & ONE-WAY OFFICIAL ANNOUNCEMENT CHANNEL ACTIVE (MỤC III)
 // =========================================================
 {
-  // Create group conversation between 'a' and 'a_rev'
-  const conv=await call('/api/chat/conversations','POST',{conv_type:'group',title:'Ban Điều phối Sự kiện Sky First',participant_account_ids:['a_rev']});
-  assert.equal(conv.httpStatus,201);assert.equal(conv.participant_count,2);const cid=conv.id;checks+=2;
+  // Two-way chat endpoints MUST return 410 GONE (CHAT_FEATURE_RETIRED)
+  const chatGet=await call('/api/chat/conversations','GET');
+  assert.equal(chatGet.httpStatus,410);assert.equal(chatGet.error,'CHAT_FEATURE_RETIRED');checks+=2;
 
-  // Send message, pin message, edit message, recall message
-  const m1=await call(`/api/chat/conversations/${encodeURIComponent(cid)}/messages`,'POST',{body:'Xin chào nhóm điều phối!',linked_entity_type:'sk_event'});
-  assert.equal(m1.httpStatus,201);const mid=m1.id;checks++;
+  const chatPost=await call('/api/chat/conversations','POST',{conv_type:'group',title:'Test'});
+  assert.equal(chatPost.httpStatus,410);assert.equal(chatPost.error,'CHAT_FEATURE_RETIRED');checks+=2;
 
-  r=await call(`/api/chat/messages/${encodeURIComponent(mid)}`,'PATCH',{action:'pin'});
-  assert.equal(r.httpStatus,200);assert.equal(r.is_pinned,true);checks+=2;
+  const chatUp=new Request('https://nghiepvu.skyfirst.io.vn/api/chat/upload',{method:'POST',headers:{cookie:'sfn_session=admin_session_token',origin:'https://nghiepvu.skyfirst.io.vn'}});
+  assert.equal((await api(chatUp,{DB,FILES},new URL(chatUp.url))).status,410);checks++;
 
-  r=await call(`/api/chat/messages/${encodeURIComponent(mid)}`,'PATCH',{action:'edit',body:'Xin chào nhóm điều phối (đã cập nhật)!'});
-  assert.equal(r.httpStatus,200);checks++;
-
-  // Non-participant 't24' cannot read conversation messages (403)
-  const unauthChatReq=new Request(`https://nghiepvu.skyfirst.io.vn/api/chat/conversations/${encodeURIComponent(cid)}/messages`,{headers:{cookie:'sfn_session=t24_active_tok',origin:'https://nghiepvu.skyfirst.io.vn'}});
-  assert.equal((await api(unauthChatReq,{DB,FILES},new URL(unauthChatReq.url))).status,403);checks++;
-
-  // Recall message -> returns '[Tin nhắn đã được thu hồi]'
-  r=await call(`/api/chat/messages/${encodeURIComponent(mid)}`,'PATCH',{action:'recall'});
-  assert.equal(r.status,'recalled');
-  const msgsAfter=await call(`/api/chat/conversations/${encodeURIComponent(cid)}/messages`,'GET');
-  assert.equal(msgsAfter.messages.find(x=>x.id===mid).body,'[Tin nhắn đã được thu hồi]');checks+=2;
-
-  // Community Feed: Regular user posting to 1-way announcement channel is blocked (403)
+  // Regular user posting to 1-way announcement channel is blocked (403)
   const unauthPostReq=new Request('https://nghiepvu.skyfirst.io.vn/api/community/posts',{method:'POST',headers:{cookie:'sfn_session=t24_active_tok','content-type':'application/json',origin:'https://nghiepvu.skyfirst.io.vn'},body:JSON.stringify({group_id:'grp_official_bch',post_kind:'official_announcement',title:'Fake Official',body:'Should be blocked'})});
   assert.equal((await api(unauthPostReq,{DB,FILES},new URL(unauthPostReq.url))).status,403);checks++;
 
@@ -904,17 +888,16 @@ function buildTestZip(entries){
   const propPostBody=await propPostRes.json();
   assert.equal(propPostRes.status,201);assert.equal(propPostBody.moderation_status,'pending_approval');checks+=2;
 
-  // Moderator approves and publishes the post, reacts, comments, and handles report
+  // Moderator approves and publishes the announcement, and members can acknowledge/react, while two-way comments are disabled (410)
   r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/moderate`,'POST',{action:'publish'});
   assert.equal(r.httpStatus,200);assert.equal(r.moderation_status,'published');checks+=2;
 
   r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/react`,'POST',{reaction_type:'like'});
   assert.equal(r.httpStatus,200);assert.equal(r.reaction_count,1);checks+=2;
 
-  r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/comments`,'POST',{body:'Bình luận xác nhận thông báo.'});
-  assert.equal(r.httpStatus,201);checks++;
+  r=await call(`/api/community/posts/${encodeURIComponent(propPostBody.id)}/comments`,'POST',{body:'Bình luận hai chiều bị khóa'});
+  assert.equal(r.httpStatus,410);assert.equal(r.error,'TWO_WAY_CHAT_DISABLED');checks+=2;
 }
-
 
 // =========================================================
 // 13. SKY FIRST DEEP REMEDIATION & END-TO-END SYSTEM VERIFICATION
@@ -1205,6 +1188,250 @@ function buildTestZip(entries){
   assert.equal(meCv.httpStatus,200);
   assert(meCv.activities.some(a=>a.id===syncEvId));
   checks+=6;
+}
+
+
+// =========================================================
+// 15. PUBLIC LOGIN-FREE QR & MANUAL CODE CHECK-IN (/q-r/tenhd) WITH MANDATORY EVIDENCE PHOTO (MỤC IV & VII)
+// =========================================================
+{
+  const pubCall = async (path, method = 'GET', bodyObj = null) => {
+    const rq = new Request('https://nghiepvu.skyfirst.io.vn' + path, {
+      method,
+      headers: {
+        origin: 'https://nghiepvu.skyfirst.io.vn',
+        ...(bodyObj ? { 'content-type': 'application/json' } : {})
+      },
+      body: bodyObj ? JSON.stringify(bodyObj) : undefined
+    });
+    const rs = await api(rq, { DB, FILES }, new URL(rq.url));
+    const j = await rs.json().catch(() => ({}));
+    return { httpStatus: rs.status, ...j };
+  };
+
+  // 1. Admin creates activity with custom slug 'ngay-hoi-so-skyfirst-2026' and Attendance Manager, self-approves & publishes it
+  const evQrCreate = await call('/api/admin/sk-events', 'POST', {
+    name: 'Ngày hội Nghiệp vụ Số Sky First 2026',
+    slug: 'ngay-hoi-so-skyfirst-2026',
+    purpose: 'Hoạt động điểm danh QR công khai không cần đăng nhập',
+    starts_at: '2026-01-01 08:00:00',
+    ends_at: '2027-12-31 20:00:00',
+    location_or_platform: 'TP. Hồ Chí Minh',
+    lead_person_name: 'Trần Quản Trị',
+    attendance_manager_name: 'Lê Phụ Trách Điểm Danh',
+    attendance_manager_email: 'diemdanh@skyfirst.io.vn',
+    attendance_manager_phone: '0912345678'
+  });
+  assert.equal(evQrCreate.httpStatus, 201);
+  assert.equal(evQrCreate.slug, 'ngay-hoi-so-skyfirst-2026');
+  assert.equal(evQrCreate.qr_url, 'https://nghiepvu.skyfirst.io.vn/q-r/ngay-hoi-so-skyfirst-2026');
+  checks += 3;
+
+  // Before approval, /api/public/q-r/ngay-hoi-so-skyfirst-2026 returns 403 EVENT_NOT_OPEN_FOR_CHECKIN (never redirects to login)
+  const preOpenInfo = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026', 'GET');
+  assert.equal(preOpenInfo.httpStatus, 403);
+  assert.equal(preOpenInfo.error, 'EVENT_NOT_OPEN_FOR_CHECKIN');
+  checks += 2;
+
+  // Non-existent slug returns 404 EVENT_NOT_FOUND
+  const notFoundInfo = await pubCall('/api/public/q-r/hoat-dong-khong-ton-tai-999', 'GET');
+  assert.equal(notFoundInfo.httpStatus, 404);
+  assert.equal(notFoundInfo.error, 'EVENT_NOT_FOUND');
+  checks += 2;
+
+  // Admin self-approves and publishes the activity directly (Section V.2)
+  const selfApp = await call(`/api/admin/sk-events/${encodeURIComponent(evQrCreate.id)}/transition`, 'POST', { action: 'approve', note: 'Admin tự phê duyệt hoạt động' });
+  assert.equal(selfApp.httpStatus, 200);
+  assert.equal(selfApp.status, 'approved');
+  const selfPub = await call(`/api/admin/sk-events/${encodeURIComponent(evQrCreate.id)}/transition`, 'POST', { action: 'publish' });
+  assert.equal(selfPub.httpStatus, 200);
+  assert.equal(selfPub.status, 'published');
+  checks += 4;
+
+  // Issue QR session with manual code 'SKM-2026OK'
+  const qrSessionRes = await call(`/api/admin/sk-events/${encodeURIComponent(evQrCreate.id)}/qr-sessions`, 'POST', {
+    session_name: 'Ca Sáng Ngày Hội Số',
+    manual_code: 'SKM-2026OK',
+    attendance_manager_name: 'Lê Phụ Trách Điểm Danh'
+  });
+  assert.equal(qrSessionRes.httpStatus, 201);
+  assert.equal(qrSessionRes.manual_code, 'SKM-2026OK');
+  assert.equal(qrSessionRes.qr_path, '/q-r/ngay-hoi-so-skyfirst-2026');
+  checks += 3;
+
+  // 2. Unauthenticated visitor opens /api/public/q-r/ngay-hoi-so-skyfirst-2026?t=<qr_token> -> 200 OK with exact activity name & valid token state
+  const openInfo = await pubCall(`/api/public/q-r/ngay-hoi-so-skyfirst-2026?t=${encodeURIComponent(qrSessionRes.qr_token)}`, 'GET');
+  assert.equal(openInfo.httpStatus, 200);
+  assert.equal(openInfo.event.name, 'Ngày hội Nghiệp vụ Số Sky First 2026');
+  assert.equal(openInfo.event.attendance_manager_name, 'Lê Phụ Trách Điểm Danh');
+  assert.equal(openInfo.checkin_open, true);
+  assert.equal(openInfo.token_state.valid, true);
+  checks += 5;
+
+  // QR PNG image endpoint works publicly without login
+  const qrImgReq = new Request(`https://nghiepvu.skyfirst.io.vn/api/public/q-r/ngay-hoi-so-skyfirst-2026/qr-image?t=${encodeURIComponent(qrSessionRes.qr_token)}`);
+  const qrImgRes = await api(qrImgReq, { DB, FILES }, new URL(qrImgReq.url));
+  assert.equal(qrImgRes.status, 200);
+  assert.equal(qrImgRes.headers.get('content-type'), 'image/png');
+  checks += 2;
+
+  // 3. Evidence photo upload validation: reject non-image / forged bytes (400), accept valid PNG (201)
+  const badEvReq = new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/ngay-hoi-so-skyfirst-2026/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: new Uint8Array([1, 2, 3, 4, 5])
+  });
+  assert.equal((await api(badEvReq, { DB, FILES }, new URL(badEvReq.url))).status, 400);
+  checks++;
+
+  const validPng = png;
+  const okEvReq = new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/ngay-hoi-so-skyfirst-2026/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: validPng
+  });
+  const okEvRes = await api(okEvReq, { DB, FILES }, new URL(okEvReq.url));
+  const okEvBody = await okEvRes.json();
+  assert.equal(okEvRes.status, 201);
+  assert(okEvBody.evidence_photo_url.startsWith(`/files/events/private/attendance/${evQrCreate.id}/`));
+  checks += 2;
+
+  // 4. Field validation: missing phone, invalid email, or missing evidence photo MUST be rejected (400) with exact field name
+  const missPhone = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'qr_scan',
+    qr_token: qrSessionRes.qr_token,
+    full_name: 'Phạm Minh Tuấn',
+    phone: '12345',
+    email: 'pmtuan@gmail.com',
+    evidence_photo_url: okEvBody.evidence_photo_url
+  });
+  assert.equal(missPhone.httpStatus, 400);
+  assert.equal(missPhone.field, 'phone');
+  checks += 2;
+
+  const missEvidence = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'qr_scan',
+    qr_token: qrSessionRes.qr_token,
+    full_name: 'Phạm Minh Tuấn',
+    phone: '0901234567',
+    email: 'pmtuan@gmail.com',
+    evidence_photo_url: ''
+  });
+  assert.equal(missEvidence.httpStatus, 400);
+  assert.equal(missEvidence.field, 'evidence_photo');
+  checks += 2;
+
+  // 5. Complete public login-free check-in via QR Scan (Method 1)
+  const chk1 = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'qr_scan',
+    qr_token: qrSessionRes.qr_token,
+    full_name: 'Phạm Minh Tuấn',
+    phone: '0901234567',
+    email: 'pmtuan@gmail.com',
+    evidence_photo_url: okEvBody.evidence_photo_url,
+    idempotency_key: 'idem_tuan_01'
+  });
+  assert.equal(chk1.httpStatus, 201);
+  assert.equal(chk1.checkin_method, 'qr_scan');
+  assert.equal(chk1.attendance_manager_name, 'Lê Phụ Trách Điểm Danh');
+  checks += 3;
+
+  // Retrying with same idempotency_key returns 200 deduplicated without error or duplicate row
+  const chk1Retry = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'qr_scan',
+    qr_token: qrSessionRes.qr_token,
+    full_name: 'Phạm Minh Tuấn',
+    phone: '0901234567',
+    email: 'pmtuan@gmail.com',
+    evidence_photo_url: okEvBody.evidence_photo_url,
+    idempotency_key: 'idem_tuan_01'
+  });
+  assert.equal(chk1Retry.httpStatus, 200);
+  assert.equal(chk1Retry.deduplicated, true);
+  checks += 2;
+
+  // Duplicate check-in with same phone or email (different idempotency_key) is blocked (409 DUPLICATE_CHECKIN_BLOCKED)
+  const chk1Dup = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'manual_code',
+    manual_code: 'SKM-2026OK',
+    full_name: 'Phạm Minh Tuấn',
+    phone: '0901234567',
+    email: 'otheremail@gmail.com',
+    evidence_photo_url: okEvBody.evidence_photo_url
+  });
+  assert.equal(chk1Dup.httpStatus, 409);
+  assert.equal(chk1Dup.error, 'DUPLICATE_CHECKIN_BLOCKED');
+  checks += 2;
+
+  // 6. Another participant with the SAME FULL NAME ('Phạm Minh Tuấn') but different phone & email checks in via Manual Code (Method 2) -> ALLOWED with duplicate_name_notice!
+  const okEvReq2 = new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/ngay-hoi-so-skyfirst-2026/upload-evidence', {
+    method: 'POST',
+    headers: { origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'image/png' },
+    body: validPng
+  });
+  const okEvBody2 = await (await api(okEvReq2, { DB, FILES }, new URL(okEvReq2.url))).json();
+
+  const chk2 = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'manual_code',
+    manual_code: 'SKM-2026OK',
+    full_name: 'Phạm Minh Tuấn',
+    phone: '0988776655',
+    email: 'pmtuan2.homonym@gmail.com',
+    evidence_photo_url: okEvBody2.evidence_photo_url
+  });
+  assert.equal(chk2.httpStatus, 201);
+  assert.equal(chk2.checkin_method, 'manual_code');
+  assert.equal(chk2.duplicate_name_notice, true);
+  checks += 3;
+
+  // 7. Cross-event code check: using a code from another event on /q-r/ngay-hoi-so-skyfirst-2026 is rejected (403 CODE_EVENT_MISMATCH)
+  const otherEv = await call('/api/admin/sk-events', 'POST', {
+    name: 'Hoạt động Khác 2026',
+    slug: 'hoat-dong-khac-2026',
+    purpose: 'Kiểm tra chéo mã QR',
+    starts_at: '2026-01-01 08:00:00',
+    ends_at: '2027-12-31 20:00:00',
+    location_or_platform: 'Hà Nội'
+  });
+  await call(`/api/admin/sk-events/${encodeURIComponent(otherEv.id)}/transition`, 'POST', { action: 'approve' });
+  await call(`/api/admin/sk-events/${encodeURIComponent(otherEv.id)}/transition`, 'POST', { action: 'publish' });
+  const otherQr = await call(`/api/admin/sk-events/${encodeURIComponent(otherEv.id)}/qr-sessions`, 'POST', {
+    session_name: 'Ca Khác',
+    manual_code: 'SKM-OTHEREV'
+  });
+  const crossTry = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026/checkin', 'POST', {
+    checkin_method: 'manual_code',
+    manual_code: otherQr.manual_code,
+    full_name: 'Lê Văn C',
+    phone: '0977665544',
+    email: 'levanc@gmail.com',
+    evidence_photo_url: okEvBody2.evidence_photo_url
+  });
+  assert.equal(crossTry.httpStatus, 403);
+  assert.equal(crossTry.error, 'CODE_EVENT_MISMATCH');
+  checks += 2;
+
+  // 8. Access control on evidence photo: anonymous (401) and unprivileged user 't24' (403) CANNOT view participant evidence photo!
+  const anonFileReq = new Request('https://nghiepvu.skyfirst.io.vn' + okEvBody.evidence_photo_url);
+  assert.equal((await worker.fetch(anonFileReq, { DB, FILES })).status, 401);
+  const unprivFileReq = new Request('https://nghiepvu.skyfirst.io.vn' + okEvBody.evidence_photo_url, {
+    headers: { cookie: 'sfn_session=t24_active_tok' }
+  });
+  assert.equal((await worker.fetch(unprivFileReq, { DB, FILES })).status, 403);
+  const adminFileReq = new Request('https://nghiepvu.skyfirst.io.vn' + okEvBody.evidence_photo_url, {
+    headers: { cookie: 'sfn_session=test_session_token' }
+  });
+  assert.equal((await worker.fetch(adminFileReq, { DB, FILES })).status, 200);
+  checks += 3;
+
+  // 9. Admin reviews and adjusts attendance status with audit log
+  const adjRes = await call(`/api/admin/sk-events/${encodeURIComponent(evQrCreate.id)}/attendance/${encodeURIComponent(chk2.id)}`, 'PATCH', {
+    attendance_status: 'late',
+    review_note: 'Đối soát thời gian check-in trễ 10 phút'
+  });
+  assert.equal(adjRes.httpStatus, 200);
+  assert.equal(adjRes.attendance_status, 'late');
+  checks += 2;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

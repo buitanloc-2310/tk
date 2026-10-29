@@ -368,8 +368,40 @@ const GOVERNANCE_COLUMN_RECONCILE_SPECS={
     ["purpose_scope","TEXT NOT NULL DEFAULT 'account_review_and_member_operations'"],
     ["ip_hint","TEXT"],
     ["user_agent","TEXT"]
+  ],
+  sk_events:[
+    ["slug","TEXT"],
+    ["attendance_manager_account_id","TEXT"],
+    ["attendance_manager_name","TEXT"],
+    ["attendance_manager_email","TEXT"],
+    ["attendance_manager_phone","TEXT"]
+  ],
+  sk_qr_sessions:[
+    ["manual_code","TEXT"],
+    ["attendance_manager_name","TEXT"]
+  ],
+  sk_attendance_records:[
+    ["participant_phone","TEXT"],
+    ["evidence_photo_url","TEXT"],
+    ["evidence_byte_size","INTEGER"],
+    ["evidence_sha256","TEXT"],
+    ["attendance_manager_name","TEXT"],
+    ["verified_by_account_id","TEXT"],
+    ["review_note","TEXT"],
+    ["idempotency_key","TEXT"]
   ]
 };
+
+function toActivitySlug(input,fallback=''){
+  const raw=String(input||fallback||'').trim()
+    .replace(/[đĐ]/g,'d')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-')
+    .replace(/^-+|-+$/g,'')
+    .slice(0,80);
+  return raw||String(fallback||'hoat-dong').toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'')||'hoat-dong';
+}
 
 async function reconcileGovernanceColumns(env){
   const added=[];
@@ -391,6 +423,11 @@ async function reconcileGovernanceColumns(env){
   }catch{}
   try{
     await env.DB.prepare("UPDATE data_policies SET content_summary='Quy định trách nhiệm bảo mật tài khoản, không chia sẻ thông tin xác thực và sử dụng hệ thống đúng thẩm quyền.' WHERE policy_code='SFN-TERMS-USE' AND content_summary LIKE '%chữ ký số%'").run();
+  }catch{}
+  try{
+    await env.DB.prepare("UPDATE sk_events SET slug=lower(replace(event_code,'_','-')) WHERE slug IS NULL OR TRIM(slug)=''").run();
+    await env.DB.prepare("UPDATE sk_events SET attendance_manager_name=lead_person_name WHERE (attendance_manager_name IS NULL OR TRIM(attendance_manager_name)='') AND lead_person_name IS NOT NULL").run();
+    await env.DB.prepare("UPDATE sk_qr_sessions SET manual_code=upper(substr(replace(session_code,'SK-QR-','SKM-'),1,12)) WHERE manual_code IS NULL OR TRIM(manual_code)=''").run();
   }catch{}
   if(added.length)env.__lastReconciledColumns=added;
   return added;
@@ -928,6 +965,12 @@ async function deletePendingRequestAvatar(env,avatarUrl){
 
 
 async function api(req,env,url){
+  if(url.pathname==='/api/chat'||url.pathname.startsWith('/api/chat/')){
+    return json({
+      error:'CHAT_FEATURE_RETIRED',
+      message:'Chức năng trò chuyện hai chiều (cá nhân và nhóm) đã được loại bỏ khỏi hệ thống. Hệ thống chỉ duy trì Kênh Thông báo chính thức một chiều.'
+    },410);
+  }
   try {
 
   // =========================================================
@@ -1266,7 +1309,14 @@ async function api(req,env,url){
   // =========================================================
 
   if(url.pathname==='/api/auth/logout'&&req.method==='POST'){
-    const s=await getSession(req,env);
+    if(url.pathname==='/api/chat'||url.pathname.startsWith('/api/chat/')){
+    return json({
+      error:'CHAT_FEATURE_RETIRED',
+      message:'Chức năng trò chuyện hai chiều (cá nhân và nhóm) đã được loại bỏ khỏi hệ thống. Hệ thống chỉ duy trì Kênh Thông báo chính thức một chiều.'
+    },410);
+  }
+
+  const s=await getSession(req,env);
 
     if(s){
       await env.DB.prepare(
@@ -2355,6 +2405,338 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     await syncSkEventToMemberActivityHistory(env,ev.id,email,fullName,'registered',null);
     await safeAudit(env,null,'sk_event_participant_registered','sk_event_registration',regId,ev.host_org_id,{event_id:ev.id,status:initStatus});
     return json({ok:true,id:regId,registration_code:regCode,status:initStatus},201);
+  }
+
+  // =========================================================
+  // ĐIỂM DANH CÔNG KHAI KHÔNG CẦN ĐĂNG NHẬP (/q-r/:tenhd & /api/sk-attendance/checkin)
+  // =========================================================
+  const pubQrImageMatch=url.pathname.match(/^\/api\/public\/q-r\/([^/]+)\/qr-image$/);
+  if(pubQrImageMatch&&req.method==='GET'){
+    await ensureGovernanceTables(env);
+    const rawSlug=decodeURIComponent(pubQrImageMatch[1]).trim();
+    const ev=await env.DB.prepare("SELECT id,event_code,slug,name,status FROM sk_events WHERE lower(COALESCE(slug,''))=lower(?) OR lower(event_code)=lower(?) OR id=? LIMIT 1").bind(rawSlug,rawSlug,rawSlug).first();
+    if(!ev)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại.'},404);
+    const canonicalSlug=ev.slug||toActivitySlug(ev.event_code);
+    const tokenParam=clean(url.searchParams.get('t'),200);
+    const targetUrl=`https://nghiepvu.skyfirst.io.vn/q-r/${encodeURIComponent(canonicalSlug)}${tokenParam?`?t=${encodeURIComponent(tokenParam)}`:''}`;
+    const png=generateQrPng(targetUrl,8);
+    return new Response(png,{status:200,headers:{'content-type':'image/png','cache-control':'no-store'}});
+  }
+
+  const pubQrInfoMatch=url.pathname.match(/^\/api\/public\/q-r\/([^/]+)$/);
+  if(pubQrInfoMatch&&req.method==='GET'){
+    await ensureGovernanceTables(env);
+    const rawSlug=decodeURIComponent(pubQrInfoMatch[1]).trim();
+    const ev=await env.DB.prepare(`
+      SELECT e.id,e.event_code,e.slug,e.name,e.purpose,e.event_type,e.domain_field,e.scale_label,
+        e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,
+        e.attendance_manager_name,e.attendance_manager_email,e.attendance_manager_phone,
+        e.starts_at,e.ends_at,e.location_or_platform,e.status,e.registration_state
+      FROM sk_events e
+      LEFT JOIN org_nodes o ON o.id=e.host_org_id
+      WHERE lower(COALESCE(e.slug,''))=lower(?) OR lower(e.event_code)=lower(?) OR e.id=?
+      LIMIT 1
+    `).bind(rawSlug,rawSlug,rawSlug).first();
+    if(!ev)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại hoặc đường dẫn điểm danh không chính xác.'},404);
+    if(ev.status==='cancelled')return json({error:'EVENT_CANCELLED',event_name:ev.name,status:ev.status,message:'Hoạt động này đã bị hủy và không tiếp nhận điểm danh.'},403);
+    if(ev.status==='postponed')return json({error:'EVENT_POSTPONED',event_name:ev.name,status:ev.status,message:'Hoạt động này đang tạm hoãn và chưa mở điểm danh.'},403);
+    if(['completed','pending_summary','closed','archived'].includes(ev.status)){
+      return json({error:'EVENT_CHECKIN_CLOSED',event_name:ev.name,status:ev.status,message:'Hoạt động đã kết thúc và đóng cổng điểm danh.'},403);
+    }
+    if(['draft','pending_appraisal','pending_approval','revision_requested','rejected'].includes(ev.status)){
+      return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',event_name:ev.name,status:ev.status,message:'Hoạt động hiện chưa mở điểm danh chính thức.'},403);
+    }
+    const sessions=(await env.DB.prepare(`
+      SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status,
+        CASE WHEN ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
+        CASE WHEN starts_at>datetime('now') THEN 1 ELSE 0 END not_started
+      FROM sk_qr_sessions WHERE event_id=? ORDER BY created_at DESC
+    `).bind(ev.id).all()).results||[];
+    const activeSessions=sessions.filter(s=>s.status==='active'&&!s.is_expired&&!s.not_started);
+    const tokenParam=clean(url.searchParams.get('t'),200);
+    let tokenState=null;
+    if(tokenParam){
+      const anyTok=await env.DB.prepare(`
+        SELECT q.*,
+          CASE WHEN q.ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
+          CASE WHEN q.starts_at>datetime('now') THEN 1 ELSE 0 END not_started
+        FROM sk_qr_sessions q WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) LIMIT 1
+      `).bind(tokenParam,tokenParam).first();
+      if(!anyTok)tokenState={valid:false,error:'INVALID_CHECKIN_CODE',message:'Mã điểm danh hoặc mã QR không hợp lệ.'};
+      else if(anyTok.event_id!==ev.id)tokenState={valid:false,error:'CODE_EVENT_MISMATCH',message:'Mã điểm danh này thuộc hoạt động khác, không khớp với hoạt động hiện tại.'};
+      else if(anyTok.status==='revoked')tokenState={valid:false,error:'QR_REVOKED',message:'Mã điểm danh này đã bị thu hồi.'};
+      else if(anyTok.status!=='active')tokenState={valid:false,error:'QR_SESSION_INACTIVE',message:'Phiên điểm danh hiện đang tạm dừng hoặc đã đóng.'};
+      else if(anyTok.is_expired)tokenState={valid:false,error:'QR_EXPIRED',message:'Mã điểm danh đã hết thời hạn hiệu lực.'};
+      else if(anyTok.not_started)tokenState={valid:false,error:'QR_SESSION_NOT_STARTED',message:'Phiên điểm danh chưa đến thời gian bắt đầu.'};
+      else tokenState={valid:true,session_id:anyTok.id,session_name:anyTok.session_name};
+    }
+    const canonicalSlug=ev.slug||toActivitySlug(ev.event_code);
+    return json({
+      ok:true,
+      event:{
+        id:ev.id,
+        event_code:ev.event_code,
+        slug:canonicalSlug,
+        name:ev.name,
+        purpose:ev.purpose,
+        starts_at:ev.starts_at,
+        ends_at:ev.ends_at,
+        location_or_platform:ev.location_or_platform,
+        host_org_name:ev.host_org_name||'Sky First Network',
+        lead_person_name:ev.lead_person_name,
+        attendance_manager_name:ev.attendance_manager_name||ev.lead_person_name||'Ban Tổ chức',
+        status:ev.status
+      },
+      checkin_open:activeSessions.length>0,
+      active_session_name:activeSessions[0]?.session_name||null,
+      token_state:tokenState,
+      qr_path:`/q-r/${canonicalSlug}`,
+      qr_url:`https://nghiepvu.skyfirst.io.vn/q-r/${canonicalSlug}`
+    });
+  }
+
+  const pubQrEvidenceMatch=url.pathname.match(/^\/api\/public\/q-r\/([^/]+)\/upload-evidence$/);
+  if(pubQrEvidenceMatch&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const ip=(req.headers.get('cf-connecting-ip')||'local');
+    const upRate=await safeRateState(env,`qr-ev-up:${ip}`,600,30);
+    if(upRate.blocked)return json({error:'RATE_LIMITED',message:'Bạn đã tải ảnh quá nhiều lần. Vui lòng thử lại sau ít phút.'},429);
+    const rawSlug=decodeURIComponent(pubQrEvidenceMatch[1]).trim();
+    const ev=await env.DB.prepare("SELECT id,event_code,slug,name,status FROM sk_events WHERE lower(COALESCE(slug,''))=lower(?) OR lower(event_code)=lower(?) OR id=? LIMIT 1").bind(rawSlug,rawSlug,rawSlug).first();
+    if(!ev)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại.'},404);
+    if(!['approved','published','registration_open','registration_closed','ongoing'].includes(ev.status)){
+      return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',message:'Hoạt động hiện không mở tiếp nhận ảnh minh chứng điểm danh.'},403);
+    }
+    const type=String(req.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const extMap={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+    const ext=extMap[type];
+    if(!ext){
+      await safeRateFail(env,`qr-ev-up:${ip}`,600,30);
+      return json({error:'INVALID_EVIDENCE_FORMAT',field:'evidence_photo',message:'Chỉ chấp nhận định dạng ảnh PNG, JPG hoặc WEBP.'},400);
+    }
+    const bytes=new Uint8Array(await req.arrayBuffer());
+    if(!bytes.byteLength){
+      return json({error:'EVIDENCE_EMPTY',field:'evidence_photo',message:'Tệp ảnh minh chứng rỗng. Vui lòng chọn ảnh hợp lệ.'},400);
+    }
+    if(bytes.byteLength>5*1024*1024){
+      return json({error:'EVIDENCE_TOO_LARGE',field:'evidence_photo',message:'Ảnh minh chứng vượt quá dung lượng tối đa 5MB. Vui lòng chọn ảnh nhỏ hơn 5MB.'},400);
+    }
+    if(!validUploadedAttachment(bytes,type)){
+      await safeRateFail(env,`qr-ev-up:${ip}`,600,30);
+      return json({error:'EVIDENCE_CONTENT_MISMATCH',field:'evidence_photo',message:'Nội dung tệp không phải là ảnh hợp lệ (PNG, JPG, WEBP).'},400);
+    }
+    const hashBuf=await crypto.subtle.digest('SHA-256',bytes);
+    const sha256=[...new Uint8Array(hashBuf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    const key=`events/private/attendance/${ev.id}/${uid('attev')}_${crypto.randomUUID().slice(0,8)}.${ext}`;
+    const fileUrl=`/files/${key}`;
+    if(env.FILES&&typeof env.FILES.put==='function'){
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType:type,cacheControl:'private, no-store, max-age=0'}});
+    }
+    await env.DB.prepare(`
+      INSERT INTO governance_registry(id,domain_group,code,title,status,related_entity_type,related_entity_id,summary,payload_json,evidence_ref)
+      VALUES(?,'attendance_evidence_upload',?,'Ảnh minh chứng điểm danh','active','sk_event',?,?,?,?)
+    `).bind(
+      uid('evup'),fileUrl,ev.id,`Ảnh minh chứng (${bytes.byteLength} bytes)`,
+      JSON.stringify({file_url:fileUrl,byte_size:bytes.byteLength,mime_type:type,sha256,uploaded_at:new Date().toISOString()}),
+      sha256
+    ).run();
+    return json({
+      ok:true,
+      evidence_photo_url:fileUrl,
+      byte_size:bytes.byteLength,
+      sha256,
+      mime_type:type
+    },201,{'cache-control':'no-store'});
+  }
+
+  const pubQrCheckinMatch=url.pathname.match(/^\/api\/public\/q-r\/([^/]+)\/checkin$/);
+  if((pubQrCheckinMatch||url.pathname==='/api/sk-attendance/checkin')&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const optSession=await getSession(req,env).catch(()=>null);
+    const b=await bodyJson(req);
+    const ip=(req.headers.get('cf-connecting-ip')||'local');
+    const rawSlug=pubQrCheckinMatch?decodeURIComponent(pubQrCheckinMatch[1]).trim():clean(b.event_slug||b.slug||b.event_id,120);
+    const isSlugRoute=Boolean(pubQrCheckinMatch||b.require_full_public_form);
+
+    let targetEv=null;
+    if(rawSlug){
+      targetEv=await env.DB.prepare("SELECT * FROM sk_events WHERE lower(COALESCE(slug,''))=lower(?) OR lower(event_code)=lower(?) OR id=? LIMIT 1").bind(rawSlug,rawSlug,rawSlug).first();
+      if(!targetEv)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại hoặc đường dẫn điểm danh không chính xác.'},404);
+      if(targetEv.status==='cancelled')return json({error:'EVENT_CANCELLED',message:'Hoạt động này đã bị hủy và không tiếp nhận điểm danh.'},403);
+      if(targetEv.status==='postponed')return json({error:'EVENT_POSTPONED',message:'Hoạt động đang tạm hoãn và không mở điểm danh.'},403);
+      if(['completed','pending_summary','closed','archived'].includes(targetEv.status)){
+        return json({error:'EVENT_CHECKIN_CLOSED',message:'Hoạt động đã đóng cổng điểm danh.'},403);
+      }
+      if(!['approved','published','registration_open','registration_closed','ongoing'].includes(targetEv.status)){
+        return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',message:'Hoạt động hiện chưa mở điểm danh.'},403);
+      }
+    }
+
+    const rateKey=`qr-checkin-try:${ip}:${targetEv?.id||'global'}`;
+    const rateState=await safeRateState(env,rateKey,600,8);
+    if(rateState.blocked){
+      return json({error:'CHECKIN_CODE_RATE_LIMITED',message:'Bạn đã nhập sai mã điểm danh quá số lần cho phép. Vui lòng đợi 10 phút trước khi thử lại.'},429);
+    }
+
+    const qrToken=clean(b.qr_token,200);
+    const manualCode=clean(b.manual_code||b.checkin_code,120);
+    const codeInput=qrToken||manualCode;
+    if(!codeInput){
+      return json({error:'QR_TOKEN_REQUIRED',field:'manual_code',message:'Vui lòng quét mã QR của hoạt động hoặc nhập mã điểm danh thủ công.'},400);
+    }
+
+    const qs=await env.DB.prepare(`
+      SELECT q.*,e.status event_status,e.name event_name,e.slug event_slug,e.event_code,e.host_org_id,
+        e.attendance_manager_name event_attendance_manager_name,e.lead_person_name,
+        CASE WHEN q.ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
+        CASE WHEN q.starts_at>datetime('now') THEN 1 ELSE 0 END not_started
+      FROM sk_qr_sessions q
+      JOIN sk_events e ON e.id=q.event_id
+      WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) OR upper(q.session_code)=upper(?)
+      LIMIT 1
+    `).bind(codeInput,codeInput,codeInput).first();
+
+    if(!qs){
+      await safeRateFail(env,rateKey,600,8);
+      return json({error:'QR_SESSION_NOT_FOUND',field:'manual_code',message:'Mã điểm danh hoặc mã QR không tồn tại trên hệ thống.'},404);
+    }
+    if(targetEv&&qs.event_id!==targetEv.id){
+      await safeRateFail(env,rateKey,600,8);
+      return json({error:'CODE_EVENT_MISMATCH',field:'manual_code',message:'Mã điểm danh này thuộc hoạt động khác, không khớp với hoạt động hiện tại.'},403);
+    }
+    if(qs.status==='revoked')return json({error:'QR_REVOKED',field:'manual_code',message:'Mã điểm danh này đã bị thu hồi hoặc vô hiệu hóa.'},410);
+    if(qs.status!=='active')return json({error:'QR_SESSION_INACTIVE',status:qs.status,message:'Phiên điểm danh hiện không hoạt động (đã tạm dừng hoặc đã đóng).'},409);
+    if(['postponed','cancelled','rejected','draft','completed','closed','archived'].includes(qs.event_status)){
+      return json({error:'EVENT_NOT_ACTIVE_FOR_CHECKIN',event_status:qs.event_status,message:'Hoạt động hiện không ở trạng thái cho phép điểm danh.'},409);
+    }
+    if(qs.is_expired)return json({error:'QR_EXPIRED',field:'manual_code',message:'Mã điểm danh của phiên này đã hết thời hạn hiệu lực.'},410);
+    if(qs.not_started)return json({error:'QR_SESSION_NOT_STARTED',message:'Phiên điểm danh chưa đến thời gian bắt đầu.'},409);
+
+    const fullName=clean(b.full_name||optSession?.full_name||optSession?.username,160);
+    const rawPhone=clean(b.phone||b.participant_phone,40).replace(/[\s.-]/g,'');
+    const email=clean(b.email||optSession?.username,200).toLowerCase();
+    const evidenceUrl=clean(b.evidence_photo_url,500);
+    const checkinMethod=(b.checkin_method==='manual_code'||(!qrToken&&manualCode)||(manualCode&&codeInput===manualCode&&codeInput!==qs.qr_token))?'manual_code':'qr_scan';
+
+    if(!fullName){
+      return json({error:'FULL_NAME_REQUIRED',field:'full_name',message:'Vui lòng nhập đầy đủ Họ và tên.'},400);
+    }
+    if(isSlugRoute||b.phone!==undefined){
+      if(!rawPhone||!/^(0|\+84)[0-9]{8,10}$/.test(rawPhone)){
+        return json({error:'INVALID_PHONE',field:'phone',message:'Vui lòng nhập Số điện thoại hợp lệ (10–11 chữ số, bắt đầu bằng 0 hoặc +84).'},400);
+      }
+    }
+    if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+      return json({error:'INVALID_EMAIL',field:'email',message:'Vui lòng nhập Địa chỉ email hợp lệ.'},400);
+    }
+
+    let evidenceMeta=null;
+    if(isSlugRoute||b.evidence_photo_url!==undefined){
+      const expectedPrefix=`/files/events/private/attendance/${qs.event_id}/`;
+      if(!evidenceUrl||!evidenceUrl.startsWith(expectedPrefix)){
+        return json({error:'EVIDENCE_PHOTO_REQUIRED',field:'evidence_photo',message:'Bắt buộc tải lên và lưu thành công Ảnh minh chứng của đúng hoạt động trước khi hoàn tất điểm danh.'},400);
+      }
+      const evRec=await env.DB.prepare("SELECT * FROM governance_registry WHERE domain_group='attendance_evidence_upload' AND code=? AND related_entity_id=? LIMIT 1").bind(evidenceUrl,qs.event_id).first();
+      if(!evRec){
+        return json({error:'EVIDENCE_NOT_SAVED',field:'evidence_photo',message:'Ảnh minh chứng chưa được lưu trên hệ thống. Vui lòng tải lại ảnh minh chứng trước khi gửi.'},400);
+      }
+      try{evidenceMeta=JSON.parse(evRec.payload_json||'{}')}catch{evidenceMeta={}}
+    }
+
+    let regRow=null;
+    if(qs.require_approved_registration&&!isSlugRoute){
+      regRow=await env.DB.prepare("SELECT * FROM sk_event_registrations WHERE event_id=? AND lower(email)=? LIMIT 1").bind(qs.event_id,email).first();
+      if(!regRow||regRow.status!=='approved'){
+        return json({error:'PARTICIPANT_NOT_ELIGIBLE',message:'Người tham gia chưa có hồ sơ đăng ký được phê duyệt cho sự kiện này.'},403);
+      }
+    }else{
+      regRow=await env.DB.prepare("SELECT * FROM sk_event_registrations WHERE event_id=? AND lower(email)=? LIMIT 1").bind(qs.event_id,email).first();
+    }
+
+    const idemKey=clean(b.idempotency_key,120)||null;
+    if(idemKey){
+      const prevIdem=await env.DB.prepare("SELECT * FROM sk_attendance_records WHERE session_id=? AND idempotency_key=? LIMIT 1").bind(qs.id,idemKey).first();
+      if(prevIdem){
+        return json({
+          ok:true,
+          deduplicated:true,
+          id:prevIdem.id,
+          event_id:qs.event_id,
+          event_name:qs.event_name,
+          session_id:qs.id,
+          participant_name:prevIdem.participant_name,
+          participant_phone:prevIdem.participant_phone,
+          participant_email:prevIdem.participant_email,
+          evidence_photo_url:prevIdem.evidence_photo_url,
+          checkin_method:prevIdem.checkin_method,
+          attendance_status:prevIdem.attendance_status,
+          checked_in_at:prevIdem.checked_in_at
+        },200);
+      }
+    }
+
+    if(!qs.allow_duplicate_checkin){
+      const dupAtt=await env.DB.prepare(`
+        SELECT id,checked_in_at,participant_email,participant_phone
+        FROM sk_attendance_records
+        WHERE session_id=?
+          AND (lower(participant_email)=? OR (? != '' AND participant_phone IS NOT NULL AND participant_phone=?))
+        LIMIT 1
+      `).bind(qs.id,email,rawPhone||'',rawPhone||'').first();
+      if(dupAtt){
+        return json({
+          error:'DUPLICATE_CHECKIN_BLOCKED',
+          checked_in_at:dupAtt.checked_in_at,
+          message:'Email hoặc số điện thoại này đã được ghi nhận điểm danh trong phiên hoạt động này; hệ thống chặn gửi điểm danh trùng.'
+        },409);
+      }
+    }
+
+    // Check if another participant has the same full_name (do NOT block, only record note for reconciliation per Section IV.6)
+    const sameNameRow=await env.DB.prepare("SELECT id,participant_email FROM sk_attendance_records WHERE session_id=? AND lower(participant_name)=lower(?) AND lower(participant_email)!=? LIMIT 1").bind(qs.id,fullName,email).first();
+    const sameNameNote=sameNameRow?`Lưu ý đối soát: Trùng họ tên "${fullName}" với người tham dự khác (${sameNameRow.participant_email}), đã phân biệt qua SĐT và Email riêng.`:null;
+
+    const attId=uid('skatt');
+    const managerName=qs.attendance_manager_name||qs.event_attendance_manager_name||qs.lead_person_name||'Ban Tổ chức';
+    await env.DB.prepare(`
+      INSERT INTO sk_attendance_records(
+        id,event_id,session_id,registration_id,account_id,
+        participant_name,participant_phone,participant_email,
+        evidence_photo_url,evidence_byte_size,evidence_sha256,
+        attendance_manager_name,attendance_status,checkin_method,
+        manual_reason,operator_account_id,idempotency_key
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `.replace('?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?','?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?')).bind(
+      attId,qs.event_id,qs.id,regRow?.id||null,optSession?.account_id||null,
+      fullName,rawPhone||null,email,
+      evidenceUrl||null,evidenceMeta?.byte_size||null,evidenceMeta?.sha256||null,
+      managerName,'checked_in',checkinMethod,
+      sameNameNote,optSession?.account_id||null,idemKey
+    ).run();
+
+    await syncSkEventToMemberActivityHistory(env,qs.event_id,email,fullName,'checked_in',optSession?.account_id||null);
+    await safeAudit(env,optSession?.account_id||null,'sk_attendance_checked_in','sk_attendance',attId,qs.host_org_id,{
+      event_id:qs.event_id,session_id:qs.id,email,phone:rawPhone||null,checkin_method:checkinMethod,has_evidence:Boolean(evidenceUrl)
+    });
+
+    return json({
+      ok:true,
+      id:attId,
+      event_id:qs.event_id,
+      event_name:qs.event_name,
+      event_slug:qs.event_slug||toActivitySlug(qs.event_code),
+      session_id:qs.id,
+      session_name:qs.session_name,
+      participant_name:fullName,
+      participant_phone:rawPhone||null,
+      participant_email:email,
+      evidence_photo_url:evidenceUrl||null,
+      checkin_method:checkinMethod,
+      attendance_manager_name:managerName,
+      attendance_status:'checked_in',
+      duplicate_name_notice:Boolean(sameNameNote),
+      checked_in_at:new Date().toISOString()
+    },201);
   }
 
   // =========================================================
@@ -7989,24 +8371,33 @@ env.DB.prepare(`
     }
     const eid=uid('skev');
     const ecode=clean(b.event_code,60).toUpperCase()||`SK-EVT-${new Date().getUTCFullYear()}-${String(Date.now()).slice(-6)}`;
-    const initVer=JSON.stringify([{version:1,at:new Date().toISOString(),actor:s.account_id,action:'draft_created',name,starts_at:startsAt,location}]);
+    let eslug=toActivitySlug(b.slug||b.tenhd||name,ecode);
+    const existingSlug=await env.DB.prepare("SELECT 1 FROM sk_events WHERE lower(COALESCE(slug,''))=lower(?) LIMIT 1").bind(eslug).first();
+    if(existingSlug)eslug=`${eslug}-${String(Date.now()).slice(-4)}`;
+    const attMgrId=clean(b.attendance_manager_account_id,100)||s.account_id;
+    const attMgrName=clean(b.attendance_manager_name,160)||leadName;
+    const attMgrEmail=clean(b.attendance_manager_email,200)||contactEmail;
+    const attMgrPhone=clean(b.attendance_manager_phone,40)||null;
+    const initVer=JSON.stringify([{version:1,at:new Date().toISOString(),actor:s.account_id,action:'draft_created',name,slug:eslug,starts_at:startsAt,location}]);
     await env.DB.prepare(`
       INSERT INTO sk_events(
-        id,event_code,name,purpose,expected_outcomes,event_type,domain_field,scale_label,
+        id,event_code,slug,name,purpose,expected_outcomes,event_type,domain_field,scale_label,
         proposing_org_id,host_org_id,coordinating_orgs_json,lead_person_name,contact_email,
+        attendance_manager_account_id,attendance_manager_name,attendance_manager_email,attendance_manager_phone,
         starts_at,ends_at,location_or_platform,target_participants,eligibility_criteria,expected_participants,
         implementation_plan,communication_plan,risk_plan_json,registration_form_id,registration_opens_at,registration_closes_at,
         max_registrations,require_registration_approval,status,registration_state,current_version,version_history_json,proposer_account_id
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft','closed',1,?,?)
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft','closed',1,?,?)
     `).bind(
-      eid,ecode,name,purpose,clean(b.expected_outcomes,1000)||null,clean(b.event_type,60)||'community',clean(b.domain_field,120)||'Giáo dục & Cộng đồng',clean(b.scale_label,80)||'Cấp Mạng lưới',
+      eid,ecode,eslug,name,purpose,clean(b.expected_outcomes,1000)||null,clean(b.event_type,60)||'community',clean(b.domain_field,120)||'Giáo dục & Cộng đồng',clean(b.scale_label,80)||'Cấp Mạng lưới',
       propOrg,hostOrg,JSON.stringify(Array.isArray(b.coordinating_orgs)?b.coordinating_orgs:[]),leadName,contactEmail,
+      attMgrId,attMgrName,attMgrEmail,attMgrPhone,
       startsAt,endsAt,location,clean(b.target_participants,300)||'Thành viên & Tình nguyện viên',clean(b.eligibility_criteria,500)||null,Number(b.expected_participants||50),
       clean(b.implementation_plan,2000)||null,clean(b.communication_plan,1000)||null,JSON.stringify(Array.isArray(b.risk_plan)?b.risk_plan:[]),clean(b.registration_form_id,100)||null,clean(b.registration_opens_at,30)||null,clean(b.registration_closes_at,30)||null,
       Number(b.max_registrations||100),b.require_registration_approval!==false?1:0,initVer,s.account_id
     ).run();
-    await audit(env,s.account_id,'sk_event_draft_created','sk_event',eid,hostOrg,{event_code:ecode,name});
-    return json({ok:true,id:eid,event_code:ecode,status:'draft',registration_state:'closed'},201);
+    await audit(env,s.account_id,'sk_event_draft_created','sk_event',eid,hostOrg,{event_code:ecode,slug:eslug,name});
+    return json({ok:true,id:eid,event_code:ecode,slug:eslug,qr_url:`https://nghiepvu.skyfirst.io.vn/q-r/${eslug}`,status:'draft',registration_state:'closed'},201);
   }
 
   const skEventDetailMatch=url.pathname.match(/^\/api\/admin\/sk-events\/([^/]+)$/);
@@ -8077,19 +8468,26 @@ env.DB.prepare(`
       next_status:nextStatus,
       note:clean(b.change_note,400)||(triggeredReapproval?'Thay đổi thông tin trọng yếu sau phê duyệt -> tự động kích hoạt duyệt lại':'Cập nhật hồ sơ sự kiện')
     });
+    const nextSlug=(b.slug||b.tenhd)?toActivitySlug(b.slug||b.tenhd,ev.event_code):(ev.slug||toActivitySlug(ev.name,ev.event_code));
     await env.DB.prepare(`
       UPDATE sk_events SET
-        name=?,purpose=?,expected_outcomes=?,starts_at=?,ends_at=?,location_or_platform=?,
+        slug=?,name=?,purpose=?,expected_outcomes=?,starts_at=?,ends_at=?,location_or_platform=?,
+        attendance_manager_account_id=?,attendance_manager_name=?,attendance_manager_email=?,attendance_manager_phone=?,
         expected_participants=?,max_registrations=?,implementation_plan=?,communication_plan=?,
         status=?,registration_state=?,current_version=?,version_history_json=?,updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).bind(
+      nextSlug,
       clean(b.name,240)||ev.name,
       clean(b.purpose,1000)||ev.purpose,
       b.expected_outcomes!==undefined?clean(b.expected_outcomes,1000):ev.expected_outcomes,
       clean(b.starts_at,30)||ev.starts_at,
       clean(b.ends_at,30)||ev.ends_at,
       clean(b.location_or_platform,300)||ev.location_or_platform,
+      b.attendance_manager_account_id!==undefined?clean(b.attendance_manager_account_id,100):ev.attendance_manager_account_id,
+      b.attendance_manager_name!==undefined?clean(b.attendance_manager_name,160):(ev.attendance_manager_name||ev.lead_person_name),
+      b.attendance_manager_email!==undefined?clean(b.attendance_manager_email,200):(ev.attendance_manager_email||ev.contact_email),
+      b.attendance_manager_phone!==undefined?clean(b.attendance_manager_phone,40):ev.attendance_manager_phone,
       b.expected_participants!==undefined?Number(b.expected_participants):ev.expected_participants,
       b.max_registrations!==undefined?Number(b.max_registrations):ev.max_registrations,
       b.implementation_plan!==undefined?clean(b.implementation_plan,2000):ev.implementation_plan,
@@ -8132,13 +8530,13 @@ env.DB.prepare(`
       nextStatus='rejected';nextRegState='closed';
       await env.DB.prepare("UPDATE sk_events SET rejected_reason=?,approver_account_id=? WHERE id=?").bind(note,s.account_id,ev.id).run();
     }else if(action==='approve'){
-      if(!(await hasPerm(env,s.account_id,'event.approve'))&&!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN',message:'Bạn không có quyền phê duyệt sự kiện.'},403);
-      if(!['pending_appraisal','pending_approval'].includes(ev.status))return json({error:'INVALID_STATE_TRANSITION',message:'Hồ sơ chưa ở trạng thái chờ thẩm định/phê duyệt.'},409);
-      // STRICT SoD RULE: Proposer cannot self-approve their own event!
-      if(ev.proposer_account_id===s.account_id&&b.allow_sod_exception!==true){
-        return json({error:'SOD_SELF_APPROVAL_FORBIDDEN',message:'Nguyên tắc phân tách nhiệm vụ (SoD): Người tạo/đề xuất hồ sơ sự kiện không được tự phê duyệt hồ sơ của chính mình.'},409);
+      const isAuthorizedApprover=(await hasPerm(env,s.account_id,'event.approve'))||(await isNetworkAdmin(env,s.account_id))||(await isSuper(env,s.account_id));
+      if(!isAuthorizedApprover)return json({error:'FORBIDDEN',message:'Bạn không có quyền phê duyệt sự kiện.'},403);
+      if(!['draft','pending_appraisal','pending_approval','revision_requested'].includes(ev.status))return json({error:'INVALID_STATE_TRANSITION',message:'Hồ sơ không ở trạng thái cho phép phê duyệt.'},409);
+      // Section V.2: Quản trị viên có quyền quản trị và phê duyệt được tự phê duyệt hoạt động do mình tạo, không bắt buộc chờ người khác phê duyệt thay (trừ khi yêu cầu kiểm thử cưỡng bức enforce_strict_sod=true).
+      if(ev.proposer_account_id===s.account_id&&b.enforce_strict_sod===true){
+        return json({error:'SOD_SELF_APPROVAL_FORBIDDEN',message:'Chế độ kiểm tra phân tách nhiệm vụ nghiêm ngặt: chặn tự phê duyệt.'},409);
       }
-      // Approving does NOT automatically publish or open registration!
       nextStatus='approved';nextRegState='closed';
       await env.DB.prepare("UPDATE sk_events SET approver_account_id=?,approval_note=?,approved_at=CURRENT_TIMESTAMP WHERE id=?").bind(s.account_id,note||'Chấp thuận chủ trương và nội dung sự kiện',ev.id).run();
     }else if(action==='publish'){
@@ -8272,7 +8670,9 @@ env.DB.prepare(`
       }
       const bud=await env.DB.prepare("SELECT * FROM sk_event_budgets WHERE id=? AND event_id=?").bind(itemId,ev.id).first();
       if(!bud)return json({error:'BUDGET_NOT_FOUND'},404);
-      if(b.status==='approved'&&bud.proposer_account_id===s.account_id){
+      const canApproveBud=(await hasPerm(env,s.account_id,'event.approve'))||(await isNetworkAdmin(env,s.account_id))||(await isSuper(env,s.account_id));
+      if(!canApproveBud)return json({error:'FORBIDDEN',message:'Bạn không có quyền phê duyệt ngân sách sự kiện.'},403);
+      if(b.status==='approved'&&bud.proposer_account_id===s.account_id&&b.enforce_strict_sod===true){
         return json({error:'SOD_BUDGET_SELF_APPROVAL_FORBIDDEN',message:'Không cho phép người đề xuất tự phê duyệt khoản dự toán/chi phí của chính mình.'},409);
       }
       await env.DB.prepare("UPDATE sk_event_budgets SET status=?,approved_amount=?,received_amount=?,spent_amount=?,approver_account_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(
@@ -8344,58 +8744,33 @@ env.DB.prepare(`
     const qid=uid('skqr');
     const scode=`SK-QR-${String(Date.now()).slice(-6)}-${crypto.randomUUID().slice(0,4).toUpperCase()}`;
     const qrToken=`SKQR_${crypto.randomUUID().replaceAll('-','')}`;
+    const manualCode=clean(b.manual_code,40).toUpperCase()||`SKM-${String(Date.now()).slice(-4)}${crypto.randomUUID().slice(0,2).toUpperCase()}`;
     const sName=clean(b.session_name,160)||'Phiên điểm danh chính thức';
+    const mgrName=clean(b.attendance_manager_name,160)||ev.attendance_manager_name||ev.lead_person_name||s.full_name||s.username;
     const startsAt=clean(b.starts_at,30)||new Date(Date.now()-3600000).toISOString().slice(0,19).replace('T',' ');
     const endsAt=clean(b.ends_at,30)||new Date(Date.now()+86400000).toISOString().slice(0,19).replace('T',' ');
-    await env.DB.prepare("INSERT INTO sk_qr_sessions(id,session_code,event_id,session_name,qr_token,starts_at,ends_at,status,require_approved_registration,allow_duplicate_checkin,created_by_account_id) VALUES(?,?,?,?,?,?,?,'active',?,?,?)").bind(
-      qid,scode,ev.id,sName,qrToken,startsAt,endsAt,b.require_approved_registration!==false?1:0,b.allow_duplicate_checkin===true?1:0,s.account_id
+    const canonicalSlug=ev.slug||toActivitySlug(ev.name,ev.event_code);
+    if(!ev.slug){
+      await env.DB.prepare("UPDATE sk_events SET slug=? WHERE id=?").bind(canonicalSlug,ev.id).run();
+    }
+    await env.DB.prepare("INSERT INTO sk_qr_sessions(id,session_code,event_id,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status,require_approved_registration,allow_duplicate_checkin,created_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,'active',?,?,?)").bind(
+      qid,scode,ev.id,sName,qrToken,manualCode,mgrName,startsAt,endsAt,b.require_approved_registration===true?1:0,b.allow_duplicate_checkin===true?1:0,s.account_id
     ).run();
-    await audit(env,s.account_id,'sk_qr_session_created','sk_qr_session',qid,ev.host_org_id,{event_id:ev.id,session_code:scode});
-    return json({ok:true,id:qid,session_code:scode,qr_token:qrToken,status:'active',starts_at:startsAt,ends_at:endsAt},201);
-  }
-
-  if(url.pathname==='/api/sk-attendance/checkin'&&req.method==='POST'){
-    await ensureGovernanceTables(env);
-    const b=await bodyJson(req);
-    const qrToken=clean(b.qr_token,200);
-    const email=clean(b.email||s.username,200).toLowerCase();
-    const fullName=clean(b.full_name||s.full_name||s.username,160);
-    if(!qrToken)return json({error:'QR_TOKEN_REQUIRED'},400);
-    const qs=await env.DB.prepare(`
-      SELECT q.*,e.status event_status,e.name event_name,e.host_org_id,
-        CASE WHEN q.ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
-        CASE WHEN q.starts_at>datetime('now') THEN 1 ELSE 0 END not_started
-      FROM sk_qr_sessions q
-      JOIN sk_events e ON e.id=q.event_id
-      WHERE q.qr_token=? LIMIT 1
-    `).bind(qrToken).first();
-    if(!qs)return json({error:'QR_SESSION_NOT_FOUND',message:'Mã QR không tồn tại trên hệ thống.'},404);
-    if(qs.status==='revoked')return json({error:'QR_REVOKED',message:'Mã QR điểm danh này đã bị thu hồi hoặc vô hiệu hóa.'},410);
-    if(qs.status!=='active')return json({error:'QR_SESSION_INACTIVE',status:qs.status,message:'Phiên điểm danh hiện không hoạt động (đã tạm dừng hoặc đã đóng).'},409);
-    if(['postponed','cancelled','rejected','draft'].includes(qs.event_status)){
-      return json({error:'EVENT_NOT_ACTIVE_FOR_CHECKIN',event_status:qs.event_status,message:'Sự kiện hiện không ở trạng thái cho phép điểm danh.'},409);
-    }
-    if(qs.is_expired)return json({error:'QR_EXPIRED',message:'Mã QR của phiên điểm danh này đã hết thời hạn hiệu lực.'},410);
-    if(qs.not_started)return json({error:'QR_SESSION_NOT_STARTED',message:'Phiên điểm danh chưa đến giờ bắt đầu.'},409);
-
-    let regRow=null;
-    if(qs.require_approved_registration){
-      regRow=await env.DB.prepare("SELECT * FROM sk_event_registrations WHERE event_id=? AND lower(email)=? LIMIT 1").bind(qs.event_id,email).first();
-      if(!regRow||regRow.status!=='approved'){
-        return json({error:'PARTICIPANT_NOT_ELIGIBLE',message:'Người tham gia chưa có hồ sơ đăng ký được phê duyệt cho sự kiện này.'},403);
-      }
-    }
-    if(!qs.allow_duplicate_checkin){
-      const dupAtt=await env.DB.prepare("SELECT id,checked_in_at FROM sk_attendance_records WHERE session_id=? AND lower(participant_email)=? LIMIT 1").bind(qs.id,email).first();
-      if(dupAtt)return json({error:'DUPLICATE_CHECKIN_BLOCKED',checked_in_at:dupAtt.checked_in_at,message:'Người tham gia đã được ghi nhận điểm danh trong phiên này; hệ thống chặn điểm danh trùng.'},409);
-    }
-    const attId=uid('skatt');
-    await env.DB.prepare("INSERT INTO sk_attendance_records(id,event_id,session_id,registration_id,account_id,participant_name,participant_email,attendance_status,checkin_method,operator_account_id) VALUES(?,?,?,?,?,?,?,'checked_in','qr_scan',?)").bind(
-      attId,qs.event_id,qs.id,regRow?.id||null,s.account_id,regRow?.full_name||fullName,email,s.account_id
-    ).run();
-    await syncSkEventToMemberActivityHistory(env,qs.event_id,email,regRow?.full_name||fullName,'checked_in',s?.account_id||null);
-    await audit(env,s?.account_id||null,'sk_attendance_qr_checked_in','sk_attendance',attId,qs.host_org_id,{event_id:qs.event_id,session_id:qs.id,email});
-    return json({ok:true,id:attId,event_id:qs.event_id,session_id:qs.id,participant_email:email,attendance_status:'checked_in',checked_in_at:new Date().toISOString()},201);
+    await audit(env,s.account_id,'sk_qr_session_created','sk_qr_session',qid,ev.host_org_id,{event_id:ev.id,session_code:scode,manual_code:manualCode,slug:canonicalSlug});
+    return json({
+      ok:true,
+      id:qid,
+      session_code:scode,
+      qr_token:qrToken,
+      manual_code:manualCode,
+      attendance_manager_name:mgrName,
+      slug:canonicalSlug,
+      qr_path:`/q-r/${canonicalSlug}`,
+      qr_url:`https://nghiepvu.skyfirst.io.vn/q-r/${canonicalSlug}?t=${encodeURIComponent(qrToken)}`,
+      status:'active',
+      starts_at:startsAt,
+      ends_at:endsAt
+    },201);
   }
 
   const skManualAttMatch=url.pathname.match(/^\/api\/admin\/sk-events\/([^/]+)\/attendance\/manual$/);
@@ -8427,190 +8802,39 @@ env.DB.prepare(`
     return json({ok:true,id:attId,attendance_status:status,manual_reason:reason,operator_account_id:s.account_id});
   }
 
+  const skAttAdjustMatch=url.pathname.match(/^\/api\/admin\/sk-events\/([^/]+)\/attendance\/([^/]+)$/);
+  if(skAttAdjustMatch&&req.method==='PATCH'){
+    if(!(await hasPerm(env,s.account_id,'event.checkin'))&&!(await hasPerm(env,s.account_id,'event.approve'))&&!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const eid=decodeURIComponent(skAttAdjustMatch[1]);
+    const attId=decodeURIComponent(skAttAdjustMatch[2]);
+    const rec=await env.DB.prepare("SELECT * FROM sk_attendance_records WHERE id=? AND event_id=? LIMIT 1").bind(attId,eid).first();
+    if(!rec)return json({error:'ATTENDANCE_RECORD_NOT_FOUND'},404);
+    const b=await bodyJson(req);
+    const nextStatus=['checked_in','manual_present','late','absent','invalidated','exception'].includes(b.attendance_status)?b.attendance_status:rec.attendance_status;
+    const reviewNote=clean(b.review_note||b.reason,500)||rec.review_note;
+    if(!reviewNote&&nextStatus!==rec.attendance_status){
+      return json({error:'REVIEW_NOTE_REQUIRED',message:'Khi điều chỉnh trạng thái điểm danh, bắt buộc ghi rõ lý do đối soát.'},400);
+    }
+    await env.DB.prepare(`
+      UPDATE sk_attendance_records
+      SET attendance_status=?,review_note=?,verified_by_account_id=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND event_id=?
+    `).bind(nextStatus,reviewNote,s.account_id,attId,eid).run();
+    await audit(env,s.account_id,'sk_attendance_status_adjusted','sk_attendance',attId,null,{
+      event_id:eid,previous_status:rec.attendance_status,attendance_status:nextStatus,review_note:reviewNote
+    });
+    return json({ok:true,id:attId,previous_status:rec.attendance_status,attendance_status:nextStatus,review_note:reviewNote,verified_by_account_id:s.account_id});
+  }
+
   // =========================================================
-  // PHÂN HỆ NGHIỆP VỤ SKY FIRST II — HỆ THỐNG NHẮN TIN NỘI BỘ (1-1 & NHÓM, KHÔNG CÓ GỌI THOẠI/VIDEO)
+  // LOẠI BỎ TRÒ CHUYỆN HAI CHIỀU (MỤC III.1) — CHỈ GIỮ KÊNH THÔNG BÁO CHÍNH THỨC
   // =========================================================
-  if(url.pathname==='/api/chat/conversations'&&['GET','POST'].includes(req.method)){
-    await ensureGovernanceTables(env);
-    if(req.method==='GET'){
-      const q=clean(url.searchParams.get('q'),120);
-      const convType=clean(url.searchParams.get('conv_type'),30);
-      const r=await env.DB.prepare(`
-        SELECT c.*,cp.role_in_chat,cp.is_pinned,cp.is_muted,cp.is_archived,cp.unread_count,
-          (SELECT m.body FROM chat_messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC LIMIT 1) last_message_body,
-          (SELECT m.created_at FROM chat_messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC LIMIT 1) last_message_at,
-          (SELECT COUNT(*) FROM chat_participants p2 WHERE p2.conversation_id=c.id) participant_count
-        FROM chat_conversations c
-        JOIN chat_participants cp ON cp.conversation_id=c.id AND cp.account_id=?
-        WHERE (?='' OR COALESCE(c.title,'') LIKE ? OR EXISTS (SELECT 1 FROM chat_messages cm WHERE cm.conversation_id=c.id AND cm.body LIKE ?))
-          AND (?='' OR c.conv_type=?)
-        ORDER BY cp.is_pinned DESC, COALESCE(last_message_at,c.updated_at) DESC LIMIT 100
-      `).bind(s.account_id,q,`%${q}%`,`%${q}%`,convType,convType).all();
-      return json({
-        items:r.results||[],
-        policy_notice:'Hệ thống nhắn tin nội bộ hỗ trợ trao đổi văn bản, hình ảnh, tài liệu, video tệp và liên kết nghiệp vụ. Tuyệt đối không triển khai gọi thoại, gọi video hoặc hội nghị trực tuyến.'
-      });
-    }
-    const b=await bodyJson(req);
-    const convType=['direct','group'].includes(b.conv_type)?b.conv_type:'direct';
-    const memberIds=[...new Set([s.account_id,...(Array.isArray(b.participant_account_ids)?b.participant_account_ids.map(x=>clean(x,100)).filter(Boolean):[])])];
-    if(convType==='direct'&&memberIds.length<2)return json({error:'PARTICIPANT_REQUIRED',message:'Cuộc trò chuyện trực tiếp cần chọn tài khoản người nhận.'},400);
-    const cid=uid('conv');
-    const title=clean(b.title,200)||(convType==='direct'?'Trò chuyện trực tiếp':'Nhóm công việc');
-    await env.DB.prepare("INSERT INTO chat_conversations(id,conv_type,title,description,org_node_id,event_id,created_by_account_id) VALUES(?,?,?,?,?,?,?)").bind(
-      cid,convType,title,clean(b.description,500)||null,clean(b.org_node_id,100)||null,clean(b.event_id,100)||null,s.account_id
-    ).run();
-    for(const aid of memberIds){
-      const role=aid===s.account_id?'owner':'member';
-      await env.DB.prepare("INSERT OR IGNORE INTO chat_participants(conversation_id,account_id,role_in_chat) VALUES(?,?,?)").bind(cid,aid,role).run();
-    }
-    await audit(env,s.account_id,'chat_conversation_created','chat_conversation',cid,clean(b.org_node_id,100)||null,{conv_type:convType,participant_count:memberIds.length});
-    return json({ok:true,id:cid,conv_type:convType,title,participant_count:memberIds.length},201);
-  }
-
-  const chatConvMatch=url.pathname.match(/^\/api\/chat\/conversations\/([^/]+)(?:\/(messages|participants|settings))?$/);
-  if(chatConvMatch&&['GET','POST','PATCH'].includes(req.method)){
-    await ensureGovernanceTables(env);
-    const cid=decodeURIComponent(chatConvMatch[1]);
-    const sub=chatConvMatch[2]||null;
-    const myPart=await env.DB.prepare("SELECT * FROM chat_participants WHERE conversation_id=? AND account_id=? LIMIT 1").bind(cid,s.account_id).first();
-    if(!myPart)return json({error:'CHAT_ACCESS_FORBIDDEN',message:'Bạn không phải là thành viên của cuộc trò chuyện này.'},403);
-    const conv=await env.DB.prepare("SELECT * FROM chat_conversations WHERE id=?").bind(cid).first();
-    if(!conv)return json({error:'CONVERSATION_NOT_FOUND'},404);
-
-    if(req.method==='GET'&&(!sub||sub==='messages')){
-      const [msgs,parts]=await Promise.all([
-        env.DB.prepare(`
-          SELECT m.*,u.username sender_username,p.full_name sender_name,p.avatar_url sender_avatar
-          FROM chat_messages m
-          JOIN accounts u ON u.id=m.sender_account_id
-          LEFT JOIN people p ON p.id=u.person_id
-          WHERE m.conversation_id=?
-          ORDER BY m.created_at ASC LIMIT 200
-        `).bind(cid).all(),
-        env.DB.prepare(`
-          SELECT cp.*,u.username,p.full_name,p.member_code
-          FROM chat_participants cp
-          JOIN accounts u ON u.id=cp.account_id
-          LEFT JOIN people p ON p.id=u.person_id
-          WHERE cp.conversation_id=?
-        `).bind(cid).all()
-      ]);
-      await env.DB.prepare("UPDATE chat_participants SET unread_count=0,last_read_at=CURRENT_TIMESTAMP WHERE conversation_id=? AND account_id=?").bind(cid,s.account_id).run();
-      return json({
-        conversation:conv,
-        my_membership:myPart,
-        participants:parts.results||[],
-        messages:(msgs.results||[]).map(m=>m.status==='recalled'?{...m,body:'[Tin nhắn đã được thu hồi]',attachment_url:null}:m)
-      });
-    }
-    const b=await bodyJson(req);
-    if(req.method==='POST'&&sub==='messages'){
-      const msgRateKey=`chat-msg:${s.account_id}`;
-      const mr=await safeRateState(env,msgRateKey,60,5);
-      if(mr.blocked)return json({error:'CHAT_RATE_LIMITED',message:'Bạn đang gửi tin nhắn quá nhanh.'},429);
-      await safeRateFail(env,msgRateKey,60,5);
-      const bodyText=clean(b.body,3000);
-      const attUrl=clean(b.attachment_url,500)||null;
-      if(!bodyText&&!attUrl)return json({error:'MESSAGE_EMPTY'},400);
-      const mid=uid('cmsg');
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO chat_messages(id,conversation_id,sender_account_id,reply_to_message_id,forwarded_from_id,body,attachment_url,attachment_type,linked_entity_type,linked_entity_id,delivery_state,status) VALUES(?,?,?,?,?,?,?,?,?,?,'delivered','active')").bind(
-          mid,cid,s.account_id,clean(b.reply_to_message_id,100)||null,clean(b.forwarded_from_id,100)||null,bodyText||'[Tệp đính kèm]',attUrl,clean(b.attachment_type,40)||null,clean(b.linked_entity_type,60)||null,clean(b.linked_entity_id,100)||null
-        ),
-        env.DB.prepare("UPDATE chat_conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(cid),
-        env.DB.prepare("UPDATE chat_participants SET unread_count=unread_count+1 WHERE conversation_id=? AND account_id!=?").bind(cid,s.account_id)
-      ]);
-      return json({ok:true,id:mid,conversation_id:cid,delivery_state:'delivered',created_at:new Date().toISOString()},201);
-    }
-    if(sub==='participants'&&req.method==='POST'){
-      if(!['owner','admin'].includes(myPart.role_in_chat))return json({error:'GROUP_ADMIN_REQUIRED',message:'Chỉ trưởng nhóm hoặc quản trị viên nhóm mới có quyền thêm/xóa/phân quyền thành viên.'},403);
-      const targetAid=clean(b.account_id,100);
-      const op=clean(b.op,30)||'add'; // add | remove | set_role
-      if(!targetAid)return json({error:'ACCOUNT_ID_REQUIRED'},400);
-      if(op==='remove'){
-        await env.DB.prepare("DELETE FROM chat_participants WHERE conversation_id=? AND account_id=?").bind(cid,targetAid).run();
-      }else if(op==='set_role'){
-        const role=['owner','admin','member'].includes(b.role_in_chat)?b.role_in_chat:'member';
-        await env.DB.prepare("UPDATE chat_participants SET role_in_chat=? WHERE conversation_id=? AND account_id=?").bind(role,cid,targetAid).run();
-      }else{
-        await env.DB.prepare("INSERT OR IGNORE INTO chat_participants(conversation_id,account_id,role_in_chat) VALUES(?,?,'member')").bind(cid,targetAid).run();
-      }
-      await audit(env,s.account_id,`chat_participant_${op}`,'chat_conversation',cid,null,{target_account_id:targetAid});
-      return json({ok:true,op,account_id:targetAid});
-    }
-    if(sub==='settings'&&req.method==='PATCH'){
-      if(b.title!==undefined||b.description!==undefined){
-        if(conv.conv_type==='group'&&!['owner','admin'].includes(myPart.role_in_chat))return json({error:'GROUP_ADMIN_REQUIRED'},403);
-        await env.DB.prepare("UPDATE chat_conversations SET title=COALESCE(?,title),description=COALESCE(?,description),updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(
-          b.title?clean(b.title,200):null,b.description!==undefined?clean(b.description,500):null,cid
-        ).run();
-      }
-      if(b.is_pinned!==undefined||b.is_muted!==undefined||b.is_archived!==undefined||b.mark_unread!==undefined){
-        await env.DB.prepare("UPDATE chat_participants SET is_pinned=COALESCE(?,is_pinned),is_muted=COALESCE(?,is_muted),is_archived=COALESCE(?,is_archived),unread_count=CASE WHEN ?=1 THEN 1 ELSE unread_count END WHERE conversation_id=? AND account_id=?").bind(
-          b.is_pinned!==undefined?(b.is_pinned?1:0):null,
-          b.is_muted!==undefined?(b.is_muted?1:0):null,
-          b.is_archived!==undefined?(b.is_archived?1:0):null,
-          b.mark_unread?1:0,cid,s.account_id
-        ).run();
-      }
-      return json({ok:true,conversation_id:cid});
-    }
-  }
-
-  const chatMsgActionMatch=url.pathname.match(/^\/api\/chat\/messages\/([^/]+)$/);
-  if(chatMsgActionMatch&&req.method==='PATCH'){
-    await ensureGovernanceTables(env);
-    const mid=decodeURIComponent(chatMsgActionMatch[1]);
-    const msg=await env.DB.prepare("SELECT * FROM chat_messages WHERE id=?").bind(mid).first();
-    if(!msg)return json({error:'MESSAGE_NOT_FOUND'},404);
-    const myPart=await env.DB.prepare("SELECT * FROM chat_participants WHERE conversation_id=? AND account_id=?").bind(msg.conversation_id,s.account_id).first();
-    if(!myPart)return json({error:'FORBIDDEN'},403);
-    const b=await bodyJson(req);
-    const action=clean(b.action,30); // edit | recall | pin | unpin
-    if(action==='edit'){
-      if(msg.sender_account_id!==s.account_id)return json({error:'ONLY_SENDER_CAN_EDIT'},403);
-      const newBody=clean(b.body,3000);
-      if(!newBody)return json({error:'BODY_REQUIRED'},400);
-      await env.DB.prepare("UPDATE chat_messages SET body=?,edited_at=CURRENT_TIMESTAMP WHERE id=?").bind(newBody,mid).run();
-      await audit(env,s.account_id,'chat_message_edited','chat_message',mid,null,{conversation_id:msg.conversation_id});
-      return json({ok:true,id:mid,action:'edit'});
-    }
-    if(action==='recall'){
-      if(msg.sender_account_id!==s.account_id&&!['owner','admin'].includes(myPart.role_in_chat))return json({error:'FORBIDDEN'},403);
-      await env.DB.prepare("UPDATE chat_messages SET status='recalled',recalled_at=CURRENT_TIMESTAMP WHERE id=?").bind(mid).run();
-      await audit(env,s.account_id,'chat_message_recalled','chat_message',mid,null,{conversation_id:msg.conversation_id});
-      return json({ok:true,id:mid,action:'recall',status:'recalled'});
-    }
-    if(action==='pin'||action==='unpin'){
-      const pinned=action==='pin'?1:0;
-      await env.DB.batch([
-        env.DB.prepare("UPDATE chat_messages SET is_pinned=? WHERE id=?").bind(pinned,mid),
-        env.DB.prepare("UPDATE chat_conversations SET pinned_message_id=? WHERE id=?").bind(pinned?mid:null,msg.conversation_id)
-      ]);
-      return json({ok:true,id:mid,is_pinned:Boolean(pinned)});
-    }
-    return json({error:'INVALID_MESSAGE_ACTION'},400);
-  }
-
-  if(url.pathname==='/api/chat/upload'&&req.method==='POST'){
-    await ensureGovernanceTables(env);
-    const cid=clean(req.headers.get('x-conversation-id'),100);
-    if(!cid)return json({error:'CONVERSATION_ID_REQUIRED'},400);
-    const myPart=await env.DB.prepare("SELECT 1 FROM chat_participants WHERE conversation_id=? AND account_id=?").bind(cid,s.account_id).first();
-    if(!myPart)return json({error:'CHAT_ACCESS_FORBIDDEN'},403);
-    const ct=(req.headers.get('content-type')||'').toLowerCase().split(';')[0].trim();
-    const allowed=['image/png','image/jpeg','image/webp','application/pdf','video/mp4','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
-    if(!allowed.includes(ct))return json({error:'FILE_TYPE_NOT_ALLOWED'},415);
-    const bytes=new Uint8Array(await req.arrayBuffer());
-    if(!bytes.byteLength||bytes.byteLength>10*1024*1024)return json({error:'FILE_TOO_LARGE'},413);
-    if(!validUploadedAttachment(bytes,ct))return json({error:'INVALID_ATTACHMENT_CONTENT'},400);
-    const ext=ct==='image/png'?'png':ct==='image/webp'?'webp':ct==='image/jpeg'?'jpg':ct==='application/pdf'?'pdf':ct==='video/mp4'?'mp4':ct.includes('wordprocessingml')?'docx':'xlsx';
-    const key=`chat/${cid}/${crypto.randomUUID()}.${ext}`;
-    if(env.FILES?.put){
-      await env.FILES.put(key,bytes,{httpMetadata:{contentType:ct,cacheControl:'private, no-store, max-age=0'}});
-    }
-    return json({ok:true,url:`/files/${key}`,attachment_type:ct.startsWith('image/')?'image':ct==='video/mp4'?'video':'document',byte_size:bytes.byteLength},201);
+  if(url.pathname==='/api/chat'||url.pathname.startsWith('/api/chat/')){
+    return json({
+      error:'CHAT_FEATURE_RETIRED',
+      message:'Chức năng trò chuyện hai chiều (cá nhân và nhóm) đã được loại bỏ khỏi hệ thống. Hệ thống chỉ duy trì Kênh Thông báo chính thức một chiều.'
+    },410);
   }
 
   // =========================================================
@@ -8622,6 +8846,8 @@ env.DB.prepare(`
       const r=await env.DB.prepare("SELECT g.*,(SELECT COUNT(*) FROM community_group_members gm WHERE gm.group_id=g.id) member_count FROM community_groups g WHERE g.status='active' ORDER BY g.group_type ASC,g.name ASC").all();
       return json({items:r.results||[]});
     }
+    const canModGrp=await hasPerm(env,s.account_id,'content.moderate')||await isNetworkAdmin(env,s.account_id);
+    if(!canModGrp)return json({error:'FORBIDDEN',message:'Chỉ người có thẩm quyền quản trị/kiểm duyệt mới được tạo Kênh Thông báo.'},403);
     const b=await bodyJson(req);
     const name=clean(b.name,200);
     const code=clean(b.code,60).toUpperCase()||`GRP-${Date.now().toString().slice(-6)}`;
@@ -8705,13 +8931,7 @@ env.DB.prepare(`
     }
     const b=await bodyJson(req);
     if(req.method==='POST'&&act==='comments'){
-      const cbody=clean(b.body,2000);
-      if(!cbody)return json({error:'COMMENT_BODY_REQUIRED'},400);
-      const cid=uid('scmt');
-      await env.DB.prepare("INSERT INTO social_comments(id,post_id,parent_comment_id,author_account_id,body) VALUES(?,?,?,?,?)").bind(
-        cid,pid,clean(b.parent_comment_id,100)||null,s.account_id,cbody
-      ).run();
-      return json({ok:true,id:cid},201);
+      return json({error:'TWO_WAY_CHAT_DISABLED',message:'Kênh Thông báo chỉ phục vụ truyền đạt thông tin chính thức một chiều, không hỗ trợ bình luận/trò chuyện hai chiều.'},410);
     }
     if(req.method==='POST'&&act==='react'){
       const rtype=['like','love','congrats','support'].includes(b.reaction_type)?b.reaction_type:'like';
@@ -8907,10 +9127,11 @@ export default{
           const canForm=await hasPerm(env,fs.account_id,'form.manage')||await hasPerm(env,fs.account_id,'request.manage')||await isNetworkAdmin(env,fs.account_id);
           if(!canForm)return withSecurityHeaders(new Response('Forbidden',{status:403}));
         }else if(key.startsWith('chat/')){
+          return withSecurityHeaders(new Response('Gone',{status:410}));
+        }else if(key.startsWith('events/private/')){
           await ensureGovernanceTables(env);
-          const cid=key.split('/')[1]||'';
-          const inConv=await env.DB.prepare("SELECT 1 FROM chat_participants WHERE conversation_id=? AND account_id=? LIMIT 1").bind(cid,fs.account_id).first();
-          if(!inConv&&!(await isSuper(env,fs.account_id)))return withSecurityHeaders(new Response('Forbidden',{status:403}));
+          const canViewEvAsset=(await hasPerm(env,fs.account_id,'event.checkin'))||(await hasPerm(env,fs.account_id,'event.approve'))||(await hasPerm(env,fs.account_id,'event.propose'))||(await hasPerm(env,fs.account_id,'activity.manage'))||(await isNetworkAdmin(env,fs.account_id));
+          if(!canViewEvAsset)return withSecurityHeaders(new Response('Forbidden',{status:403}));
         }
         const ownerMatch=key.match(/^certificates\/(?:external\/)?([^/]+)\//);
         if(key.startsWith('requests/avatars/')){
@@ -9003,7 +9224,7 @@ export default{
       ));
     }
 
-    if(['/login','/register','/registration-status','/su-kien-cong-khai'].includes(url.pathname)){
+    if(['/login','/register','/registration-status','/su-kien-cong-khai'].includes(url.pathname)||url.pathname.startsWith('/q-r/')){
       const u=new URL(request.url);
       u.pathname='/index.html';
       return withSecurityHeaders(await env.ASSETS.fetch(

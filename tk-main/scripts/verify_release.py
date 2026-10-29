@@ -301,7 +301,7 @@ for marker, name in [
     ('/api/admin/sk-events', 'SK event lifecycle & 3-decision separation endpoint'),
     ('SOD_SELF_APPROVAL_FORBIDDEN', 'SK event self-approval SoD block'),
     ('/api/sk-attendance/checkin', 'SK event QR session check-in endpoint'),
-    ('/api/chat/conversations', 'GFI internal 1-1 & group messaging endpoint'),
+    ('CHAT_FEATURE_RETIRED', 'two-way chat retired with 410 GONE (CHAT_FEATURE_RETIRED)'),
     ('/api/community/posts', 'GFI internal community & moderated announcement endpoint'),
 ]:
     if marker in front + back + (ROOT/'migrations/0017_skyfirst_operations_center_p1_p7.sql').read_text(encoding='utf-8'):
