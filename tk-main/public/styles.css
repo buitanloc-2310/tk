@@ -435,3 +435,19 @@ input.is-invalid,select.is-invalid,textarea.is-invalid{border-color:#dc2626!impo
   .sf-dialog{padding:18px;border-radius:16px}
   .sf-dialog-actions button{flex:1 1 auto}
 }
+
+
+/* =========================================================
+   2026-10-29 TABLE & MULTI-VIEWPORT TYPOGRAPHY HARDENING
+   Prevent narrow table columns from breaking words character-by-character vertically
+   ========================================================= */
+table th, table td, .issuance-panel th, .issuance-panel td {
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+table td code, table td a {
+  overflow-wrap: break-word;
+}
+table th {
+  white-space: nowrap;
+}

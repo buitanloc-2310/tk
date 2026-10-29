@@ -179,13 +179,13 @@ CREATE TABLE IF NOT EXISTS account_type_configs(
 INSERT OR IGNORE INTO account_type_configs(code, name, aliases_json, purpose, eligible_group, activation_condition, duration_hours, duration_months, allow_public_register, granted_scope_note, resource_limits_json, renewal_policy, retention_policy, status) VALUES
 ('trial_24h', 'Tài khoản 24 giờ', '["24h","24 giờ"]', 'Dùng thử hoặc tham gia phiên nghiệp vụ ngắn hạn trong 24 giờ kể từ lúc kích hoạt.', 'Người đăng ký dùng thử, khách mời hoặc cộng tác viên ngắn hạn', 'Sau khi xác minh OTP email và được kích hoạt', 24, NULL, 1, 'Chỉ sử dụng chức năng cá nhân và biểu mẫu công khai; không mặc nhiên có quyền Admin hoặc xem dữ liệu nội bộ.', '{"max_files_mb":10,"admin_access":false}', 'Có thể được quản trị viên gia hạn sang 48 giờ hoặc chuyển sang Tài khoản 12 tháng (01 năm) sau khi xét duyệt.', 'Khi hết hạn: tự động chặn đăng nhập và API cần quyền sử dụng; giữ nguyên hồ sơ và nhật ký kiểm toán.', 'active'),
 ('trial_48h', 'Tài khoản 48 giờ', '["48h","48 giờ"]', 'Tham gia chương trình, sự kiện hoặc đợt công tác ngắn hạn trong 48 giờ kể từ lúc kích hoạt.', 'Người tham gia sự kiện, tình nguyện viên theo đợt hoặc tài khoản trải nghiệm mở rộng', 'Sau khi xác minh OTP email và được kích hoạt', 48, NULL, 1, 'Sử dụng cổng thành viên trong phạm vi được giao; không có quyền quản trị hệ thống.', '{"max_files_mb":20,"admin_access":false}', 'Quản trị viên có thẩm quyền có thể gia hạn hoặc nâng cấp lên Tài khoản 12 tháng (01 năm).', 'Khi hết hạn: tự động chặn phiên và thao tác API; bảo toàn dữ liệu lịch sử.', 'active'),
-('annual_12m_1y', 'Tài khoản 12 tháng (01 năm)', '["12_months","1_year","12 tháng","1 năm","01 năm"]', 'Tài khoản thành viên/cộng tác viên có kỳ hạn chuẩn 12 tháng (tương đương 01 năm — hai cách gọi cùng một gói thời hạn 365 ngày / 12 tháng để tránh trùng lặp).', 'Thành viên chính thức, cộng tác viên thường xuyên của Sky First Network', 'Sau khi hồ sơ đăng ký được cấp có thẩm quyền phê duyệt và kích hoạt', 8760, 12, 1, 'Quyền thành viên theo đơn vị trực thuộc; vai trò nghiệp vụ được gán tách biệt với loại tài khoản.', '{"max_files_mb":100,"admin_access":false}', 'Gia hạn định kỳ hằng năm theo kết quả đánh giá hoạt động hoặc quyết định của Ban/Đơn vị.', 'Khi hết hạn: khóa quyền thao tác nghiệp vụ cho đến khi được gia hạn; bảo toàn toàn bộ hồ sơ, thẻ và chứng nhận.', 'active'),
+('annual_12m_1y', '12 tháng', '["12_months","1_year","12 tháng","1 năm","01 năm"]', 'Tài khoản thành viên/cộng tác viên có kỳ hạn chuẩn 12 tháng (tương đương 01 năm — hai cách gọi cùng một gói thời hạn 365 ngày / 12 tháng để tránh trùng lặp).', 'Thành viên chính thức, cộng tác viên thường xuyên của Sky First Network', 'Sau khi hồ sơ đăng ký được cấp có thẩm quyền phê duyệt và kích hoạt', 8760, 12, 1, 'Quyền thành viên theo đơn vị trực thuộc; vai trò nghiệp vụ được gán tách biệt với loại tài khoản.', '{"max_files_mb":100,"admin_access":false}', 'Gia hạn định kỳ hằng năm theo kết quả đánh giá hoạt động hoặc quyết định của Ban/Đơn vị.', 'Khi hết hạn: khóa quyền thao tác nghiệp vụ cho đến khi được gia hạn; bảo toàn toàn bộ hồ sơ, thẻ và chứng nhận.', 'active'),
 ('staff_custom', 'Tài khoản nhân sự (Thời hạn do Quản trị viên thiết lập)', '["staff","custom","nhân sự"]', 'Tài khoản dành cho nhân sự, cán bộ phụ trách hoặc ban điều hành với thời hạn hoạt động thiết lập theo nhiệm kỳ/nhiệm vụ.', 'Nhân sự nội bộ, Ban Chấp hành, Văn phòng Mạng lưới, Trưởng/Phó đơn vị do Quản trị viên cấp', 'Do quản trị viên có thẩm quyền khởi tạo hoặc phê duyệt kèm mốc hết hạn cụ thể', NULL, NULL, 0, 'Loại tài khoản xác định thời hạn hoạt động; quyền quản trị được kiểm soát độc lập qua bảng vai trò và phạm vi đơn vị (RBAC).', '{"max_files_mb":500}', 'Điều chỉnh hoặc gia hạn theo quyết định bổ nhiệm/phân công nhiệm vụ của tổ chức.', 'Khi hết thời hạn nhiệm vụ: thu hồi phiên đăng nhập và quyền thao tác nhưng giữ nguyên toàn bộ lịch sử phê duyệt và nhật ký.', 'active');
 
 CREATE TABLE IF NOT EXISTS account_lifecycle(
   account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
   account_type_code TEXT NOT NULL DEFAULT 'annual_12m_1y',
-  duration_label TEXT NOT NULL DEFAULT '12 tháng (01 năm)',
+  duration_label TEXT NOT NULL DEFAULT '12 tháng',
   activated_at TEXT,
   expires_at TEXT,
   lifecycle_status TEXT NOT NULL DEFAULT 'active',
@@ -381,6 +381,9 @@ CREATE TABLE IF NOT EXISTS sk_events(
   require_registration_approval INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'draft',
   registration_state TEXT NOT NULL DEFAULT 'closed',
+  checkin_gate_state TEXT NOT NULL DEFAULT 'auto',
+  checkin_opens_at TEXT,
+  checkin_closes_at TEXT,
   summary_report_state TEXT NOT NULL DEFAULT 'not_submitted',
   current_version INTEGER NOT NULL DEFAULT 1,
   version_history_json TEXT NOT NULL DEFAULT '[]',
@@ -658,8 +661,15 @@ CREATE TABLE IF NOT EXISTS social_posts(
   post_kind TEXT NOT NULL DEFAULT 'discussion',
   title TEXT,
   body TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Điều hành chung',
+  priority TEXT NOT NULL DEFAULT 'normal',
+  target_scope TEXT NOT NULL DEFAULT 'all_members',
   media_url TEXT,
   media_type TEXT,
+  attachment_name TEXT,
+  attachment_size INTEGER,
+  updated_by_account_id TEXT,
+  archived_at TEXT,
   is_pinned INTEGER NOT NULL DEFAULT 0,
   moderation_status TEXT NOT NULL DEFAULT 'published',
   approver_account_id TEXT,
@@ -671,6 +681,13 @@ CREATE TABLE IF NOT EXISTS social_posts(
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_social_posts_feed ON social_posts(moderation_status, is_pinned DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS announcement_reads(
+  post_id TEXT NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(post_id, account_id)
+);
 
 CREATE TABLE IF NOT EXISTS social_comments(
   id TEXT PRIMARY KEY,
@@ -734,7 +751,7 @@ INSERT OR IGNORE INTO governance_registry(id, domain_group, code, title, status,
 ('gov_sod_01', 'sod_rule', 'SOD-APPROVAL-01', 'Quy tắc phân tách nhiệm vụ: Không tự phê duyệt hồ sơ do chính mình đề xuất', 'active', '1.0', 'Người tạo yêu cầu thay đổi quy trình, hồ sơ sự kiện hoặc khoản mục ngân sách không được tự phê duyệt trực tiếp.', 'Khung Kiểm soát Nội bộ Sky First', '2026-01-01'),
 ('gov_kn_01', 'knowledge_article', 'KN-SLA-2026', 'Hướng dẫn SLA xét duyệt hồ sơ đăng ký tài khoản và xử lý phiếu hỗ trợ', 'active', '1.2', 'Thời gian xử lý tiêu chuẩn cho hồ sơ đăng ký thành viên là từ 60 phút đến 48 giờ; phiếu hỗ trợ khẩn cấp phản hồi trong 4 giờ.', 'Sổ tay Vận hành Trung tâm Nghiệp vụ Số', '2026-01-01'),
 ('gov_svc_01', 'service_catalog', 'SVC-PORTAL-MAIN', 'Trang Thông Tin Điện Tử Sky First', 'active', '1.0', 'Cổng thông tin chính thức của Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First.', 'https://www.skyfirst.io.vn/', '2026-01-01'),
-('gov_svc_02', 'service_catalog', 'SVC-PORTAL-CTT', 'Cổng Thông Tin Số Sky First', 'active', '1.0', 'Nền tảng thông tin, chương trình và tiện ích số thuộc hệ sinh thái Sky First.', 'https://ctt.skyfirst.io.vn/', '2026-01-01'),
+('gov_svc_02', 'service_catalog', 'SVC-PORTAL-APP', 'Hệ thống Số Sky First', 'active', '1.0', 'Hệ thống số phục vụ các chức năng và tiện ích thuộc hệ sinh thái Sky First.', 'https://app.skyfirst.io.vn', '2026-01-01'),
 ('gov_cap_01', 'capability_map', 'CAP-IDENTITY-01', 'Năng lực Quản trị Định danh Số, Thẻ Thành viên & Xác minh QR Độc lập', 'active', '2.0', 'Quản lý vòng đời hồ sơ nhân sự, cấp phát thẻ hai mặt chuẩn in ấn và xác minh QR độc lập không phụ thuộc dịch vụ bên thứ ba.', 'Kiến trúc Nghiệp vụ Sky First', '2026-01-01'),
 ('gov_sla_01', 'sla_commitment', 'SLA-CORE-01', 'Cam kết chất lượng dịch vụ (SLA) xét duyệt hồ sơ & hỗ trợ kỹ thuật', 'active', '1.0', 'Đảm bảo xét duyệt hồ sơ trong 60 phút đến 48 giờ và lưu vết đầy đủ mọi quyết định điều phối.', 'Khung SLA Nội bộ Sky First', '2026-01-01'),
 ('gov_csr_01', 'csr_program', 'CSR-COMMUNITY-01', 'Chương trình Trách nhiệm Xã hội & Phát triển Cộng đồng Sky First', 'active', '1.0', 'Theo dõi các sáng kiến giáo dục cộng đồng, tình nguyện và hỗ trợ thanh thiếu niên.', 'Khung Phát triển Bền vững Sky First', '2026-01-01'),

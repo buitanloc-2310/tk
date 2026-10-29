@@ -186,7 +186,7 @@ for marker,name in [
 # Brand configuration and uploaded-image-only contracts.
 for marker,name in [
     ("Trang Thông Tin Điện Tử Sky First",'current official portal naming'),
-    ("Cổng Thông Tin Số Sky First",'active digital portal naming'),
+    ("Hệ thống Số Sky First",'active digital portal naming'),
     ('/api/admin/site-assets','uploaded site asset endpoint'),
     ('INVALID_LOGO_PATH','reject external logo URLs'),
     ('baseFontSize','editable common font size'),
@@ -387,6 +387,30 @@ if 'Ký trực tiếp trên giao diện' in front and 'Tải tệp xác nhận l
     ok('Step 04 supports both direct signature and confirmation file upload')
 else:
     fail('Step 04 confirmation methods', 'missing direct signature or confirmation file upload in Step 04')
+
+
+# Check VIP Comprehensive Upgrades (Sections III, IV, V, VI, VII)
+for marker, label in [
+    ('/api/admin/announcements', 'Admin Kênh Thông báo CRUD & pagination endpoint'),
+    ('/api/admin/announcements/upload', 'Admin Kênh Thông báo secure attachment upload endpoint'),
+    ('announcement_reads', 'Persistent member read/unread tracking table for announcements'),
+    ('renderAdminAnnouncements', 'Admin Kênh Thông báo full management view'),
+    ('await generateQrPng(targetUrl,reqSize)', 'Awaited binary PNG QR generation for /api/public/q-r/:slug/qr-image'),
+    ('isQrSessionTimeStates', 'Timezone-safe UTC / Asia/Ho_Chi_Minh check-in window evaluator'),
+    ('/api/admin/legal-documents', 'Official Legal Document Registry & Background Sync endpoint'),
+    ('runSilentLegalCatalogSync', 'Silent background sync from official Government sources with fallback'),
+    ('Hệ thống Số Sky First', 'Standardized brand name Hệ thống Số Sky First'),
+    ('https://app.skyfirst.io.vn', 'Standardized ecosystem URL https://app.skyfirst.io.vn'),
+]:
+    if marker in back or marker in front:
+        ok(label)
+    else:
+        fail(label, f'{marker} missing')
+
+if '12 tháng (01 năm)' in front:
+    fail('standardized account type label to 12 tháng', 'old label 12 tháng (01 năm) still present in public/app.js')
+else:
+    ok('standardized account type label to 12 tháng in UI')
 
 if errors:
     print('\nRELEASE CHECK FAILED:',len(errors),'issue(s)')

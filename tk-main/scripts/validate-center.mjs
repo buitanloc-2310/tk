@@ -118,10 +118,10 @@ await dbRun("INSERT OR REPLACE INTO system_settings(key,value_json,updated_at) V
 const legacyConfig=await call('/api/public/portal-config');assert.equal(legacyConfig.links.length,2);assert.equal(legacyConfig.brand.logoUrl,'/sfn-logo.png');assert.equal(legacyConfig.brand.siteName,'Trung tâm Nghiệp vụ Số Sky First');assert.equal(legacyConfig.links[0].name,'Trang Thông Tin Điện Tử Sky First');checks++;
 const securityResponse=await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/public/portal-config'),{DB});assert.equal(securityResponse.status,200);assert.equal(securityResponse.headers.get('x-content-type-options'),'nosniff');assert.equal(securityResponse.headers.get('x-frame-options'),'DENY');assert.equal(securityResponse.headers.get('referrer-policy'),'no-referrer');assert((securityResponse.headers.get('content-security-policy')||'').includes("frame-ancestors 'none'"));checks++;
 await dbRun("UPDATE system_settings SET value_json=?,updated_at=CURRENT_TIMESTAMP WHERE key='member_portal_v4'",JSON.stringify({links:[{name:'Cổng chính Sky First Network',url:'https://www.skyfirst.io.vn/'},{name:'Cổng Thông tin',url:'https://ctt.skyfirst.io.vn/'}]}));
-const migratedLinks=await call('/api/public/portal-config');assert.deepEqual(migratedLinks.links.map(x=>x.name),['Trang Thông Tin Điện Tử Sky First','Cổng Thông Tin Số Sky First']);assert.equal(migratedLinks.links[0].url,'https://www.skyfirst.io.vn/');assert.equal(migratedLinks.links[1].url,'https://ctt.skyfirst.io.vn/');checks++;
-const linkSet=[{name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức'},{name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin số'}];
+const migratedLinks=await call('/api/public/portal-config');assert.deepEqual(migratedLinks.links.map(x=>x.name),['Trang Thông Tin Điện Tử Sky First','Hệ thống Số Sky First']);assert.equal(migratedLinks.links[0].url,'https://www.skyfirst.io.vn/');assert.equal(migratedLinks.links[1].url,'https://app.skyfirst.io.vn');checks++;
+const linkSet=[{name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức'},{name:'Hệ thống Số Sky First',url:'https://app.skyfirst.io.vn',description:'Hệ thống số phục vụ các chức năng và tiện ích thuộc hệ sinh thái Sky First.'}];
 r=await call('/api/admin/portal-config','PUT',{stats:[],tagline:'Hành trình của thành viên',brand:{siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:17,cornerRadius:12,contentMaxWidth:1360},links:linkSet,change_reason:'Chuẩn hóa nhận diện Trung tâm Nghiệp vụ Số Sky First'});assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links.length,2);checks++;
-r=await call('/api/admin/portal-config');assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.baseFontSize,17);assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links[1].name,'Cổng Thông Tin Số Sky First');checks++;
+r=await call('/api/admin/portal-config');assert.equal(r.status,200);assert.equal(r.settings.brand.primaryColor,'#123456');assert.equal(r.settings.brand.baseFontSize,17);assert.equal(r.settings.brand.cornerRadius,12);assert.equal(r.settings.brand.contentMaxWidth,1360);assert.equal(r.settings.links[1].name,'Hệ thống Số Sky First');checks++;
 r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'https://external.invalid/logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:linkSet});assert.equal(r.status,400);assert.equal(r.error,'INVALID_LOGO_PATH');checks++;
 r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:[linkSet[0],{name:'External',url:'https://example.com',description:''}]});assert.equal(r.status,400);assert.equal(r.error,'INVALID_PORTAL_LINK');checks++;
 r=await call('/api/admin/portal-config','PUT',{stats:[],brand:{siteName:'Bad',logoUrl:'/sfn-logo.png',primaryColor:'#123456',accentColor:'#22bbdd',navColor:'#102030',fontFamily:'system',baseFontSize:16},links:[{...linkSet[0],url:'https://ctt.skyfirst.io.vn/'},linkSet[1]]});assert.equal(r.status,400);assert.equal(r.error,'INVALID_PORTAL_LINK');checks++;
@@ -1432,6 +1432,189 @@ function buildTestZip(entries){
   assert.equal(adjRes.httpStatus, 200);
   assert.equal(adjRes.attendance_status, 'late');
   checks += 2;
+}
+
+
+// ============================================================================
+// 16. VIP COMPREHENSIVE UPGRADE VERIFICATION (SCENARIOS 1–13: ADMIN ANNOUNCEMENTS,
+//     MEMBER READ TRACKING, QR PNG BYTES, CHECKIN GATE OPEN/CLOSE, LEGAL SYNC,
+//     BRAND APP.SKYFIRST.IO.VN & ACCOUNT LABEL "12 THÁNG")
+// ============================================================================
+{
+  const pubCall = async (path, method = 'GET', body = null) => {
+    const u = new URL(path, 'https://nghiepvu.skyfirst.io.vn');
+    const headers = { origin: 'https://nghiepvu.skyfirst.io.vn' };
+    if (body) headers['content-type'] = 'application/json';
+    const r = await Worker.fetch(new Request(u.toString(), { method, headers, body: body ? JSON.stringify(body) : undefined }), { DB, FILES });
+    const d = await r.json().catch(() => ({}));
+    return { httpStatus: r.status, ...d };
+  };
+
+  // Scenario 6: Verify /api/public/q-r/:slug/qr-image returns genuine PNG binary bytes (89 50 4E 47)
+  const qrImgCheckReq = new Request('https://nghiepvu.skyfirst.io.vn/api/public/q-r/ngay-hoi-so-skyfirst-2026/qr-image?size=320');
+  const qrImgCheckRes = await Worker.fetch(qrImgCheckReq, { DB, FILES });
+  assert.equal(qrImgCheckRes.status, 200);
+  assert.equal(qrImgCheckRes.headers.get('content-type'), 'image/png');
+  const qrPngBytes = new Uint8Array(await qrImgCheckRes.arrayBuffer());
+  assert(qrPngBytes.byteLength > 200, `Expected PNG byteLength > 200, got ${qrPngBytes.byteLength}`);
+  assert.equal(qrPngBytes[0], 137);
+  assert.equal(qrPngBytes[1], 80);
+  assert.equal(qrPngBytes[2], 78);
+  assert.equal(qrPngBytes[3], 71);
+  checks += 6;
+
+  // Scenario 5: Verify Check-in Gate Open / Close controls in Admin & /api/public/q-r/:slug
+  const evListRes = await call('/api/admin/sk-events?q=ngay-hoi-so-skyfirst-2026', 'GET');
+  const targetQrEv = evListRes.items.find(x => x.slug === 'ngay-hoi-so-skyfirst-2026');
+  assert(targetQrEv, 'Target QR event must exist');
+  // Close check-in gate explicitly -> /api/public/q-r/ngay-hoi-so-skyfirst-2026 returns 403 EVENT_CHECKIN_CLOSED
+  const closeGateRes = await call(`/api/admin/sk-events/${encodeURIComponent(targetQrEv.id)}/transition`, 'POST', { action: 'close_checkin', note: 'Đóng cổng điểm danh kiểm thử' });
+  assert.equal(closeGateRes.httpStatus, 200);
+  const closedInfoData = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026', 'GET');
+  assert.equal(closedInfoData.httpStatus, 403);
+  assert.equal(closedInfoData.error, 'EVENT_CHECKIN_CLOSED');
+  // Re-open check-in gate explicitly -> /api/public/q-r/ngay-hoi-so-skyfirst-2026 returns 200 OK with checkin_open: true
+  const openGateRes = await call(`/api/admin/sk-events/${encodeURIComponent(targetQrEv.id)}/transition`, 'POST', { action: 'open_checkin', note: 'Mở lại cổng điểm danh' });
+  assert.equal(openGateRes.httpStatus, 200);
+  const reopenedInfoData = await pubCall('/api/public/q-r/ngay-hoi-so-skyfirst-2026', 'GET');
+  assert.equal(reopenedInfoData.httpStatus, 200);
+  assert.equal(reopenedInfoData.checkin_open, true);
+  assert.equal(reopenedInfoData.event.checkin_gate_state, 'open');
+  checks += 7;
+
+  // Scenario 3 & 4: Full Admin "Kênh Thông báo" CRUD + Attachment Upload + Member Read Tracking + RBAC
+  const unauthAnnReq = new Request('https://nghiepvu.skyfirst.io.vn/api/admin/announcements', {
+    method: 'GET',
+    headers: { cookie: 'sfn_session=t24_active_tok', origin: 'https://nghiepvu.skyfirst.io.vn' }
+  });
+  const unauthAnnRes = await Worker.fetch(unauthAnnReq, { DB, FILES });
+  assert.equal(unauthAnnRes.status, 403);
+  checks += 1;
+
+  // Admin uploads PDF attachment for announcement
+  const validPdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]);
+  const annUpReq = new Request('https://nghiepvu.skyfirst.io.vn/api/admin/announcements/upload', {
+    method: 'POST',
+    headers: { cookie: 'sfn_session=test', origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'application/pdf', 'x-file-name': 'Quyet-dinh-2026.pdf' },
+    body: validPdfBytes
+  });
+  const annUpRes = await Worker.fetch(annUpReq, { DB, FILES });
+  const annUpData = await annUpRes.json();
+  assert.equal(annUpRes.status, 201);
+  assert(annUpData.attachment_url.startsWith('/files/announcements/attachments/'));
+  checks += 2;
+
+  // Admin creates Draft announcement -> Member cannot see it
+  const draftAnn = await call('/api/admin/announcements', 'POST', {
+    title: 'Thông báo Nháp Nội bộ 2026',
+    body: 'Nội dung thông báo đang soạn thảo chưa xuất bản.',
+    category: 'Điều hành chung',
+    priority: 'important',
+    target_scope: 'all_members',
+    attachment_url: annUpData.attachment_url,
+    attachment_name: 'Quyet-dinh-2026.pdf',
+    attachment_size: validPdfBytes.byteLength,
+    status: 'draft'
+  });
+  assert.equal(draftAnn.httpStatus, 201);
+  assert.equal(draftAnn.status, 'draft');
+  const memFeedBefore = await (await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/community/posts', {
+    headers: { cookie: 'sfn_session=t24_active_tok' }
+  }), { DB, FILES })).json();
+  assert(!memFeedBefore.items.some(x => x.id === draftAnn.id), 'Draft announcement must NOT be visible to regular member');
+  checks += 3;
+
+  // Admin publishes announcement & pins it -> Member sees it with is_read: false
+  const pubAnn = await call(`/api/admin/announcements/${encodeURIComponent(draftAnn.id)}`, 'PATCH', {
+    action: 'publish',
+    is_pinned: true,
+    title: 'Thông báo Chính thức Đã Xuất bản 2026'
+  });
+  assert.equal(pubAnn.httpStatus, 200);
+  assert.equal(pubAnn.status, 'published');
+  assert.equal(pubAnn.is_pinned, true);
+
+  const memFeedAfter = await (await Worker.fetch(new Request('https://nghiepvu.skyfirst.io.vn/api/community/posts', {
+    headers: { cookie: 'sfn_session=t24_active_tok' }
+  }), { DB, FILES })).json();
+  const memAnnItem = memFeedAfter.items.find(x => x.id === draftAnn.id);
+  assert(memAnnItem, 'Published announcement must be visible to member');
+  assert.equal(memAnnItem.is_read, false);
+  assert.equal(memAnnItem.attachment_name, 'Quyet-dinh-2026.pdf');
+  checks += 6;
+
+  // Member marks announcement as read -> is_read becomes true and read_count increments in Admin
+  const markReadRes = await (await Worker.fetch(new Request(`https://nghiepvu.skyfirst.io.vn/api/community/posts/${encodeURIComponent(draftAnn.id)}/read`, {
+    method: 'POST',
+    headers: { cookie: 'sfn_session=t24_active_tok', origin: 'https://nghiepvu.skyfirst.io.vn', 'content-type': 'application/json' },
+    body: JSON.stringify({})
+  }), { DB, FILES })).json();
+  assert.equal(markReadRes.ok, true);
+  assert.equal(markReadRes.is_read, true);
+  assert(markReadRes.read_count >= 1);
+
+  const adminAnnDetail = await call(`/api/admin/announcements/${encodeURIComponent(draftAnn.id)}`, 'GET');
+  assert.equal(adminAnnDetail.httpStatus, 200);
+  assert(adminAnnDetail.readers.length >= 1);
+
+  // Admin archives and deletes a temporary announcement
+  const tempAnn = await call('/api/admin/announcements', 'POST', {
+    title: 'Thông báo Tạm để Xóa',
+    body: 'Nội dung tạm',
+    status: 'draft'
+  });
+  const archAnn = await call(`/api/admin/announcements/${encodeURIComponent(tempAnn.id)}`, 'PATCH', { action: 'archive' });
+  assert.equal(archAnn.status, 'archived');
+  const delAnn = await call(`/api/admin/announcements/${encodeURIComponent(tempAnn.id)}`, 'DELETE');
+  assert.equal(delAnn.deleted, true);
+  checks += 7;
+
+  // Scenario 11: Legal Document Registry & Background Sync (Normal + Simulated Unreachable Fallback + Deduplication + No User Spam)
+  const legalList1 = await call('/api/admin/legal-documents', 'GET');
+  assert.equal(legalList1.httpStatus, 200);
+  assert(legalList1.items.length >= 2);
+
+  const notifCountBefore = (await DB.prepare("SELECT COUNT(*) n FROM notifications").first()).n;
+  const syncFallback = await call('/api/admin/legal-documents/sync', 'POST', { simulate_unreachable: true });
+  assert.equal(syncFallback.httpStatus, 200);
+  assert.equal(syncFallback.sync_status, 'source_unreachable_preserved_existing');
+  assert.equal(syncFallback.user_notification_sent, false);
+  const notifCountAfter = (await DB.prepare("SELECT COUNT(*) n FROM notifications").first()).n;
+  assert.equal(notifCountAfter, notifCountBefore, 'Background legal sync must NEVER send user notifications');
+
+  // Create & deduplicate manual legal document
+  const manualLaw1 = await call('/api/admin/legal-documents', 'POST', {
+    doc_number: '13/2023/NĐ-CP',
+    title: 'Nghị định số 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân',
+    source_name: 'Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)',
+    official_url: 'https://vanban.chinhphu.vn/?pageid=27160&docid=207759',
+    issued_date: '2023-04-17',
+    effective_date: '2023-07-01',
+    legal_status: 'Sửa đổi, bổ sung'
+  });
+  assert.equal(manualLaw1.httpStatus, 201);
+  assert.equal(manualLaw1.meta.sync_source_type, 'manual_admin');
+  const manualLawDup = await call('/api/admin/legal-documents', 'POST', {
+    doc_number: '13/2023/NĐ-CP',
+    title: 'Nghị định số 13/2023/NĐ-CP về bảo vệ dữ liệu cá nhân (Đã cập nhật)',
+    official_url: 'https://vanban.chinhphu.vn/?pageid=27160&docid=207759'
+  });
+  assert.equal(manualLawDup.deduplicated_update, true);
+  assert.equal(manualLawDup.id, manualLaw1.id);
+  checks += 10;
+
+  // Scenario 12 & 13: Verify Brand Ecosystem Platform Directory (https://app.skyfirst.io.vn) & Account Type Label ("12 tháng")
+  const portalCfg = await call('/api/public/portal-config', 'GET');
+  const appPortal = portalCfg.links.find(x => x.url === 'https://app.skyfirst.io.vn');
+  assert(appPortal, 'https://app.skyfirst.io.vn must be in portal links');
+  assert.equal(appPortal.name, 'Hệ thống Số Sky First');
+  assert.equal(appPortal.description, 'Hệ thống số phục vụ các chức năng và tiện ích thuộc hệ sinh thái Sky First.');
+
+  const accCenter = await call('/api/admin/accounts-center', 'GET');
+  const annualType = accCenter.account_types.find(x => x.code === 'annual_12m_1y');
+  assert(annualType, 'annual_12m_1y config must exist');
+  assert.equal(annualType.name, '12 tháng');
+  checks += 5;
 }
 
 console.log(`${checks}/${checks} center/API integration checks passed`);

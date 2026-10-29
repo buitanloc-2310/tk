@@ -225,7 +225,7 @@ async function ensureGovernanceTables(env){
   ];
   const extDdl=[
     "CREATE TABLE IF NOT EXISTS account_type_configs(code TEXT PRIMARY KEY,name TEXT NOT NULL,aliases_json TEXT NOT NULL DEFAULT '[]',purpose TEXT NOT NULL,eligible_group TEXT NOT NULL,activation_condition TEXT NOT NULL,duration_hours INTEGER,duration_months INTEGER,allow_public_register INTEGER NOT NULL DEFAULT 1,granted_scope_note TEXT NOT NULL,resource_limits_json TEXT NOT NULL DEFAULT '{}',renewal_policy TEXT NOT NULL,retention_policy TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-    "CREATE TABLE IF NOT EXISTS account_lifecycle(account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,account_type_code TEXT NOT NULL DEFAULT 'annual_12m_1y',duration_label TEXT NOT NULL DEFAULT '12 tháng (01 năm)',activated_at TEXT,expires_at TEXT,lifecycle_status TEXT NOT NULL DEFAULT 'active',expiry_notified_at TEXT,renewal_count INTEGER NOT NULL DEFAULT 0,last_action_reason TEXT,updated_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS account_lifecycle(account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,account_type_code TEXT NOT NULL DEFAULT 'annual_12m_1y',duration_label TEXT NOT NULL DEFAULT '12 tháng',activated_at TEXT,expires_at TEXT,lifecycle_status TEXT NOT NULL DEFAULT 'active',expiry_notified_at TEXT,renewal_count INTEGER NOT NULL DEFAULT 0,last_action_reason TEXT,updated_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS data_policies(id TEXT PRIMARY KEY,policy_code TEXT NOT NULL,policy_type TEXT NOT NULL,title TEXT NOT NULL,version_label TEXT NOT NULL,content_summary TEXT NOT NULL,content_body TEXT NOT NULL,is_mandatory INTEGER NOT NULL DEFAULT 1,requires_reconsent INTEGER NOT NULL DEFAULT 0,applicable_scope TEXT NOT NULL DEFAULT 'all_forms',status TEXT NOT NULL DEFAULT 'active',effective_from TEXT NOT NULL,updated_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(policy_code,version_label))",
     "CREATE TABLE IF NOT EXISTS consent_withdrawal_requests(id TEXT PRIMARY KEY,consent_record_id TEXT,subject_email TEXT NOT NULL,person_id TEXT,policy_code TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'received',admin_note TEXT,processed_by_account_id TEXT,processed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS registration_forms(id TEXT PRIMARY KEY,code TEXT NOT NULL UNIQUE,slug TEXT NOT NULL UNIQUE,title TEXT NOT NULL,description TEXT,target_audience TEXT,guidelines TEXT,support_contact TEXT NOT NULL DEFAULT 'support@skyfirst.io.vn',owner_org_node_id TEXT,owner_account_id TEXT,status TEXT NOT NULL DEFAULT 'draft',current_version INTEGER NOT NULL DEFAULT 1,opens_at TEXT,closes_at TEXT,max_submissions INTEGER,require_attachment INTEGER NOT NULL DEFAULT 0,require_signature INTEGER NOT NULL DEFAULT 0,signature_method TEXT NOT NULL DEFAULT 'drawn_or_uploaded',default_account_type TEXT,post_submit_message TEXT,fields_json TEXT NOT NULL DEFAULT '[]',policy_codes_json TEXT NOT NULL DEFAULT '[\"SFN-PDPD-NOTICE\",\"SFN-TERMS-USE\"]',event_id TEXT,created_by_account_id TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
@@ -248,10 +248,11 @@ async function ensureGovernanceTables(env){
     "CREATE TABLE IF NOT EXISTS chat_messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,sender_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,reply_to_message_id TEXT,forwarded_from_id TEXT,body TEXT NOT NULL,attachment_url TEXT,attachment_type TEXT,linked_entity_type TEXT,linked_entity_id TEXT,is_pinned INTEGER NOT NULL DEFAULT 0,delivery_state TEXT NOT NULL DEFAULT 'sent',status TEXT NOT NULL DEFAULT 'active',edited_at TEXT,recalled_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS community_groups(id TEXT PRIMARY KEY,code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,group_type TEXT NOT NULL DEFAULT 'group',visibility TEXT NOT NULL DEFAULT 'public_internal',org_node_id TEXT,description TEXT,allow_member_posts INTEGER NOT NULL DEFAULT 1,allow_comments INTEGER NOT NULL DEFAULT 1,require_post_approval INTEGER NOT NULL DEFAULT 0,created_by_account_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS community_group_members(group_id TEXT NOT NULL REFERENCES community_groups(id) ON DELETE CASCADE,account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,role_in_group TEXT NOT NULL DEFAULT 'member',can_post INTEGER NOT NULL DEFAULT 1,can_comment INTEGER NOT NULL DEFAULT 1,joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(group_id,account_id))",
-    "CREATE TABLE IF NOT EXISTS social_posts(id TEXT PRIMARY KEY,group_id TEXT REFERENCES community_groups(id) ON DELETE SET NULL,author_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,org_node_id TEXT,event_id TEXT,post_kind TEXT NOT NULL DEFAULT 'discussion',title TEXT,body TEXT NOT NULL,media_url TEXT,media_type TEXT,is_pinned INTEGER NOT NULL DEFAULT 0,moderation_status TEXT NOT NULL DEFAULT 'published',approver_account_id TEXT,approved_at TEXT,rejected_reason TEXT,published_at TEXT,share_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS social_posts(id TEXT PRIMARY KEY,group_id TEXT REFERENCES community_groups(id) ON DELETE SET NULL,author_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,org_node_id TEXT,event_id TEXT,post_kind TEXT NOT NULL DEFAULT 'discussion',category TEXT NOT NULL DEFAULT 'Điều hành chung',priority TEXT NOT NULL DEFAULT 'normal',target_scope TEXT NOT NULL DEFAULT 'all_members',title TEXT,body TEXT NOT NULL,media_url TEXT,media_type TEXT,attachment_name TEXT,attachment_size INTEGER,is_pinned INTEGER NOT NULL DEFAULT 0,moderation_status TEXT NOT NULL DEFAULT 'published',approver_account_id TEXT,approved_at TEXT,rejected_reason TEXT,published_at TEXT,updated_by_account_id TEXT,archived_at TEXT,share_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS social_comments(id TEXT PRIMARY KEY,post_id TEXT NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,parent_comment_id TEXT,author_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,body TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'active',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     "CREATE TABLE IF NOT EXISTS social_reactions(post_id TEXT NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,reaction_type TEXT NOT NULL DEFAULT 'like',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(post_id,account_id))",
-    "CREATE TABLE IF NOT EXISTS content_reports(id TEXT PRIMARY KEY,target_type TEXT NOT NULL,target_id TEXT NOT NULL,reporter_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',moderator_account_id TEXT,resolution_note TEXT,resolved_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+    "CREATE TABLE IF NOT EXISTS content_reports(id TEXT PRIMARY KEY,target_type TEXT NOT NULL,target_id TEXT NOT NULL,reporter_account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',moderator_account_id TEXT,resolution_note TEXT,resolved_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE TABLE IF NOT EXISTS announcement_reads(post_id TEXT NOT NULL REFERENCES social_posts(id) ON DELETE CASCADE,account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(post_id,account_id))"
   ];
   for(const sql of [...ddl,...extDdl])await env.DB.prepare(sql).run();
   await reconcileGovernanceColumns(env);
@@ -374,7 +375,19 @@ const GOVERNANCE_COLUMN_RECONCILE_SPECS={
     ["attendance_manager_account_id","TEXT"],
     ["attendance_manager_name","TEXT"],
     ["attendance_manager_email","TEXT"],
-    ["attendance_manager_phone","TEXT"]
+    ["attendance_manager_phone","TEXT"],
+    ["checkin_gate_state","TEXT NOT NULL DEFAULT 'auto'"],
+    ["checkin_opens_at","TEXT"],
+    ["checkin_closes_at","TEXT"]
+  ],
+  social_posts:[
+    ["category","TEXT NOT NULL DEFAULT 'Điều hành chung'"],
+    ["priority","TEXT NOT NULL DEFAULT 'normal'"],
+    ["target_scope","TEXT NOT NULL DEFAULT 'all_members'"],
+    ["attachment_name","TEXT"],
+    ["attachment_size","INTEGER"],
+    ["updated_by_account_id","TEXT"],
+    ["archived_at","TEXT"]
   ],
   sk_qr_sessions:[
     ["manual_code","TEXT"],
@@ -429,10 +442,52 @@ async function reconcileGovernanceColumns(env){
   try{
     await env.DB.prepare("UPDATE sk_events SET slug=lower(replace(event_code,'_','-')) WHERE slug IS NULL OR TRIM(slug)=''").run();
     await env.DB.prepare("UPDATE sk_events SET attendance_manager_name=lead_person_name WHERE (attendance_manager_name IS NULL OR TRIM(attendance_manager_name)='') AND lead_person_name IS NOT NULL").run();
+    await env.DB.prepare("UPDATE sk_events SET checkin_gate_state='auto' WHERE checkin_gate_state IS NULL OR TRIM(checkin_gate_state)=''").run();
     await env.DB.prepare("UPDATE sk_qr_sessions SET manual_code=upper(substr(replace(session_code,'SK-QR-','SKM-'),1,12)) WHERE manual_code IS NULL OR TRIM(manual_code)=''").run();
+  }catch{}
+  try{
+    await env.DB.prepare("UPDATE account_type_configs SET name='12 tháng' WHERE code='annual_12m_1y' AND name LIKE '%01 năm%'").run();
+    await env.DB.prepare("UPDATE account_lifecycle SET duration_label='12 tháng' WHERE account_type_code='annual_12m_1y' AND duration_label LIKE '%01 năm%'").run();
+  }catch{}
+  try{
+    await env.DB.prepare("UPDATE governance_registry SET code='SVC-PORTAL-APP',title='Hệ thống Số Sky First',summary='Hệ thống số phục vụ các chức năng và tiện ích thuộc hệ sinh thái Sky First.',evidence_ref='https://app.skyfirst.io.vn' WHERE id='gov_svc_02' OR code='SVC-PORTAL-CTT'").run();
+    const law91Meta=JSON.stringify({doc_number:'91/2025/QH15',source_name:'Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)',official_url:'https://chinhphu.vn/?pageid=27160&docid=214590&classid=1&typegroupid=3',issued_date:'2025-06-26',effective_date:'2026-01-01',legal_status:'Còn hiệu lực',sync_source_type:'auto_sync',approval_state:'approved_published',last_synced_at:'2026-10-28T00:00:00Z'});
+    const dec356Meta=JSON.stringify({doc_number:'356/2025/NĐ-CP',source_name:'Hệ thống Văn bản Quy phạm Pháp luật Chính phủ (vanban.chinhphu.vn)',official_url:'https://vanban.chinhphu.vn/?pageid=27160&docid=216387',issued_date:'2025-12-31',effective_date:'2026-01-01',legal_status:'Còn hiệu lực',sync_source_type:'auto_sync',approval_state:'approved_published',last_synced_at:'2026-10-28T00:00:00Z'});
+    await env.DB.prepare("UPDATE governance_registry SET payload_json=? WHERE id='gov_law_91' AND (payload_json IS NULL OR payload_json='{}')").bind(law91Meta).run();
+    await env.DB.prepare("UPDATE governance_registry SET payload_json=? WHERE id='gov_dec_356' AND (payload_json IS NULL OR payload_json='{}')").bind(dec356Meta).run();
   }catch{}
   if(added.length)env.__lastReconciledColumns=added;
   return added;
+}
+
+function parseFlexibleTimeMs(raw, assumeVnLocal=false){
+  const s=String(raw||'').trim();
+  if(!s)return NaN;
+  if(/Z$|[+-]\d{2}:?\d{2}$/.test(s))return Date.parse(s);
+  const iso=s.replace(' ','T');
+  return Date.parse(iso+(assumeVnLocal?'+07:00':'Z'));
+}
+
+function isQrSessionTimeStates(startsAt, endsAt, nowMs=Date.now()){
+  const sStr=String(startsAt||'').trim();
+  const eStr=String(endsAt||'').trim();
+  let notStarted=false;
+  let isExpired=false;
+  if(sStr){
+    const sUtc=parseFlexibleTimeMs(sStr,false);
+    const sVn=parseFlexibleTimeMs(sStr,true);
+    // Only mark not_started if current time is before BOTH UTC and VN interpretations
+    const minStart=Math.min(Number.isFinite(sUtc)?sUtc:Infinity, Number.isFinite(sVn)?sVn:Infinity);
+    if(Number.isFinite(minStart)&&nowMs<minStart-60000)notStarted=true;
+  }
+  if(eStr){
+    const eUtc=parseFlexibleTimeMs(eStr,false);
+    const eVn=parseFlexibleTimeMs(eStr,true);
+    // Only mark is_expired if current time is past BOTH UTC and VN interpretations
+    const maxEnd=Math.max(Number.isFinite(eUtc)?eUtc:-Infinity, Number.isFinite(eVn)?eVn:-Infinity);
+    if(Number.isFinite(maxEnd)&&nowMs>maxEnd+60000)isExpired=true;
+  }
+  return {is_expired:isExpired?1:0, not_started:notStarted?1:0};
 }
 
 async function syncSkEventToMemberActivityHistory(env,eventId,participantEmail,participantName,attStatus,operatorAccountId){
@@ -482,7 +537,7 @@ function computeAccountExpirySql(typeCode,customExpiresAt=null){
   if(norm==='staff_custom'&&customExpiresAt){
     return {code:'staff_custom',label:'Tài khoản nhân sự (Có thời hạn)',custom:clean(customExpiresAt,30)};
   }
-  return {code:'annual_12m_1y',label:'Tài khoản 12 tháng (01 năm)',sqlExpr:"datetime('now','+365 days')"};
+  return {code:'annual_12m_1y',label:'12 tháng',sqlExpr:"datetime('now','+365 days')"};
 }
 function validUploadedAttachment(bytes,mimeType){
   if(!bytes||!bytes.byteLength)return false;
@@ -839,7 +894,7 @@ function withSecurityHeaders(response){
 const RETIRED_OR_EXTERNAL_HOST_RE=/^(?:tnv|slc|mail|sfec)\.skyfirst\.io\.vn$/i;
 const DEFAULT_PORTAL_LINKS=[
   {name:'Trang Thông Tin Điện Tử Sky First',url:'https://www.skyfirst.io.vn/',description:'Thông tin chính thức của Sky First'},
-  {name:'Cổng Thông Tin Số Sky First',url:'https://ctt.skyfirst.io.vn/',description:'Thông tin, chương trình và tiện ích số'}
+  {name:'Hệ thống Số Sky First',url:'https://app.skyfirst.io.vn',description:'Hệ thống số phục vụ các chức năng và tiện ích thuộc hệ sinh thái Sky First.'}
 ];
 const DEFAULT_SYSTEM_IDENTITY={
   siteName:'Trung tâm Nghiệp vụ Số Sky First',
@@ -851,15 +906,28 @@ const DEFAULT_SYSTEM_IDENTITY={
   contactEmail:'lienhe@skyfirst.io.vn'
 };
 const DEFAULT_PORTAL_BRAND={siteName:'Trung tâm Nghiệp vụ Số Sky First',logoUrl:'/sfn-logo.png',primaryColor:'#2563eb',accentColor:'#38bdf8',navColor:'#0b1220',fontFamily:'system',baseFontSize:16,cornerRadius:18,contentMaxWidth:1500};
-function safeSkyFirstUrl(value){try{const u=new URL(String(value||''));const h=u.hostname.toLowerCase();if(RETIRED_OR_EXTERNAL_HOST_RE.test(h))return null;return u.protocol==='https:'&&!u.username&&!u.password&&(h==='skyfirst.io.vn'||h.endsWith('.skyfirst.io.vn'))?u.toString():null}catch{return null}}
+function safeSkyFirstUrl(value){try{const u=new URL(String(value||''));const h=u.hostname.toLowerCase();if(RETIRED_OR_EXTERNAL_HOST_RE.test(h))return null;if(!(u.protocol==='https:'&&!u.username&&!u.password&&(h==='skyfirst.io.vn'||h.endsWith('.skyfirst.io.vn'))))return null;return (h==='app.skyfirst.io.vn'&&u.pathname==='/'&&!u.search&&!u.hash)?'https://app.skyfirst.io.vn':u.toString()}catch{return null}}
 function portalLinksFromSettings(candidates){
   if(!Array.isArray(candidates)||!candidates.length)return DEFAULT_PORTAL_LINKS.map(x=>({...x}));
-  const oldNames=new Set(['cổng chính sky first network','cổng thông tin','cổng sfn','cổng sfec','lớp học trực tuyến','cổng tình nguyện viên','cổng thư điện tử']);
+  const oldNames=new Set(['cổng chính sky first network','cổng thông tin','cổng thông tin số sky first','cổng sfn','cổng sfec','lớp học trực tuyến','cổng tình nguyện viên','cổng thư điện tử']);
   return DEFAULT_PORTAL_LINKS.map(fallback=>{
-    const item=candidates.find(x=>{const u=safeSkyFirstUrl(x?.url);if(!u)return false;try{return new URL(u).hostname===new URL(fallback.url).hostname}catch{return false}});
+    const fbHost=new URL(fallback.url).hostname.toLowerCase();
+    const item=candidates.find(x=>{
+      const u=safeSkyFirstUrl(x?.url);
+      if(!u)return false;
+      try{
+        const h=new URL(u).hostname.toLowerCase();
+        if(fbHost==='app.skyfirst.io.vn'&&(h==='app.skyfirst.io.vn'||h==='ctt.skyfirst.io.vn'))return true;
+        return h===fbHost;
+      }catch{return false}
+    });
     if(!item)return {...fallback};
-    const rawName=clean(item.name,100),name=rawName&&!oldNames.has(rawName.toLocaleLowerCase('vi-VN'))?rawName:fallback.name;
-    return {name,url:safeSkyFirstUrl(item.url)||fallback.url,description:clean(item.description,140)||fallback.description};
+    const rawName=clean(item.name,100);
+    const isLegacyCtt=String(item.url||'').toLowerCase().includes('ctt.skyfirst.io.vn')||oldNames.has(rawName.toLocaleLowerCase('vi-VN'));
+    const name=(rawName&&!isLegacyCtt)?rawName:fallback.name;
+    const url=isLegacyCtt?fallback.url:(safeSkyFirstUrl(item.url)||fallback.url);
+    const desc=(clean(item.description,140)&&!isLegacyCtt)?clean(item.description,140):fallback.description;
+    return {name,url,description:desc};
   });
 }
 function localImagePath(value,fallback='/sfn-logo.png'){const p=clean(value,1200);if(p==='/sfn-logo.png')return p;if(/^\/files\/[A-Za-z0-9._/-]+\.(?:png|jpe?g|webp)$/i.test(p)&&!p.includes('..')&&!p.includes('\\')&&!p.includes('//'))return p;return fallback}
@@ -2017,7 +2085,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const password=String(b.password||'');
     const rawType=clean(b.account_type_code,40)||'trial_24h';
     const typeCode=normalizeAccountTypeCode(rawType);
-    if(!['trial_24h','trial_48h'].includes(typeCode))return json({error:'TRIAL_TYPE_ONLY',message:'Đăng ký kích hoạt tức thời chỉ áp dụng cho Tài khoản 24 giờ hoặc 48 giờ; Tài khoản 12 tháng (01 năm) đi qua luồng xét duyệt hồ sơ.'},400);
+    if(!['trial_24h','trial_48h'].includes(typeCode))return json({error:'TRIAL_TYPE_ONLY',message:'Đăng ký kích hoạt tức thời chỉ áp dụng cho Tài khoản 24 giờ hoặc 48 giờ; Tài khoản 12 tháng đi qua luồng xét duyệt hồ sơ.'},400);
     if(!fullName||!email||!/^\S+@\S+\.\S+$/.test(email)||password.length<10)return json({error:'INVALID_TRIAL_DATA',message:'Vui lòng nhập họ tên, email hợp lệ và mật khẩu tối thiểu 10 ký tự.'},400);
     if(String(b.read_acknowledged)!=='1'||String(b.terms_accepted)!=='1'||String(b.privacy_consent)!=='1'){
       return json({error:'CONSENT_REQUIRED',message:'Vui lòng thực hiện hành động đồng ý rõ ràng đối với Thông báo bảo mật, Điều khoản sử dụng và Xử lý dữ liệu cá nhân.'},400);
@@ -2420,9 +2488,16 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(!ev)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại.'},404);
     const canonicalSlug=ev.slug||toActivitySlug(ev.event_code);
     const tokenParam=clean(url.searchParams.get('t'),200);
+    const reqSize=Math.max(180,Math.min(600,Number(url.searchParams.get('size'))||320));
     const targetUrl=`https://nghiepvu.skyfirst.io.vn/q-r/${encodeURIComponent(canonicalSlug)}${tokenParam?`?t=${encodeURIComponent(tokenParam)}`:''}`;
-    const png=generateQrPng(targetUrl,8);
-    return new Response(png,{status:200,headers:{'content-type':'image/png','cache-control':'no-store'}});
+    try{
+      const png=await generateQrPng(targetUrl,reqSize);
+      if(!png?.byteLength)return json({error:'QR_GENERATION_FAILED',message:'Không tạo được ảnh mã QR.'},502);
+      return new Response(png,{status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
+    }catch(err){
+      console.error('EVENT_QR_PNG_ERROR',String(err?.message||err));
+      return json({error:'QR_GENERATION_FAILED',message:'Lỗi tạo ảnh mã QR điểm danh.'},502);
+    }
   }
 
   const pubQrInfoMatch=url.pathname.match(/^\/api\/public\/q-r\/([^/]+)$/);
@@ -2433,7 +2508,8 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       SELECT e.id,e.event_code,e.slug,e.name,e.purpose,e.event_type,e.domain_field,e.scale_label,
         e.host_org_id,o.name host_org_name,e.lead_person_name,e.contact_email,
         e.attendance_manager_name,e.attendance_manager_email,e.attendance_manager_phone,
-        e.starts_at,e.ends_at,e.location_or_platform,e.status,e.registration_state
+        e.starts_at,e.ends_at,e.location_or_platform,e.status,e.registration_state,
+        COALESCE(e.checkin_gate_state,'auto') checkin_gate_state,e.checkin_opens_at,e.checkin_closes_at
       FROM sk_events e
       LEFT JOIN org_nodes o ON o.id=e.host_org_id
       WHERE lower(COALESCE(e.slug,''))=lower(?) OR lower(e.event_code)=lower(?) OR e.id=?
@@ -2442,19 +2518,29 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     if(!ev)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại hoặc đường dẫn điểm danh không chính xác.'},404);
     if(ev.status==='cancelled')return json({error:'EVENT_CANCELLED',event_name:ev.name,status:ev.status,message:'Hoạt động này đã bị hủy và không tiếp nhận điểm danh.'},403);
     if(ev.status==='postponed')return json({error:'EVENT_POSTPONED',event_name:ev.name,status:ev.status,message:'Hoạt động này đang tạm hoãn và chưa mở điểm danh.'},403);
-    if(['completed','pending_summary','closed','archived'].includes(ev.status)){
-      return json({error:'EVENT_CHECKIN_CLOSED',event_name:ev.name,status:ev.status,message:'Hoạt động đã kết thúc và đóng cổng điểm danh.'},403);
+    const gateState=String(ev.checkin_gate_state||'auto');
+    if(gateState==='closed'){
+      return json({error:'EVENT_CHECKIN_CLOSED',event_name:ev.name,status:ev.status,checkin_gate_state:'closed',message:'Hoạt động đã kết thúc và đóng cổng điểm danh.'},403);
     }
-    if(['draft','pending_appraisal','pending_approval','revision_requested','rejected'].includes(ev.status)){
-      return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',event_name:ev.name,status:ev.status,message:'Hoạt động hiện chưa mở điểm danh chính thức.'},403);
+    if(gateState!=='open'){
+      if(['completed','pending_summary','closed','archived'].includes(ev.status)){
+        return json({error:'EVENT_CHECKIN_CLOSED',event_name:ev.name,status:ev.status,checkin_gate_state:gateState,message:'Hoạt động đã kết thúc và đóng cổng điểm danh.'},403);
+      }
+      if(['draft','pending_appraisal','pending_approval','revision_requested','rejected'].includes(ev.status)){
+        return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',event_name:ev.name,status:ev.status,checkin_gate_state:gateState,message:'Hoạt động hiện chưa mở điểm danh chính thức.'},403);
+      }
     }
-    let sessions=(await env.DB.prepare(`
-      SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status,
-        CASE WHEN ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
-        CASE WHEN starts_at>datetime('now') THEN 1 ELSE 0 END not_started
+    // Check event-level checkin_opens_at / checkin_closes_at window if configured
+    if(ev.checkin_opens_at||ev.checkin_closes_at){
+      const evWin=isQrSessionTimeStates(ev.checkin_opens_at,ev.checkin_closes_at);
+      if(evWin.not_started)return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',event_name:ev.name,status:ev.status,message:`Cổng điểm danh của hoạt động sẽ mở vào lúc ${ev.checkin_opens_at}.`},403);
+      if(evWin.is_expired&&gateState!=='open')return json({error:'EVENT_CHECKIN_CLOSED',event_name:ev.name,status:ev.status,message:`Cổng điểm danh của hoạt động đã đóng vào lúc ${ev.checkin_closes_at}.`},403);
+    }
+    let rawSessions=(await env.DB.prepare(`
+      SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status
       FROM sk_qr_sessions WHERE event_id=? ORDER BY created_at DESC
     `).bind(ev.id).all()).results||[];
-    if(!sessions.length&&['approved','published','registration_open','registration_closed','ongoing'].includes(ev.status)){
+    if(!rawSessions.length&&(gateState==='open'||['approved','published','registration_open','registration_closed','ongoing'].includes(ev.status))){
       const autoQid=uid('skqr');
       const autoCode=`SKM-${String(ev.event_code||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(-6)||'2026'}`;
       const autoTok=`SKQR_${String(ev.event_code||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase()}`;
@@ -2465,22 +2551,20 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
           starts_at,ends_at,status,require_approved_registration,allow_duplicate_checkin,created_by_account_id
         ) VALUES(?,?,?,?,?,?,?,'2025-01-01 00:00:00','2030-12-31 23:59:59','active',0,0,'system')
       `).bind(autoQid,`SK-QR-${ev.event_code}`,ev.id,'Phiên điểm danh chính thức',autoTok,autoCode,mgr).run();
-      sessions=(await env.DB.prepare(`
-        SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status,
-          0 is_expired, 0 not_started
+      rawSessions=(await env.DB.prepare(`
+        SELECT id,session_code,session_name,qr_token,manual_code,attendance_manager_name,starts_at,ends_at,status
         FROM sk_qr_sessions WHERE event_id=? ORDER BY created_at DESC
       `).bind(ev.id).all()).results||[];
     }
+    const sessions=rawSessions.map(s=>({...s,...isQrSessionTimeStates(s.starts_at,s.ends_at)}));
     const activeSessions=sessions.filter(s=>s.status==='active'&&!s.is_expired&&!s.not_started);
     const tokenParam=clean(url.searchParams.get('t'),200);
     let tokenState=null;
     if(tokenParam){
-      const anyTok=await env.DB.prepare(`
-        SELECT q.*,
-          CASE WHEN q.ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
-          CASE WHEN q.starts_at>datetime('now') THEN 1 ELSE 0 END not_started
-        FROM sk_qr_sessions q WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) LIMIT 1
+      const anyTokRaw=await env.DB.prepare(`
+        SELECT q.* FROM sk_qr_sessions q WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) LIMIT 1
       `).bind(tokenParam,tokenParam).first();
+      const anyTok=anyTokRaw?{...anyTokRaw,...isQrSessionTimeStates(anyTokRaw.starts_at,anyTokRaw.ends_at)}:null;
       if(!anyTok)tokenState={valid:false,error:'INVALID_CHECKIN_CODE',message:'Mã điểm danh hoặc mã QR không hợp lệ.'};
       else if(anyTok.event_id!==ev.id)tokenState={valid:false,error:'CODE_EVENT_MISMATCH',message:'Mã điểm danh này thuộc hoạt động khác, không khớp với hoạt động hiện tại.'};
       else if(anyTok.status==='revoked')tokenState={valid:false,error:'QR_REVOKED',message:'Mã điểm danh này đã bị thu hồi.'};
@@ -2490,6 +2574,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       else tokenState={valid:true,session_id:anyTok.id,session_name:anyTok.session_name};
     }
     const canonicalSlug=ev.slug||toActivitySlug(ev.event_code);
+    const activeToken=activeSessions[0]?.qr_token||null;
     return json({
       ok:true,
       event:{
@@ -2500,6 +2585,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
         purpose:ev.purpose,
         starts_at:ev.starts_at,
         ends_at:ev.ends_at,
+        checkin_gate_state:gateState,
+        checkin_opens_at:ev.checkin_opens_at||null,
+        checkin_closes_at:ev.checkin_closes_at||null,
         location_or_platform:ev.location_or_platform,
         host_org_name:ev.host_org_name||'Sky First Network',
         lead_person_name:ev.lead_person_name,
@@ -2508,7 +2596,9 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       },
       checkin_open:activeSessions.length>0,
       active_session_name:activeSessions[0]?.session_name||null,
-      active_qr_token:(!tokenParam&&activeSessions[0])?activeSessions[0].qr_token:null,
+      active_qr_token:(!tokenParam&&activeToken)?activeToken:null,
+      active_manual_code:activeSessions[0]?.manual_code||null,
+      qr_image_url:`/api/public/q-r/${encodeURIComponent(canonicalSlug)}/qr-image${(tokenParam||activeToken)?`?t=${encodeURIComponent(tokenParam||activeToken)}`:''}`,
       token_state:tokenState,
       qr_path:`/q-r/${canonicalSlug}`,
       qr_url:`https://nghiepvu.skyfirst.io.vn/q-r/${canonicalSlug}`
@@ -2522,9 +2612,10 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     const upRate=await safeRateState(env,`qr-ev-up:${ip}`,600,30);
     if(upRate.blocked)return json({error:'RATE_LIMITED',message:'Bạn đã tải ảnh quá nhiều lần. Vui lòng thử lại sau ít phút.'},429);
     const rawSlug=decodeURIComponent(pubQrEvidenceMatch[1]).trim();
-    const ev=await env.DB.prepare("SELECT id,event_code,slug,name,status FROM sk_events WHERE lower(COALESCE(slug,''))=lower(?) OR lower(event_code)=lower(?) OR id=? LIMIT 1").bind(rawSlug,rawSlug,rawSlug).first();
+    const ev=await env.DB.prepare("SELECT id,event_code,slug,name,status,COALESCE(checkin_gate_state,'auto') checkin_gate_state FROM sk_events WHERE lower(COALESCE(slug,''))=lower(?) OR lower(event_code)=lower(?) OR id=? LIMIT 1").bind(rawSlug,rawSlug,rawSlug).first();
     if(!ev)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại.'},404);
-    if(!['approved','published','registration_open','registration_closed','ongoing'].includes(ev.status)){
+    if(ev.checkin_gate_state==='closed')return json({error:'EVENT_CHECKIN_CLOSED',message:'Hoạt động đã đóng cổng điểm danh.'},403);
+    if(ev.checkin_gate_state!=='open'&&!['approved','published','registration_open','registration_closed','ongoing'].includes(ev.status)){
       return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',message:'Hoạt động hiện không mở tiếp nhận ảnh minh chứng điểm danh.'},403);
     }
     const type=String(req.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
@@ -2584,11 +2675,15 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       if(!targetEv)return json({error:'EVENT_NOT_FOUND',message:'Hoạt động không tồn tại hoặc đường dẫn điểm danh không chính xác.'},404);
       if(targetEv.status==='cancelled')return json({error:'EVENT_CANCELLED',message:'Hoạt động này đã bị hủy và không tiếp nhận điểm danh.'},403);
       if(targetEv.status==='postponed')return json({error:'EVENT_POSTPONED',message:'Hoạt động đang tạm hoãn và không mở điểm danh.'},403);
-      if(['completed','pending_summary','closed','archived'].includes(targetEv.status)){
-        return json({error:'EVENT_CHECKIN_CLOSED',message:'Hoạt động đã đóng cổng điểm danh.'},403);
-      }
-      if(!['approved','published','registration_open','registration_closed','ongoing'].includes(targetEv.status)){
-        return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',message:'Hoạt động hiện chưa mở điểm danh.'},403);
+      const tGate=String(targetEv.checkin_gate_state||'auto');
+      if(tGate==='closed')return json({error:'EVENT_CHECKIN_CLOSED',message:'Hoạt động đã kết thúc và đóng cổng điểm danh.'},403);
+      if(tGate!=='open'){
+        if(['completed','pending_summary','closed','archived'].includes(targetEv.status)){
+          return json({error:'EVENT_CHECKIN_CLOSED',message:'Hoạt động đã đóng cổng điểm danh.'},403);
+        }
+        if(!['approved','published','registration_open','registration_closed','ongoing'].includes(targetEv.status)){
+          return json({error:'EVENT_NOT_OPEN_FOR_CHECKIN',message:'Hoạt động hiện chưa mở điểm danh.'},403);
+        }
       }
     }
 
@@ -2605,16 +2700,15 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
       return json({error:'QR_TOKEN_REQUIRED',field:'manual_code',message:'Vui lòng quét mã QR của hoạt động hoặc nhập mã điểm danh thủ công.'},400);
     }
 
-    const qs=await env.DB.prepare(`
-      SELECT q.*,e.status event_status,e.name event_name,e.slug event_slug,e.event_code,e.host_org_id,
-        e.attendance_manager_name event_attendance_manager_name,e.lead_person_name,
-        CASE WHEN q.ends_at<datetime('now') THEN 1 ELSE 0 END is_expired,
-        CASE WHEN q.starts_at>datetime('now') THEN 1 ELSE 0 END not_started
+    const qsRaw=await env.DB.prepare(`
+      SELECT q.*,e.status event_status,COALESCE(e.checkin_gate_state,'auto') event_checkin_gate_state,e.name event_name,e.slug event_slug,e.event_code,e.host_org_id,
+        e.attendance_manager_name event_attendance_manager_name,e.lead_person_name
       FROM sk_qr_sessions q
       JOIN sk_events e ON e.id=q.event_id
       WHERE q.qr_token=? OR upper(COALESCE(q.manual_code,''))=upper(?) OR upper(q.session_code)=upper(?) OR (e.id=? AND upper(e.event_code)=upper(?))
       LIMIT 1
     `).bind(codeInput,codeInput,codeInput,targetEv?.id||'',codeInput).first();
+    const qs=qsRaw?{...qsRaw,...isQrSessionTimeStates(qsRaw.starts_at,qsRaw.ends_at)}:null;
 
     if(!qs){
       await safeRateFail(env,rateKey,600,8);
@@ -2626,7 +2720,7 @@ if(url.pathname==='/api/public/account-request'&&req.method==='POST'){
     }
     if(qs.status==='revoked')return json({error:'QR_REVOKED',field:'manual_code',message:'Mã điểm danh này đã bị thu hồi hoặc vô hiệu hóa.'},410);
     if(qs.status!=='active')return json({error:'QR_SESSION_INACTIVE',status:qs.status,message:'Phiên điểm danh hiện không hoạt động (đã tạm dừng hoặc đã đóng).'},409);
-    if(['postponed','cancelled','rejected','draft','completed','closed','archived'].includes(qs.event_status)){
+    if(['postponed','cancelled','rejected'].includes(qs.event_status)||(qs.event_checkin_gate_state!=='open'&&['draft','completed','closed','archived'].includes(qs.event_status))){
       return json({error:'EVENT_NOT_ACTIVE_FOR_CHECKIN',event_status:qs.event_status,message:'Hoạt động hiện không ở trạng thái cho phép điểm danh.'},409);
     }
     if(qs.is_expired)return json({error:'QR_EXPIRED',field:'manual_code',message:'Mã điểm danh của phiên này đã hết thời hạn hiệu lực.'},410);
@@ -6780,7 +6874,8 @@ env.DB.prepare(`
       chat_messages:['id','conversation_id','sender_account_id','body','status'],
       community_groups:['id','code','name','group_type'],
       community_group_members:['group_id','account_id'],
-      social_posts:['id','author_account_id','post_kind','moderation_status'],
+      social_posts:['id','author_account_id','post_kind','moderation_status','category','priority','target_scope'],
+      announcement_reads:['post_id','account_id','read_at'],
       social_comments:['id','post_id','author_account_id'],
       social_reactions:['post_id','account_id','reaction_type'],
       content_reports:['id','target_type','target_id','status']
@@ -7973,7 +8068,7 @@ env.DB.prepare(`
           SELECT a.id,a.person_id,a.username,a.email,a.is_locked,a.force_password_change,a.last_login_at,a.created_at,
             p.member_code,p.full_name,p.status person_status,
             COALESCE(al.account_type_code,'annual_12m_1y') account_type_code,
-            COALESCE(al.duration_label,'Tài khoản 12 tháng (01 năm)') duration_label,
+            CASE WHEN al.duration_label LIKE '%01 năm%' OR al.duration_label IS NULL OR TRIM(al.duration_label)='' THEN '12 tháng' ELSE al.duration_label END duration_label,
             COALESCE(al.activated_at,a.created_at) activated_at,
             al.expires_at,
             CASE
@@ -8355,10 +8450,10 @@ env.DB.prepare(`
           (SELECT COUNT(*) FROM sk_event_registrations rg WHERE rg.event_id=e.id AND rg.status='approved') approved_registration_count,
           (SELECT COUNT(*) FROM sk_attendance_records ar WHERE ar.event_id=e.id AND ar.attendance_status IN ('checked_in','manual_present','late')) attended_count
         FROM sk_events e
-        WHERE (?='' OR e.name LIKE ? OR e.event_code LIKE ?)
+        WHERE (?='' OR e.name LIKE ? OR e.event_code LIKE ? OR COALESCE(e.slug,'') LIKE ?)
           AND (?='' OR e.status=?)
         ORDER BY e.created_at DESC LIMIT 200
-      `).bind(q,`%${q}%`,`%${q}%`,status,status).all();
+      `).bind(q,`%${q}%`,`%${q}%`,`%${q}%`,status,status).all();
       const items=(r.results||[]).map(x=>{
         const tc=Number(x.task_count||0),cc=Number(x.completed_task_count||0);
         return {...x,progress_pct:tc>0?Math.round((cc/tc)*100):0};
@@ -8489,10 +8584,14 @@ env.DB.prepare(`
       note:clean(b.change_note,400)||(triggeredReapproval?'Thay đổi thông tin trọng yếu sau phê duyệt -> tự động kích hoạt duyệt lại':'Cập nhật hồ sơ sự kiện')
     });
     const nextSlug=(b.slug||b.tenhd)?toActivitySlug(b.slug||b.tenhd,ev.event_code):(ev.slug||toActivitySlug(ev.name,ev.event_code));
+    const nextGateState=b.checkin_gate_state!==undefined&&['auto','open','closed'].includes(b.checkin_gate_state)?b.checkin_gate_state:(ev.checkin_gate_state||'auto');
+    const nextCheckinOpens=b.checkin_opens_at!==undefined?(clean(b.checkin_opens_at,40)||null):ev.checkin_opens_at;
+    const nextCheckinCloses=b.checkin_closes_at!==undefined?(clean(b.checkin_closes_at,40)||null):ev.checkin_closes_at;
     await env.DB.prepare(`
       UPDATE sk_events SET
         slug=?,name=?,purpose=?,expected_outcomes=?,starts_at=?,ends_at=?,location_or_platform=?,
         attendance_manager_account_id=?,attendance_manager_name=?,attendance_manager_email=?,attendance_manager_phone=?,
+        checkin_gate_state=?,checkin_opens_at=?,checkin_closes_at=?,
         expected_participants=?,max_registrations=?,implementation_plan=?,communication_plan=?,
         status=?,registration_state=?,current_version=?,version_history_json=?,updated_at=CURRENT_TIMESTAMP
       WHERE id=?
@@ -8508,6 +8607,7 @@ env.DB.prepare(`
       b.attendance_manager_name!==undefined?clean(b.attendance_manager_name,160):(ev.attendance_manager_name||ev.lead_person_name),
       b.attendance_manager_email!==undefined?clean(b.attendance_manager_email,200):(ev.attendance_manager_email||ev.contact_email),
       b.attendance_manager_phone!==undefined?clean(b.attendance_manager_phone,40):ev.attendance_manager_phone,
+      nextGateState,nextCheckinOpens,nextCheckinCloses,
       b.expected_participants!==undefined?Number(b.expected_participants):ev.expected_participants,
       b.max_registrations!==undefined?Number(b.max_registrations):ev.max_registrations,
       b.implementation_plan!==undefined?clean(b.implementation_plan,2000):ev.implementation_plan,
@@ -8614,6 +8714,16 @@ env.DB.prepare(`
         env.DB.prepare("UPDATE sk_events SET postponed_or_cancelled_reason=? WHERE id=?").bind(note,ev.id),
         env.DB.prepare("UPDATE sk_qr_sessions SET status='revoked',revoked_reason=?,updated_at=CURRENT_TIMESTAMP WHERE event_id=? AND status='active'").bind(`Tự động thu hồi mã QR do sự kiện chuyển sang trạng thái ${nextStatus}: ${note}`,ev.id)
       ]);
+    }else if(action==='open_checkin'){
+      if(!(await hasPerm(env,s.account_id,'event.checkin'))&&!(await hasPerm(env,s.account_id,'event.approve'))&&!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+      if(['draft','pending_appraisal','pending_approval','completed','pending_summary','closed'].includes(ev.status)){
+        nextStatus='ongoing';
+      }
+      await env.DB.prepare("UPDATE sk_events SET checkin_gate_state='open',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(ev.id).run();
+      await env.DB.prepare("UPDATE sk_qr_sessions SET status='active',ends_at='2030-12-31 23:59:59',updated_at=CURRENT_TIMESTAMP WHERE event_id=? AND status IN ('paused','closed')").bind(ev.id).run();
+    }else if(action==='close_checkin'){
+      if(!(await hasPerm(env,s.account_id,'event.checkin'))&&!(await hasPerm(env,s.account_id,'event.approve'))&&!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+      await env.DB.prepare("UPDATE sk_events SET checkin_gate_state='closed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(ev.id).run();
     }else if(action==='archive'){
       if(ev.status!=='closed')return json({error:'ARCHIVE_REQUIRES_CLOSED',message:'Chỉ lưu trữ sự kiện sau khi đã đóng hồ sơ hoàn tất.'},409);
       nextStatus='archived';
@@ -8885,43 +8995,255 @@ env.DB.prepare(`
     return json({ok:true,id:gid,code,group_type:gtype,visibility:vis},201);
   }
 
+  // =========================================================
+  // MỤC III — PHÂN HỆ KÊNH THÔNG BÁO CHÍNH THỨC TRONG ADMIN & THÀNH VIÊN
+  // =========================================================
+  if(url.pathname==='/api/admin/announcements/upload'&&req.method==='POST'){
+    await ensureGovernanceTables(env);
+    const canManageAnn=(await hasPerm(env,s.account_id,'content.moderate'))||(await isNetworkAdmin(env,s.account_id))||(await isSuper(env,s.account_id));
+    if(!canManageAnn)return json({error:'FORBIDDEN',message:'Bạn không có quyền tải tệp đính kèm thông báo.'},403);
+    const type=String(req.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const extMap={'application/pdf':'pdf','image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+    const ext=extMap[type];
+    if(!ext)return json({error:'INVALID_ATTACHMENT_FORMAT',message:'Chỉ chấp nhận tệp đính kèm PDF, PNG, JPG hoặc WEBP.'},400);
+    const bytes=new Uint8Array(await req.arrayBuffer());
+    if(!bytes.byteLength)return json({error:'ATTACHMENT_EMPTY',message:'Tệp đính kèm rỗng.'},400);
+    if(bytes.byteLength>5*1024*1024)return json({error:'ATTACHMENT_TOO_LARGE',message:'Tệp đính kèm vượt quá dung lượng tối đa 5MB.'},400);
+    if(!validUploadedAttachment(bytes,type))return json({error:'ATTACHMENT_CONTENT_MISMATCH',message:'Nội dung tệp không khớp định dạng khai báo.'},400);
+    const rawName=clean(decodeURIComponent(req.headers.get('x-file-name')||''),180)||`dinh-kem-thong-bao.${ext}`;
+    const key=`announcements/attachments/${uid('annf')}_${crypto.randomUUID().slice(0,8)}.${ext}`;
+    const fileUrl=`/files/${key}`;
+    if(env.FILES&&typeof env.FILES.put==='function'){
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType:type,cacheControl:'private, max-age=3600'}});
+    }
+    await audit(env,s.account_id,'announcement_attachment_uploaded','announcement_attachment',key,null,{file_url:fileUrl,file_name:rawName,byte_size:bytes.byteLength});
+    return json({ok:true,attachment_url:fileUrl,attachment_name:rawName,attachment_size:bytes.byteLength,mime_type:type},201);
+  }
+
+  if(url.pathname==='/api/admin/announcements'&&['GET','POST'].includes(req.method)){
+    await ensureGovernanceTables(env);
+    const canManageAnn=(await hasPerm(env,s.account_id,'content.moderate'))||(await isNetworkAdmin(env,s.account_id))||(await isSuper(env,s.account_id));
+    if(!canManageAnn)return json({error:'FORBIDDEN',message:'Bạn không có quyền quản trị Kênh Thông báo.'},403);
+    if(req.method==='GET'){
+      const q=clean(url.searchParams.get('q'),120);
+      const statusFilter=clean(url.searchParams.get('status'),40);
+      const catFilter=clean(url.searchParams.get('category'),80);
+      const prioFilter=clean(url.searchParams.get('priority'),40);
+      const orgFilter=clean(url.searchParams.get('org_node_id'),100);
+      const page=Math.max(1,Number(url.searchParams.get('page'))||1);
+      const pageSize=Math.min(100,Math.max(5,Number(url.searchParams.get('page_size'))||15));
+      const allRows=(await env.DB.prepare(`
+        SELECT sp.*,
+          u.username author_username,p.full_name author_name,p.member_code author_member_code,
+          uu.username updated_by_username,up.full_name updated_by_name,
+          cg.name group_name,o.name org_name,
+          (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.post_id=sp.id) read_count,
+          (SELECT COUNT(*) FROM social_reactions sr WHERE sr.post_id=sp.id) reaction_count
+        FROM social_posts sp
+        JOIN accounts u ON u.id=sp.author_account_id
+        LEFT JOIN people p ON p.id=u.person_id
+        LEFT JOIN accounts uu ON uu.id=sp.updated_by_account_id
+        LEFT JOIN people up ON up.id=uu.person_id
+        LEFT JOIN community_groups cg ON cg.id=sp.group_id
+        LEFT JOIN org_nodes o ON o.id=sp.org_node_id
+        WHERE (?='' OR sp.body LIKE ? OR COALESCE(sp.title,'') LIKE ? OR COALESCE(p.full_name,'') LIKE ?)
+          AND (?='' OR sp.moderation_status=?)
+          AND (?='' OR COALESCE(sp.category,'Điều hành chung')=?)
+          AND (?='' OR COALESCE(sp.priority,'normal')=?)
+          AND (?='' OR COALESCE(sp.org_node_id,'')=?)
+        ORDER BY sp.is_pinned DESC, sp.created_at DESC
+      `).bind(q,`%${q}%`,`%${q}%`,`%${q}%`,statusFilter,statusFilter,catFilter,catFilter,prioFilter,prioFilter,orgFilter,orgFilter).all()).results||[];
+      const statsRow=await env.DB.prepare(`
+        SELECT COUNT(*) total,
+          SUM(CASE WHEN moderation_status='published' THEN 1 ELSE 0 END) published,
+          SUM(CASE WHEN moderation_status IN ('draft','pending_approval') THEN 1 ELSE 0 END) draft,
+          SUM(CASE WHEN moderation_status IN ('archived','hidden') THEN 1 ELSE 0 END) archived,
+          SUM(CASE WHEN is_pinned=1 THEN 1 ELSE 0 END) pinned
+        FROM social_posts
+      `).first();
+      const total=allRows.length;
+      const totalPages=Math.max(1,Math.ceil(total/pageSize));
+      const paged=allRows.slice((page-1)*pageSize, page*pageSize);
+      return json({
+        ok:true,
+        items:paged,
+        total,
+        page,
+        page_size:pageSize,
+        total_pages:totalPages,
+        overview:{
+          total:Number(statsRow?.total||0),
+          published:Number(statsRow?.published||0),
+          draft:Number(statsRow?.draft||0),
+          archived:Number(statsRow?.archived||0),
+          pinned:Number(statsRow?.pinned||0)
+        }
+      });
+    }
+    const b=await bodyJson(req);
+    const title=clean(b.title,240);
+    const bodyText=clean(b.body,6000);
+    if(!title||!bodyText)return json({error:'ANNOUNCEMENT_FIELDS_REQUIRED',message:'Vui lòng nhập đầy đủ Tiêu đề và Nội dung thông báo.'},400);
+    const category=clean(b.category,80)||'Điều hành chung';
+    const priority=['normal','important','urgent'].includes(b.priority)?b.priority:'normal';
+    const targetScope=['all_members','unit','role_group'].includes(b.target_scope)?b.target_scope:'all_members';
+    const orgNodeId=targetScope==='unit'?(clean(b.org_node_id,100)||null):(clean(b.org_node_id,100)||null);
+    const groupId=clean(b.group_id,100)||'grp_official_bch';
+    const status=['draft','published','archived'].includes(b.status)?b.status:(b.publish_immediately===false||b.save_as_draft===true?'draft':'published');
+    const isPinned=b.is_pinned?1:0;
+    const mediaUrl=clean(b.attachment_url||b.media_url,500)||null;
+    const mediaType=clean(b.attachment_type||b.media_type,60)||null;
+    const attName=clean(b.attachment_name,180)||null;
+    const attSize=b.attachment_size?Number(b.attachment_size):null;
+    const pid=uid('spost');
+    const nowIso=new Date().toISOString();
+    await env.DB.prepare(`
+      INSERT INTO social_posts(
+        id,group_id,author_account_id,org_node_id,post_kind,category,priority,target_scope,
+        title,body,media_url,media_type,attachment_name,attachment_size,is_pinned,
+        moderation_status,approver_account_id,approved_at,published_at,updated_by_account_id,archived_at
+      ) VALUES(?,?,?,?,'official_announcement',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).bind(
+      pid,groupId,s.account_id,orgNodeId,category,priority,targetScope,
+      title,bodyText,mediaUrl,mediaType,attName,attSize,isPinned,
+      status,status==='published'?s.account_id:null,status==='published'?nowIso:null,status==='published'?nowIso:null,s.account_id,status==='archived'?nowIso:null
+    ).run();
+    await audit(env,s.account_id,status==='published'?'announcement_published':'announcement_created','social_post',pid,orgNodeId,{title,category,priority,target_scope:targetScope,status,is_pinned:Boolean(isPinned)});
+    return json({ok:true,id:pid,title,category,priority,target_scope:targetScope,status,moderation_status:status,is_pinned:Boolean(isPinned)},201);
+  }
+
+  const adminAnnDetailMatch=url.pathname.match(/^\/api\/admin\/announcements\/([^/]+)$/);
+  if(adminAnnDetailMatch&&['GET','PATCH','DELETE'].includes(req.method)){
+    await ensureGovernanceTables(env);
+    const canManageAnn=(await hasPerm(env,s.account_id,'content.moderate'))||(await isNetworkAdmin(env,s.account_id))||(await isSuper(env,s.account_id));
+    if(!canManageAnn)return json({error:'FORBIDDEN',message:'Bạn không có quyền quản trị Kênh Thông báo.'},403);
+    const pid=decodeURIComponent(adminAnnDetailMatch[1]);
+    const post=await env.DB.prepare(`
+      SELECT sp.*,u.username author_username,p.full_name author_name,
+        uu.username updated_by_username,up.full_name updated_by_name,
+        cg.name group_name,o.name org_name,
+        (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.post_id=sp.id) read_count
+      FROM social_posts sp
+      JOIN accounts u ON u.id=sp.author_account_id
+      LEFT JOIN people p ON p.id=u.person_id
+      LEFT JOIN accounts uu ON uu.id=sp.updated_by_account_id
+      LEFT JOIN people up ON up.id=uu.person_id
+      LEFT JOIN community_groups cg ON cg.id=sp.group_id
+      LEFT JOIN org_nodes o ON o.id=sp.org_node_id
+      WHERE sp.id=? LIMIT 1
+    `).bind(pid).first();
+    if(!post)return json({error:'ANNOUNCEMENT_NOT_FOUND',message:'Thông báo không tồn tại.'},404);
+    if(req.method==='GET'){
+      const readers=(await env.DB.prepare(`
+        SELECT ar.read_at,u.username,p.full_name,p.member_code
+        FROM announcement_reads ar
+        JOIN accounts u ON u.id=ar.account_id
+        LEFT JOIN people p ON p.id=u.person_id
+        WHERE ar.post_id=? ORDER BY ar.read_at DESC LIMIT 50
+      `).bind(pid).all()).results||[];
+      return json({ok:true,announcement:post,readers});
+    }
+    if(req.method==='DELETE'){
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM announcement_reads WHERE post_id=?").bind(pid),
+        env.DB.prepare("DELETE FROM social_posts WHERE id=?").bind(pid)
+      ]);
+      await audit(env,s.account_id,'announcement_deleted','social_post',pid,post.org_node_id,{title:post.title});
+      return json({ok:true,deleted:true,id:pid});
+    }
+    const b=await bodyJson(req);
+    const act=clean(b.action,30);
+    let nextStatus=b.status!==undefined?clean(b.status,30):post.moderation_status;
+    let nextPin=b.is_pinned!==undefined?(b.is_pinned?1:0):Number(post.is_pinned||0);
+    if(act==='publish')nextStatus='published';
+    else if(act==='unpublish')nextStatus='draft';
+    else if(act==='archive')nextStatus='archived';
+    else if(act==='pin')nextPin=1;
+    else if(act==='unpin')nextPin=0;
+    const nextTitle=b.title!==undefined?clean(b.title,240):post.title;
+    const nextBody=b.body!==undefined?clean(b.body,6000):post.body;
+    if(!nextTitle||!nextBody)return json({error:'ANNOUNCEMENT_FIELDS_REQUIRED',message:'Tiêu đề và Nội dung thông báo không được để trống.'},400);
+    const nextCat=b.category!==undefined?clean(b.category,80):(post.category||'Điều hành chung');
+    const nextPrio=b.priority!==undefined&&['normal','important','urgent'].includes(b.priority)?b.priority:(post.priority||'normal');
+    const nextScope=b.target_scope!==undefined&&['all_members','unit','role_group'].includes(b.target_scope)?b.target_scope:(post.target_scope||'all_members');
+    const nextOrg=b.org_node_id!==undefined?(clean(b.org_node_id,100)||null):post.org_node_id;
+    const nextMediaUrl=b.attachment_url!==undefined?(clean(b.attachment_url,500)||null):(b.media_url!==undefined?(clean(b.media_url,500)||null):post.media_url);
+    const nextAttName=b.attachment_name!==undefined?(clean(b.attachment_name,180)||null):post.attachment_name;
+    const nextAttSize=b.attachment_size!==undefined?(b.attachment_size?Number(b.attachment_size):null):post.attachment_size;
+    const nowIso=new Date().toISOString();
+    const pubAt=nextStatus==='published'?(post.published_at||nowIso):post.published_at;
+    const archAt=nextStatus==='archived'?nowIso:(nextStatus==='published'||nextStatus==='draft'?null:post.archived_at);
+    await env.DB.prepare(`
+      UPDATE social_posts SET
+        title=?,body=?,category=?,priority=?,target_scope=?,org_node_id=?,
+        media_url=?,attachment_name=?,attachment_size=?,is_pinned=?,
+        moderation_status=?,approver_account_id=?,published_at=?,archived_at=?,
+        updated_by_account_id=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(
+      nextTitle,nextBody,nextCat,nextPrio,nextScope,nextOrg,
+      nextMediaUrl,nextAttName,nextAttSize,nextPin,
+      nextStatus,nextStatus==='published'?s.account_id:post.approver_account_id,pubAt,archAt,
+      s.account_id,pid
+    ).run();
+    await audit(env,s.account_id,act?`announcement_${act}`:'announcement_updated','social_post',pid,nextOrg,{title:nextTitle,status:nextStatus,is_pinned:Boolean(nextPin)});
+    return json({ok:true,id:pid,title:nextTitle,status:nextStatus,moderation_status:nextStatus,is_pinned:Boolean(nextPin)});
+  }
+
   if(url.pathname==='/api/community/posts'&&['GET','POST'].includes(req.method)){
     await ensureGovernanceTables(env);
-    const canMod=await hasPerm(env,s.account_id,'content.moderate')||await isNetworkAdmin(env,s.account_id);
+    const canMod=await hasPerm(env,s.account_id,'content.moderate')||await isNetworkAdmin(env,s.account_id)||await isSuper(env,s.account_id);
     if(req.method==='GET'){
       const q=clean(url.searchParams.get('q'),120);
       const groupId=clean(url.searchParams.get('group_id'),100);
       const kind=clean(url.searchParams.get('post_kind'),40);
       const modStatus=clean(url.searchParams.get('moderation_status'),40);
-      const r=await env.DB.prepare(`
-        SELECT sp.*,u.username author_username,p.full_name author_name,p.member_code author_member_code,p.avatar_url author_avatar,
-          cg.name group_name,cg.group_type,o.name org_name,
-          (SELECT COUNT(*) FROM social_reactions sr WHERE sr.post_id=sp.id) reaction_count,
-          (SELECT COUNT(*) FROM social_comments sc WHERE sc.post_id=sp.id AND sc.status='active') comment_count
-        FROM social_posts sp
-        JOIN accounts u ON u.id=sp.author_account_id
-        LEFT JOIN people p ON p.id=u.person_id
-        LEFT JOIN community_groups cg ON cg.id=sp.group_id
-        LEFT JOIN org_nodes o ON o.id=sp.org_node_id
-        WHERE (?='' OR sp.body LIKE ? OR COALESCE(sp.title,'') LIKE ? OR COALESCE(p.full_name,'') LIKE ?)
-          AND (?='' OR sp.group_id=?)
-          AND (?='' OR sp.post_kind=?)
-          AND (?='' OR sp.moderation_status=?)
-        ORDER BY sp.is_pinned DESC, sp.created_at DESC LIMIT 100
-      `).bind(q,`%${q}%`,`%${q}%`,`%${q}%`,groupId,groupId,kind,kind,modStatus,modStatus).all();
-      const visible=(r.results||[]).filter(x=>x.moderation_status==='published'||x.author_account_id===s.account_id||canMod);
+      const catFilter=clean(url.searchParams.get('category'),80);
+      const readFilter=clean(url.searchParams.get('read_state'),20); // all | unread | read
+      const [r,memOrgs]=await Promise.all([
+        env.DB.prepare(`
+          SELECT sp.*,u.username author_username,p.full_name author_name,p.member_code author_member_code,p.avatar_url author_avatar,
+            uu.username updated_by_username,up.full_name updated_by_name,
+            cg.name group_name,cg.group_type,o.name org_name,
+            (SELECT COUNT(*) FROM social_reactions sr WHERE sr.post_id=sp.id) reaction_count,
+            (SELECT COUNT(*) FROM announcement_reads ar WHERE ar.post_id=sp.id) read_count,
+            (SELECT ar2.read_at FROM announcement_reads ar2 WHERE ar2.post_id=sp.id AND ar2.account_id=? LIMIT 1) my_read_at
+          FROM social_posts sp
+          JOIN accounts u ON u.id=sp.author_account_id
+          LEFT JOIN people p ON p.id=u.person_id
+          LEFT JOIN accounts uu ON uu.id=sp.updated_by_account_id
+          LEFT JOIN people up ON up.id=uu.person_id
+          LEFT JOIN community_groups cg ON cg.id=sp.group_id
+          LEFT JOIN org_nodes o ON o.id=sp.org_node_id
+          WHERE (?='' OR sp.body LIKE ? OR COALESCE(sp.title,'') LIKE ? OR COALESCE(p.full_name,'') LIKE ?)
+            AND (?='' OR sp.group_id=?)
+            AND (?='' OR sp.post_kind=?)
+            AND (?='' OR sp.moderation_status=?)
+            AND (?='' OR COALESCE(sp.category,'Điều hành chung')=?)
+          ORDER BY sp.is_pinned DESC, sp.created_at DESC LIMIT 100
+        `).bind(s.account_id,q,`%${q}%`,`%${q}%`,`%${q}%`,groupId,groupId,kind,kind,modStatus,modStatus,catFilter,catFilter).all(),
+        s.person_id?env.DB.prepare("SELECT org_node_id FROM org_memberships WHERE person_id=? AND status='active'").bind(s.person_id).all():Promise.resolve({results:[]})
+      ]);
+      const myOrgSet=new Set((memOrgs.results||[]).map(x=>x.org_node_id));
+      let visible=(r.results||[]).filter(x=>{
+        if(canMod||x.author_account_id===s.account_id)return true;
+        if(x.moderation_status!=='published')return false;
+        if(x.target_scope==='unit'&&x.org_node_id&&myOrgSet.size>0&&!myOrgSet.has(x.org_node_id))return false;
+        return true;
+      }).map(x=>({...x,is_read:Boolean(x.my_read_at),read_at:x.my_read_at||null}));
+      if(readFilter==='unread')visible=visible.filter(x=>!x.is_read);
+      else if(readFilter==='read')visible=visible.filter(x=>x.is_read);
       return json({items:visible,can_moderate:canMod});
     }
     const b=await bodyJson(req);
-    const bodyText=clean(b.body,4000);
+    const bodyText=clean(b.body,6000);
     if(!bodyText)return json({error:'POST_BODY_REQUIRED'},400);
-    const postKind=['discussion','official_announcement'].includes(b.post_kind)?b.post_kind:'discussion';
-    const groupId=clean(b.group_id,100)||'grp_general_community';
+    const postKind=['discussion','official_announcement'].includes(b.post_kind)?b.post_kind:'official_announcement';
+    const groupId=clean(b.group_id,100)||'grp_official_bch';
     const grp=await env.DB.prepare("SELECT * FROM community_groups WHERE id=?").bind(groupId).first();
     if(grp&&grp.group_type==='announcement_channel'&&!canMod){
       return json({error:'ANNOUNCEMENT_CHANNEL_RESTRICTED',message:'Kênh thông báo một chiều chỉ cho phép người có thẩm quyền kiểm duyệt/xuất bản đăng bài.'},403);
     }
-    // Personal/internal posts NEVER automatically become published official announcements without moderation approval!
     let modStatus='published';
     if(postKind==='official_announcement'){
       modStatus=(canMod&&b.publish_immediately===true)?'published':(b.save_as_draft===true?'draft':'pending_approval');
@@ -8929,21 +9251,24 @@ env.DB.prepare(`
       modStatus='pending_approval';
     }
     const pid=uid('spost');
-    await env.DB.prepare("INSERT INTO social_posts(id,group_id,author_account_id,org_node_id,event_id,post_kind,title,body,media_url,media_type,moderation_status,approver_account_id,approved_at,published_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(
-      pid,groupId,s.account_id,clean(b.org_node_id,100)||null,clean(b.event_id,100)||null,postKind,clean(b.title,240)||null,bodyText,clean(b.media_url,500)||null,clean(b.media_type,40)||null,modStatus,modStatus==='published'&&postKind==='official_announcement'?s.account_id:null,modStatus==='published'&&postKind==='official_announcement'?new Date().toISOString():null,modStatus==='published'?new Date().toISOString():null
+    const category=clean(b.category,80)||'Điều hành chung';
+    const priority=['normal','important','urgent'].includes(b.priority)?b.priority:'normal';
+    const targetScope=['all_members','unit','role_group'].includes(b.target_scope)?b.target_scope:'all_members';
+    await env.DB.prepare("INSERT INTO social_posts(id,group_id,author_account_id,org_node_id,event_id,post_kind,category,priority,target_scope,title,body,media_url,media_type,attachment_name,attachment_size,moderation_status,approver_account_id,approved_at,published_at,updated_by_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(
+      pid,groupId,s.account_id,clean(b.org_node_id,100)||null,clean(b.event_id,100)||null,postKind,category,priority,targetScope,clean(b.title,240)||null,bodyText,clean(b.attachment_url||b.media_url,500)||null,clean(b.media_type,40)||null,clean(b.attachment_name,180)||null,b.attachment_size?Number(b.attachment_size):null,modStatus,modStatus==='published'&&postKind==='official_announcement'?s.account_id:null,modStatus==='published'&&postKind==='official_announcement'?new Date().toISOString():null,modStatus==='published'?new Date().toISOString():null,s.account_id
     ).run();
-    await audit(env,s.account_id,'social_post_created','social_post',pid,clean(b.org_node_id,100)||null,{post_kind:postKind,moderation_status:modStatus});
+    await audit(env,s.account_id,'social_post_created','social_post',pid,clean(b.org_node_id,100)||null,{post_kind:postKind,moderation_status:modStatus,category,priority});
     return json({ok:true,id:pid,post_kind:postKind,moderation_status:modStatus},201);
   }
 
-  const socialPostActionMatch=url.pathname.match(/^\/api\/community\/posts\/([^/]+)(?:\/(comments|react|moderate|report))?$/);
+  const socialPostActionMatch=url.pathname.match(/^\/api\/community\/posts\/([^/]+)(?:\/(comments|react|read|moderate|report))?$/);
   if(socialPostActionMatch&&['GET','POST','PATCH'].includes(req.method)){
     await ensureGovernanceTables(env);
     const pid=decodeURIComponent(socialPostActionMatch[1]);
     const act=socialPostActionMatch[2]||null;
     const post=await env.DB.prepare("SELECT * FROM social_posts WHERE id=?").bind(pid).first();
     if(!post)return json({error:'POST_NOT_FOUND'},404);
-    const canMod=await hasPerm(env,s.account_id,'content.moderate')||await isNetworkAdmin(env,s.account_id);
+    const canMod=await hasPerm(env,s.account_id,'content.moderate')||await isNetworkAdmin(env,s.account_id)||await isSuper(env,s.account_id);
 
     if(req.method==='GET'&&act==='comments'){
       const cmts=await env.DB.prepare("SELECT c.*,u.username author_username,p.full_name author_name FROM social_comments c JOIN accounts u ON u.id=c.author_account_id LEFT JOIN people p ON p.id=u.person_id WHERE c.post_id=? AND c.status='active' ORDER BY c.created_at ASC").bind(pid).all();
@@ -8953,11 +9278,18 @@ env.DB.prepare(`
     if(req.method==='POST'&&act==='comments'){
       return json({error:'TWO_WAY_CHAT_DISABLED',message:'Kênh Thông báo chỉ phục vụ truyền đạt thông tin chính thức một chiều, không hỗ trợ bình luận/trò chuyện hai chiều.'},410);
     }
-    if(req.method==='POST'&&act==='react'){
-      const rtype=['like','love','congrats','support'].includes(b.reaction_type)?b.reaction_type:'like';
-      await env.DB.prepare("INSERT INTO social_reactions(post_id,account_id,reaction_type) VALUES(?,?,?) ON CONFLICT(post_id,account_id) DO UPDATE SET reaction_type=excluded.reaction_type").bind(pid,s.account_id,rtype).run();
-      const cnt=await env.DB.prepare("SELECT COUNT(*) n FROM social_reactions WHERE post_id=?").bind(pid).first();
-      return json({ok:true,reaction_type:rtype,reaction_count:Number(cnt?.n||0)});
+    if(req.method==='POST'&&(act==='read'||act==='react')){
+      const nowIso=new Date().toISOString();
+      await env.DB.prepare("INSERT INTO announcement_reads(post_id,account_id,read_at) VALUES(?,?,?) ON CONFLICT(post_id,account_id) DO UPDATE SET read_at=excluded.read_at").bind(pid,s.account_id,nowIso).run();
+      if(act==='react'){
+        const rtype=['like','love','congrats','support'].includes(b.reaction_type)?b.reaction_type:'like';
+        await env.DB.prepare("INSERT INTO social_reactions(post_id,account_id,reaction_type) VALUES(?,?,?) ON CONFLICT(post_id,account_id) DO UPDATE SET reaction_type=excluded.reaction_type").bind(pid,s.account_id,rtype).run();
+      }
+      const [cnt,rcnt]=await Promise.all([
+        env.DB.prepare("SELECT COUNT(*) n FROM social_reactions WHERE post_id=?").bind(pid).first(),
+        env.DB.prepare("SELECT COUNT(*) n FROM announcement_reads WHERE post_id=?").bind(pid).first()
+      ]);
+      return json({ok:true,post_id:pid,is_read:true,read_at:nowIso,reaction_count:Number(cnt?.n||0),read_count:Number(rcnt?.n||0)});
     }
     if(req.method==='POST'&&act==='report'){
       const reason=clean(b.reason,500);
@@ -8969,19 +9301,147 @@ env.DB.prepare(`
     }
     if(req.method==='POST'&&act==='moderate'){
       if(!canMod)return json({error:'MODERATOR_PERMISSION_REQUIRED',message:'Chỉ tài khoản có quyền kiểm duyệt mới được phê duyệt, xuất bản hoặc ẩn nội dung chính thức.'},403);
-      const modOp=clean(b.action,30); // approve | publish | reject | hide | pin | unpin
+      const modOp=clean(b.action,30); // approve | publish | unpublish | archive | reject | hide | pin | unpin
       let nextMod=post.moderation_status;
       if(modOp==='approve')nextMod='approved';
       else if(modOp==='publish')nextMod='published';
+      else if(modOp==='unpublish')nextMod='draft';
+      else if(modOp==='archive')nextMod='archived';
       else if(modOp==='reject')nextMod='rejected';
       else if(modOp==='hide')nextMod='hidden';
       const nextPin=modOp==='pin'?1:(modOp==='unpin'?0:post.is_pinned);
-      await env.DB.prepare("UPDATE social_posts SET moderation_status=?,is_pinned=?,approver_account_id=?,approved_at=CASE WHEN ? IN ('approved','published') THEN CURRENT_TIMESTAMP ELSE approved_at END,published_at=CASE WHEN ?='published' THEN CURRENT_TIMESTAMP ELSE published_at END,rejected_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(
-        nextMod,nextPin,s.account_id,nextMod,nextMod,clean(b.reason,500)||null,pid
+      await env.DB.prepare("UPDATE social_posts SET moderation_status=?,is_pinned=?,approver_account_id=?,updated_by_account_id=?,approved_at=CASE WHEN ? IN ('approved','published') THEN CURRENT_TIMESTAMP ELSE approved_at END,published_at=CASE WHEN ?='published' THEN CURRENT_TIMESTAMP ELSE published_at END,archived_at=CASE WHEN ?='archived' THEN CURRENT_TIMESTAMP ELSE archived_at END,rejected_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(
+        nextMod,nextPin,s.account_id,s.account_id,nextMod,nextMod,nextMod,clean(b.reason,500)||null,pid
       ).run();
       await audit(env,s.account_id,`social_post_moderated_${modOp}`,'social_post',pid,post.org_node_id,{moderation_status:nextMod,is_pinned:nextPin});
       return json({ok:true,id:pid,moderation_status:nextMod,is_pinned:Boolean(nextPin)});
     }
+  }
+
+  // =========================================================
+  // MỤC V — CẬP NHẬT DANH MỤC VĂN BẢN PHÁP LÝ & ĐỒNG BỘ TỰ ĐỘNG TỪ NGUỒN CHÍNH PHỦ
+  // =========================================================
+  if(url.pathname==='/api/admin/legal-documents'&&['GET','POST'].includes(req.method)){
+    if(!(await hasPerm(env,s.account_id,'member.view'))&&!(await isNetworkAdmin(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    if(req.method==='GET'){
+      const q=clean(url.searchParams.get('q'),120);
+      const statusFilter=clean(url.searchParams.get('legal_status'),60);
+      const sourceTypeFilter=clean(url.searchParams.get('sync_source_type'),40);
+      const [docsRes,syncLogsRes]=await Promise.all([
+        env.DB.prepare("SELECT * FROM governance_registry WHERE domain_group='legal_obligation' ORDER BY effective_from DESC, updated_at DESC").all(),
+        env.DB.prepare("SELECT * FROM governance_registry WHERE domain_group='legal_sync_log' ORDER BY created_at DESC LIMIT 20").all()
+      ]);
+      const items=(docsRes.results||[]).map(row=>{
+        let meta={};try{meta=JSON.parse(row.payload_json||'{}')}catch{}
+        return {
+          id:row.id,
+          code:row.code,
+          doc_number:meta.doc_number||row.code,
+          title:row.title,
+          summary:row.summary||'',
+          source_name:meta.source_name||'Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)',
+          official_url:meta.official_url||row.evidence_ref||'https://vanban.chinhphu.vn',
+          issued_date:meta.issued_date||row.effective_from||'2025-06-26',
+          effective_date:meta.effective_date||row.effective_from||'2026-01-01',
+          legal_status:meta.legal_status||(row.status==='active'?'Còn hiệu lực':'Chưa xác minh hiệu lực'),
+          sync_source_type:meta.sync_source_type||'auto_sync',
+          approval_state:meta.approval_state||(row.status==='active'?'approved_published':'draft_unverified'),
+          last_synced_at:meta.last_synced_at||row.updated_at,
+          status:row.status,
+          version_label:row.version_label,
+          updated_at:row.updated_at
+        };
+      }).filter(item=>{
+        if(q&&!(`${item.doc_number} ${item.title} ${item.summary} ${item.source_name}`).toLowerCase().includes(q.toLowerCase()))return false;
+        if(statusFilter&&item.legal_status!==statusFilter)return false;
+        if(sourceTypeFilter&&item.sync_source_type!==sourceTypeFilter)return false;
+        return true;
+      });
+      return json({
+        ok:true,
+        items,
+        sync_logs:(syncLogsRes.results||[]).map(l=>{
+          let p={};try{p=JSON.parse(l.payload_json||'{}')}catch{}
+          return {id:l.id,code:l.code,title:l.title,status:l.status,summary:l.summary,created_at:l.created_at,...p};
+        })
+      });
+    }
+    if(!(await isNetworkAdmin(env,s.account_id))&&!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN',message:'Cần quyền Quản trị Mạng lưới hoặc Quản trị Hệ thống để cập nhật văn bản pháp lý.'},403);
+    const b=await bodyJson(req);
+    const docNumber=clean(b.doc_number||b.code,80);
+    const title=clean(b.title,240);
+    const officialUrl=clean(b.official_url||b.evidence_ref,500);
+    if(!docNumber||!title||!officialUrl)return json({error:'LEGAL_DOC_FIELDS_REQUIRED',message:'Vui lòng nhập đầy đủ Số hiệu văn bản, Tiêu đề và Đường dẫn nguồn chính thức.'},400);
+    const normCode=('LAW-'+docNumber.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).toUpperCase().slice(0,80);
+    const existing=await env.DB.prepare("SELECT * FROM governance_registry WHERE domain_group='legal_obligation' AND (upper(code)=upper(?) OR evidence_ref=? OR payload_json LIKE ?) LIMIT 1").bind(normCode,officialUrl,`%"doc_number":"${docNumber}"%`).first();
+    const nowIso=new Date().toISOString();
+    const meta={
+      doc_number:docNumber,
+      source_name:clean(b.source_name,160)||'Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)',
+      official_url:officialUrl,
+      issued_date:clean(b.issued_date,20)||dateInVietnam(),
+      effective_date:clean(b.effective_date||b.effective_from,20)||dateInVietnam(),
+      legal_status:clean(b.legal_status,60)||'Còn hiệu lực',
+      sync_source_type:'manual_admin',
+      approval_state:b.approval_state==='draft_unverified'?'draft_unverified':'approved_published',
+      last_synced_at:nowIso,
+      updated_by_account_id:s.account_id
+    };
+    if(existing){
+      await env.DB.prepare("UPDATE governance_registry SET title=?,status=?,summary=?,evidence_ref=?,effective_from=?,payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(
+        title,meta.approval_state==='approved_published'?'active':'draft',clean(b.summary,2000)||existing.summary,officialUrl,meta.effective_date,JSON.stringify(meta),existing.id
+      ).run();
+      await audit(env,s.account_id,'legal_document_updated_deduplicated','legal_obligation',existing.id,null,{doc_number:docNumber,sync_source_type:'manual_admin'});
+      return json({ok:true,id:existing.id,code:existing.code,deduplicated_update:true,meta});
+    }
+    const id=uid('govlaw');
+    await env.DB.prepare("INSERT INTO governance_registry(id,domain_group,code,title,status,owner_account_id,version_label,summary,payload_json,evidence_ref,effective_from) VALUES(?,'legal_obligation',?,?,?,?,?,?,?,?,?)").bind(
+      id,normCode,title,meta.approval_state==='approved_published'?'active':'draft',s.account_id,clean(b.version_label,30)||'2026.1',clean(b.summary,2000)||title,JSON.stringify(meta),officialUrl,meta.effective_date
+    ).run();
+    await audit(env,s.account_id,'legal_document_created','legal_obligation',id,null,{doc_number:docNumber,sync_source_type:'manual_admin'});
+    return json({ok:true,id,code:normCode,deduplicated_update:false,meta},201);
+  }
+
+  const legalDocPatchMatch=url.pathname.match(/^\/api\/admin\/legal-documents\/([^/]+)$/);
+  if(legalDocPatchMatch&&req.method==='PATCH'){
+    if(!(await isNetworkAdmin(env,s.account_id))&&!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const lid=decodeURIComponent(legalDocPatchMatch[1]);
+    if(lid==='sync')return json({error:'METHOD_NOT_ALLOWED'},405);
+    const existing=await env.DB.prepare("SELECT * FROM governance_registry WHERE id=? AND domain_group='legal_obligation' LIMIT 1").bind(lid).first();
+    if(!existing)return json({error:'LEGAL_DOC_NOT_FOUND'},404);
+    const b=await bodyJson(req);
+    let prevMeta={};try{prevMeta=JSON.parse(existing.payload_json||'{}')}catch{}
+    const nextMeta={
+      ...prevMeta,
+      doc_number:b.doc_number!==undefined?clean(b.doc_number,80):(prevMeta.doc_number||existing.code),
+      source_name:b.source_name!==undefined?clean(b.source_name,160):(prevMeta.source_name||'Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)'),
+      official_url:b.official_url!==undefined?clean(b.official_url,500):(prevMeta.official_url||existing.evidence_ref),
+      issued_date:b.issued_date!==undefined?clean(b.issued_date,20):(prevMeta.issued_date||existing.effective_from),
+      effective_date:b.effective_date!==undefined?clean(b.effective_date,20):(prevMeta.effective_date||existing.effective_from),
+      legal_status:b.legal_status!==undefined?clean(b.legal_status,60):(prevMeta.legal_status||'Còn hiệu lực'),
+      sync_source_type:b.sync_source_type||prevMeta.sync_source_type||'manual_admin',
+      approval_state:b.approval_state||prevMeta.approval_state||'approved_published',
+      last_synced_at:new Date().toISOString(),
+      updated_by_account_id:s.account_id
+    };
+    const nextTitle=b.title!==undefined?clean(b.title,240):existing.title;
+    const nextSummary=b.summary!==undefined?clean(b.summary,2000):existing.summary;
+    const nextStatus=nextMeta.approval_state==='approved_published'?'active':'draft';
+    await env.DB.prepare("UPDATE governance_registry SET title=?,status=?,summary=?,evidence_ref=?,effective_from=?,payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(
+      nextTitle,nextStatus,nextSummary,nextMeta.official_url,nextMeta.effective_date,JSON.stringify(nextMeta),lid
+    ).run();
+    await audit(env,s.account_id,'legal_document_updated','legal_obligation',lid,null,{doc_number:nextMeta.doc_number,legal_status:nextMeta.legal_status,approval_state:nextMeta.approval_state});
+    return json({ok:true,id:lid,meta:nextMeta});
+  }
+
+  if(url.pathname==='/api/admin/legal-documents/sync'&&req.method==='POST'){
+    if(!(await isNetworkAdmin(env,s.account_id))&&!(await isSuper(env,s.account_id)))return json({error:'FORBIDDEN'},403);
+    await ensureGovernanceTables(env);
+    const b=await bodyJson(req);
+    const syncRes=await runSilentLegalCatalogSync(env,{actorAccountId:s.account_id,simulateUnreachable:b.simulate_unreachable===true});
+    return json(syncRes);
   }
 
   // Pre-Release Readiness Gate (Grounded in real structural, R2, Email, Legal, and Identity checks)
@@ -9127,18 +9587,183 @@ env.DB.prepare(`
   }
 }
 
+
+async function runSilentLegalCatalogSync(env, opts={}){
+  await ensureGovernanceTables(env);
+  const nowIso=new Date().toISOString();
+  const officialBaselineCatalog=[
+    {
+      id:'gov_law_91',
+      code:'LAW-91-2025-QH15',
+      doc_number:'91/2025/QH15',
+      title:'Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15',
+      source_name:'Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)',
+      official_url:'https://chinhphu.vn/?pageid=27160&docid=214590&classid=1&typegroupid=3',
+      issued_date:'2025-06-26',
+      effective_date:'2026-01-01',
+      legal_status:'Còn hiệu lực',
+      summary:'Quy định nguyên tắc xử lý dữ liệu cá nhân, sự đồng ý tách bạch theo mục đích, quyền chủ thể dữ liệu và bảo vệ dữ liệu người chưa thành niên.'
+    },
+    {
+      id:'gov_dec_356',
+      code:'DEC-356-2025-NDCP',
+      doc_number:'356/2025/NĐ-CP',
+      title:'Nghị định số 356/2025/NĐ-CP quy định chi tiết Luật Bảo vệ dữ liệu cá nhân',
+      source_name:'Hệ thống Văn bản Quy phạm Pháp luật Chính phủ (vanban.chinhphu.vn)',
+      official_url:'https://vanban.chinhphu.vn/?pageid=27160&docid=216387',
+      issued_date:'2025-12-31',
+      effective_date:'2026-01-01',
+      legal_status:'Còn hiệu lực',
+      summary:'Hướng dẫn chi tiết hồ sơ đánh giá tác động xử lý dữ liệu cá nhân, bằng chứng đồng ý, rút lại sự đồng ý và kiểm soát truy cập nội bộ.'
+    },
+    {
+      id:'gov_law_20_2023_et',
+      code:'LAW-20-2023-QH15',
+      doc_number:'20/2023/QH15',
+      title:'Luật Giao dịch điện tử số 20/2023/QH15',
+      source_name:'Cơ sở Dữ liệu Quốc gia về Văn bản Pháp luật (vbpl.vn)',
+      official_url:'https://vbpl.vn/tw/Pages/vbpq-toanvan.aspx?ItemID=161626',
+      issued_date:'2023-06-22',
+      effective_date:'2024-07-01',
+      legal_status:'Còn hiệu lực',
+      summary:'Quy định về thông điệp dữ liệu, chữ ký điện tử, xác nhận điện tử và giá trị pháp lý của giao dịch điện tử.'
+    }
+  ];
+
+  let remoteReachable=false;
+  let remoteError=null;
+  if(opts.simulateUnreachable){
+    remoteReachable=false;
+    remoteError='SIMULATED_SOURCE_UNREACHABLE';
+  }else{
+    try{
+      const ctrl=new AbortController();
+      const timer=setTimeout(()=>ctrl.abort(),2500);
+      const resp=await fetch('https://vanban.chinhphu.vn',{method:'HEAD',signal:ctrl.signal});
+      clearTimeout(timer);
+      remoteReachable=Boolean(resp&&resp.ok);
+      if(!remoteReachable)remoteError=`HTTP_${resp?.status||0}`;
+    }catch(e){
+      remoteReachable=false;
+      remoteError=clean(String(e?.message||e||'NETWORK_UNREACHABLE'),160);
+    }
+  }
+
+  let insertedCount=0;
+  let updatedCount=0;
+  let preservedCount=0;
+  for(const item of officialBaselineCatalog){
+    const existing=await env.DB.prepare(
+      "SELECT * FROM governance_registry WHERE domain_group='legal_obligation' AND (id=? OR code=? OR evidence_ref=?) LIMIT 1"
+    ).bind(item.id,item.code,item.official_url).first();
+    if(existing){
+      let prevMeta={};try{prevMeta=JSON.parse(existing.payload_json||'{}')}catch{}
+      // Never overwrite manual_admin changes or overwrite valid records when source is unreachable
+      if(prevMeta.sync_source_type==='manual_admin'||!remoteReachable){
+        if(!prevMeta.doc_number){
+          const filledMeta={
+            doc_number:item.doc_number,
+            source_name:item.source_name,
+            official_url:item.official_url,
+            issued_date:item.issued_date,
+            effective_date:item.effective_date,
+            legal_status:item.legal_status,
+            sync_source_type:'auto_sync',
+            approval_state:'approved_published',
+            last_synced_at:nowIso
+          };
+          await env.DB.prepare("UPDATE governance_registry SET payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(filledMeta),existing.id).run();
+          updatedCount++;
+        }else{
+          preservedCount++;
+        }
+      }else{
+        const syncedMeta={
+          ...prevMeta,
+          doc_number:item.doc_number,
+          source_name:item.source_name,
+          official_url:item.official_url,
+          issued_date:item.issued_date,
+          effective_date:item.effective_date,
+          legal_status:item.legal_status,
+          sync_source_type:'auto_sync',
+          approval_state:'approved_published',
+          last_synced_at:nowIso
+        };
+        await env.DB.prepare("UPDATE governance_registry SET payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(syncedMeta),existing.id).run();
+        updatedCount++;
+      }
+    }else{
+      const initMeta={
+        doc_number:item.doc_number,
+        source_name:item.source_name,
+        official_url:item.official_url,
+        issued_date:item.issued_date,
+        effective_date:item.effective_date,
+        legal_status:item.legal_status,
+        sync_source_type:'auto_sync',
+        approval_state:'approved_published',
+        last_synced_at:nowIso
+      };
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO governance_registry(id,domain_group,code,title,status,version_label,summary,payload_json,evidence_ref,effective_from) VALUES(?,'legal_obligation',?,?,'active','2026.01',?,?,?,?)"
+      ).bind(item.id,item.code,item.title,item.summary,JSON.stringify(initMeta),item.official_url,item.effective_date).run();
+      insertedCount++;
+    }
+  }
+
+  const syncStatus=remoteReachable?'synced_verified':'source_unreachable_preserved_existing';
+  const logId=uid('legsync');
+  const logCode=`LSYNC-${Date.now().toString().slice(-8)}`;
+  const summaryText=remoteReachable
+    ?`Đồng bộ nền danh mục văn bản pháp lý thành công (thêm mới: ${insertedCount}, cập nhật: ${updatedCount}, giữ nguyên: ${preservedCount}).`
+    :`Không truy cập trực tiếp được nguồn bên ngoài (${remoteError||'offline'}) — đã bảo toàn nguyên vẹn dữ liệu hiện có (${preservedCount} bản ghi), đối chiếu không trùng lặp (${insertedCount} khởi tạo, ${updatedCount} bổ sung siêu dữ liệu).`;
+  const logPayload={
+    sync_status:syncStatus,
+    remote_reachable:remoteReachable,
+    remote_error:remoteError,
+    inserted_count:insertedCount,
+    updated_count:updatedCount,
+    preserved_count:preservedCount,
+    user_notification_sent:false,
+    synced_at:nowIso
+  };
+  await env.DB.prepare(
+    "INSERT INTO governance_registry(id,domain_group,code,title,status,owner_account_id,version_label,summary,payload_json,effective_from) VALUES(?,'legal_sync_log',?,'Nhật ký đồng bộ nền Danh mục Văn bản Pháp lý',?,?,'1.0',?,?,?)"
+  ).bind(logId,logCode,syncStatus,opts.actorAccountId||null,summaryText,JSON.stringify(logPayload),dateInVietnam()).run();
+  if(opts.actorAccountId){
+    await audit(env,opts.actorAccountId,'legal_documents_background_synced','legal_sync_log',logId,null,logPayload);
+  }
+  return {
+    ok:true,
+    sync_log_id:logId,
+    sync_status:syncStatus,
+    remote_reachable:remoteReachable,
+    remote_error:remoteError,
+    inserted_count:insertedCount,
+    updated_count:updatedCount,
+    preserved_count:preservedCount,
+    user_notification_sent:false,
+    summary:summaryText,
+    synced_at:nowIso
+  };
+}
+
 // =========================================================
 // WORKER
 // =========================================================
 
 export default{
+  async scheduled(event,env,ctx){
+    try{await runSilentLegalCatalogSync(env,{actorAccountId:null});}catch(e){console.error('SCHEDULED_LEGAL_SYNC_ERR',e);}
+  },
   async fetch(request,env){
     const url=new URL(request.url);
 
     if(url.pathname.startsWith('/files/')){
       let key='';try{key=decodeURIComponent(url.pathname.slice(7))}catch{return withSecurityHeaders(new Response('Bad request',{status:400}))}
       if(!key||key.includes('..')||key.startsWith('/')||key.includes('\\')||key.startsWith('_system_health_probes/')) return withSecurityHeaders(new Response('Bad request',{status:400}));
-      const isPrivate=/^(members|documents|certificates|requests\/avatars|requests\/confirmations|submissions|chat|events\/private)\//.test(key);
+      const isPrivate=/^(members|documents|certificates|requests\/avatars|requests\/confirmations|submissions|chat|events\/private|announcements\/attachments)\//.test(key);
       if(isPrivate){
         const fs=await getSession(request,env);
         if(!fs)return withSecurityHeaders(new Response('Unauthorized',{status:401}));

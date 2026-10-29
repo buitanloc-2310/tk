@@ -134,7 +134,7 @@ const vietnamDateInput=()=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'A
 const RETIRED_OR_EXTERNAL_PORTAL_HOST_RE=/^(?:tnv|slc|mail|sfec)\.skyfirst\.io\.vn$/i;
 let PORTALS=[
   ['Trang Thông Tin Điện Tử Sky First','https://www.skyfirst.io.vn/','Thông tin chính thức của Sky First'],
-  ['Cổng Thông Tin Số Sky First','https://ctt.skyfirst.io.vn/','Thông tin, chương trình và tiện ích số']
+  ['Hệ thống Số Sky First','https://app.skyfirst.io.vn','Hệ thống số phục vụ các chức năng và tiện ích thuộc hệ sinh thái Sky First.']
 ];
 const safeImageUrl=(value,fallback='')=>{
   const raw=String(value||'').trim();
@@ -1459,7 +1459,7 @@ function navButton(id,label){
 
 const VIEW_META={
   home:['Tổng quan','Không gian điều hành hành trình thành viên'],profile:['Hồ sơ của tôi','Định danh và thông tin thành viên'],journey:['Hành trình của tôi','Các cột mốc và đóng góp'],goals:['Mục tiêu & Tiến độ','Theo dõi mục tiêu cá nhân'],tasks:['Công việc','Nhiệm vụ và tiến độ'],activities:['Hoạt động','Các hoạt động đã tham gia'],certificates:['Chứng nhận','Kho chứng nhận đã xác minh'],achievements:['Thành tích & Ghi nhận','Những dấu mốc nổi bật'],evaluations:['Đánh giá của tôi','Kết quả và lịch sử đánh giá'],history:['Quá trình công tác','Vai trò và đơn vị theo thời gian'],documents:['Tài liệu của tôi','Tài liệu cá nhân và minh chứng'],cards:['Thẻ của tôi','Thẻ thành viên và xác minh QR'],cv:['CV / Hồ sơ năng lực','Hồ sơ năng lực một trang A4'],notifications:['Thông báo','Thông tin mới và việc cần chú ý'],calendar:['Lịch của tôi','Lịch hoạt động và lịch cá nhân'],security:['Bảo mật & Phiên đăng nhập','Thiết bị và phiên truy cập'],support:['Tài khoản & Hỗ trợ','Cài đặt và trung tâm hỗ trợ'],
-  'admin-issuance':['Cấp phát & thẻ','QR xác minh, thẻ thành viên và lịch sử cấp phát'], 'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-work':['Trung tâm công việc','Việc đang chờ xử lý và cảnh báo'], 'admin-reports':['Báo cáo & thống kê','Số liệu vận hành từ dữ liệu thật'], 'admin-super':['Quản trị cấp cao','Quản lý quyền quản trị và kiểm soát hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Điều chỉnh nội dung và số liệu'], 'admin-system':['Cấu hình hệ thống','Bộ lọc, an toàn và tình trạng dịch vụ'], 'community':['Kênh Thông báo','Truyền đạt thông báo chính thức theo đơn vị và toàn hệ thống'], 'admin-forms':['Biểu mẫu & Hồ sơ đăng ký','Trình tạo biểu mẫu động, quản lý hồ sơ, tệp đính kèm, chữ ký và đồng ý dữ liệu'], 'admin-events':['Sự kiện & Điểm danh QR','Quản lý vòng đời sự kiện, quy trình duyệt 3 bước, hậu cần, ngân sách và phiên QR'], 'admin-accounts':['Loại tài khoản & Thời hạn','Quản trị gói thời hạn 24h, 48h, 12 tháng (01 năm) và tài khoản nhân sự']
+  'admin-issuance':['Cấp phát & thẻ','QR xác minh, thẻ thành viên và lịch sử cấp phát'], 'admin-requests':['Yêu cầu cấp tài khoản','Tiếp nhận và phê duyệt hồ sơ'], 'admin-calendar':['Lịch Sky First Network','Điều hành lịch hệ thống'], 'admin-members':['Thành viên','Quản trị hồ sơ và tài khoản'], 'admin-org':['Cơ cấu tổ chức','Đơn vị, vai trò và phạm vi'], 'admin-audit':['Nhật ký hệ thống','Theo dõi thao tác quản trị'], 'admin-work':['Trung tâm công việc','Việc đang chờ xử lý và cảnh báo'], 'admin-reports':['Báo cáo & thống kê','Số liệu vận hành từ dữ liệu thật'], 'admin-super':['Quản trị cấp cao','Quản lý quyền quản trị và kiểm soát hệ thống'], 'admin-studio':['Cấu hình giao diện & thống kê','Điều chỉnh nội dung và số liệu'], 'admin-system':['Cấu hình hệ thống','Bộ lọc, an toàn và tình trạng dịch vụ'], 'community':['Kênh Thông báo','Truyền đạt thông báo chính thức theo đơn vị và toàn hệ thống'], 'admin-announcements':['Quản trị Kênh Thông báo','Tạo, duyệt, xuất bản, lưu trữ, ghim và phân phối thông báo chính thức'], 'admin-forms':['Biểu mẫu & Hồ sơ đăng ký','Trình tạo biểu mẫu động, quản lý hồ sơ, tệp đính kèm, chữ ký và đồng ý dữ liệu'], 'admin-events':['Sự kiện & Điểm danh QR','Quản lý vòng đời sự kiện, quy trình duyệt 3 bước, hậu cần, ngân sách và phiên QR'], 'admin-accounts':['Loại tài khoản & Thời hạn','Quản trị gói thời hạn 24h, 48h, 12 tháng và tài khoản nhân sự']
 };
 function currentViewMeta(){return VIEW_META[state.view]||['Trung tâm Nghiệp vụ Số Sky First','Không gian quản trị Sky First'];}
 
@@ -1664,6 +1664,7 @@ function renderApp(){
                   ${(hasP('form.manage')||hasP('request.manage'))?navButton('admin-forms','Biểu mẫu & Hồ sơ đăng ký'):''}
                   ${(hasP('account.manage')||hasP('request.manage'))?navButton('admin-accounts','Loại tài khoản & Thời hạn'):''}
                   ${(hasP('event.propose')||hasP('event.appraise')||hasP('event.approve')||hasP('event.publish')||hasP('event.checkin')||hasP('activity.manage'))?navButton('admin-events','Sự kiện & Điểm danh QR'):''}
+                  ${(hasP('content.moderate')||hasP('member.view')||canAdmin())?navButton('admin-announcements','Kênh Thông báo'):''}
 
                   ${
                     hasP('calendar.manage')
@@ -2305,6 +2306,7 @@ async function renderView(){
     if(state.view==='admin-forms'){return renderAdminFormsAndSubmissions(c)}
     if(state.view==='admin-accounts'){return renderAdminAccountLifecycle(c)}
     if(state.view==='admin-events'){return renderAdminSkEvents(c)}
+    if(state.view==='admin-announcements'){return renderAdminAnnouncements(c)}
 
 
     c.innerHTML=`
@@ -9590,13 +9592,122 @@ async function renderAdminSystem(c){
         $('#dataConsistencyBox').innerHTML=`<div class="list-row"><span>Trạng thái toàn vẹn dữ liệu</span><b class="${dc.consistent?'status-ok':'status-bad'}">${dc.consistent?'ĐỒNG NHẤT (0 LỖI CẤU TRÚC)':'PHÁT HIỆN '+Number(dc.total_inconsistencies||0)+' BẤT THƯỜNG'}</b></div><div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Mã kiểm tra</th><th>Tên quy tắc đối soát</th><th>Số bản ghi lệch</th><th>Mẫu bản ghi phát hiện</th><th>Khuyến nghị xử lý</th></tr></thead><tbody>${(dc.checks||[]).map(c=>`<tr><td><code>${esc(c.code)}</code></td><td>${esc(c.title)}</td><td><b class="${c.count>0?'status-bad':'status-ok'}">${c.count}</b></td><td>${(c.samples&&c.samples.length)?c.samples.slice(0,3).map(s=>`<code>${esc(s.code||s.id||'')}</code>`).join(', '):'—'}</td><td>${esc(c.remediation||'')}</td></tr>`).join('')}</tbody></table></div>`;
       }
 
-      const legals=(reg.items||[]).filter(x=>['legal_obligation','service_catalog'].includes(x.domain_group));
+      const legalData=await api('/api/admin/legal-documents').catch(()=>({items:[],sync_logs:[]}));
+      const legalItems=legalData.items||[];
+      const syncLogs=(legalData.sync_logs||[]).slice(0,5);
+      const services=(reg.items||[]).filter(x=>x.domain_group==='service_catalog');
       const lrHtml=legalRev?`<div class="stack-list" style="margin-bottom:12px">
         <div class="list-row"><span>1. Kiểm soát kỹ thuật trong mã nguồn (Tách 3 ô đồng ý · Bảo vệ người &lt;18 tuổi · Ẩn/xóa CCCD giám hộ · Rút đồng ý)</span><b class="${legalRev.technical_controls_status==='passed'?'status-ok':'status-bad'}">${esc(legalRev.technical_controls_status)}</b></div>
         <div class="list-row"><span>2. Văn bản pháp lý &amp; Chính sách dữ liệu phiên bản hóa trong DB</span><b class="${legalRev.legal_documents_seeded?'status-ok':'status-bad'}">${legalRev.legal_documents_seeded?'passed':'failed'}</b></div>
         <div class="list-row"><span>3. Thẩm định &amp; Ký duyệt pháp lý chuyên môn trước vận hành chính thức</span><b class="${legalRev.legal_signoff_status==='approved'?'status-ok':'status-bad'}">${esc(legalRev.legal_signoff_status)}</b></div>
       </div>`:'';
-      $('#legalAndServiceBox').innerHTML=`${lrHtml}<div class="table-wrap"><table><thead><tr><th>Nhóm</th><th>Mã</th><th>Tên mục / Văn bản</th><th>Trạng thái</th><th>Chi tiết &amp; Nguồn</th></tr></thead><tbody>${legals.map(x=>`<tr><td><span class="badge">${esc(x.domain_group)}</span></td><td><b>${esc(x.code)}</b></td><td>${esc(x.title)}</td><td>${esc(x.status)}</td><td>${esc(x.summary||'')}<div class="meta">${esc(x.evidence_ref||'')}</div></td></tr>`).join('')}</tbody></table></div>`;
+      $('#legalAndServiceBox').innerHTML=`
+        ${lrHtml}
+        <div class="toolbar" style="justify-content:space-between;margin:12px 0">
+          <div><b>Danh mục Văn bản Pháp lý (${legalItems.length})</b> <span class="meta">· Nguồn chuẩn: Cổng Thông tin Điện tử Chính phủ (chinhphu.vn / vanban.chinhphu.vn / vbpl.vn)</span></div>
+          <div class="toolbar" style="margin:0">
+            <button type="button" class="secondary" id="runSilentLegalSyncBtn">🔄 Đồng bộ nền từ Nguồn Chính phủ</button>
+            <button type="button" class="primary" id="addLegalDocBtn">+ Thêm / Cập nhật văn bản pháp lý</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Số hiệu</th><th>Tiêu đề &amp; Nội dung chính</th><th>Nguồn chính thức &amp; URL</th><th>Ngày ban hành / Hiệu lực</th><th>Trạng thái hiệu lực</th><th>Phân loại nguồn &amp; Đồng bộ</th><th>Thao tác</th></tr></thead>
+            <tbody>
+              ${legalItems.map(x=>`<tr>
+                <td><b><code>${esc(x.doc_number||x.code)}</code></b></td>
+                <td><b>${esc(x.title)}</b><div class="meta">${esc(x.summary||'')}</div></td>
+                <td><div>${esc(x.source_name)}</div><div class="meta"><a href="${esc(x.official_url)}" target="_blank" rel="noopener noreferrer">${esc(x.official_url)}</a></div></td>
+                <td>Ban hành: <b>${esc(x.issued_date||'—')}</b><br>Hiệu lực: <b>${esc(x.effective_date||'—')}</b></td>
+                <td><span class="badge ${x.legal_status==='Còn hiệu lực'?'ok':'warn'}">${esc(x.legal_status)}</span><div class="meta">${x.approval_state==='approved_published'?'Đã xác minh':'Bản nháp chờ xác minh'}</div></td>
+                <td><span class="badge">${x.sync_source_type==='manual_admin'?'Quản trị cập nhật':'Tự động đồng bộ'}</span><div class="meta">Đồng bộ: ${esc(x.last_synced_at||'—')}</div></td>
+                <td><button type="button" class="secondary" data-edit-legal="${esc(x.id)}">Sửa</button></td>
+              </tr>`).join('')||'<tr><td colspan="7" class="empty">Chưa có văn bản pháp lý nào.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        ${syncLogs.length?`<div style="margin-top:12px"><b style="font-size:13px">Nhật ký đồng bộ nền gần đây (Chạy ngầm · Không gửi thông báo làm phiền người dùng):</b><div class="list" style="margin-top:6px">${syncLogs.map(l=>`<div class="list-item"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${esc(l.code)} · <span class="badge ${l.status==='synced_verified'?'ok':'warn'}">${esc(l.status)}</span></b><span class="meta">${esc(l.synced_at||l.created_at)}</span></div><div class="meta">${esc(l.summary)}</div></div>`).join('')}</div></div>`:''}
+        <h3 style="margin:16px 0 8px">Danh mục Nền tảng &amp; Dịch vụ Hệ sinh thái Sky First</h3>
+        <div class="table-wrap"><table><thead><tr><th>Mã dịch vụ</th><th>Tên nền tảng thương hiệu</th><th>Địa chỉ Website</th><th>Mô tả chức năng</th></tr></thead><tbody>${services.map(s=>`<tr><td><code>${esc(s.code)}</code></td><td><b>${esc(s.title)}</b></td><td><a href="${esc(s.evidence_ref)}" target="_blank" rel="noopener noreferrer"><code>${esc(s.evidence_ref)}</code></a></td><td>${esc(s.summary||'')}</td></tr>`).join('')}</tbody></table></div>
+      `;
+      if($('#runSilentLegalSyncBtn'))$('#runSilentLegalSyncBtn').onclick=async()=>{
+        $('#runSilentLegalSyncBtn').disabled=true;
+        try{
+          const sr=await api('/api/admin/legal-documents/sync',{method:'POST',body:'{}'});
+          toast(sr.summary||'Đã chạy kiểm tra và đồng bộ nền danh mục văn bản pháp lý.');
+          await refresh();
+        }catch(e){sfAlert(e.data?.message||e.message)}
+        finally{if($('#runSilentLegalSyncBtn'))$('#runSilentLegalSyncBtn').disabled=false}
+      };
+      if($('#addLegalDocBtn'))$('#addLegalDocBtn').onclick=()=>{
+        modal('Thêm / Cập nhật Văn bản Pháp lý Chính thức',`
+          <form id="legalDocModalForm" class="form-grid two">
+            <label>Số hiệu văn bản *<input name="doc_number" required placeholder="Ví dụ: 91/2025/QH15"></label>
+            <label>Trạng thái hiệu lực *
+              <select name="legal_status">
+                <option value="Còn hiệu lực">Còn hiệu lực</option>
+                <option value="Sửa đổi, bổ sung">Sửa đổi, bổ sung</option>
+                <option value="Thay thế">Thay thế</option>
+                <option value="Chưa xác minh hiệu lực">Chưa xác minh hiệu lực</option>
+              </select>
+            </label>
+            <label style="grid-column:1/-1">Tiêu đề văn bản *<input name="title" required placeholder="Luật / Nghị định / Thông tư..."></label>
+            <label>Nguồn chính thức *<input name="source_name" required value="Cổng Thông tin Điện tử Chính phủ (chinhphu.vn)"></label>
+            <label>URL văn bản gốc *<input name="official_url" required placeholder="https://vanban.chinhphu.vn/..."></label>
+            <label>Ngày ban hành<input type="date" name="issued_date" value="2025-06-26"></label>
+            <label>Ngày có hiệu lực<input type="date" name="effective_date" value="2026-01-01"></label>
+            <label style="grid-column:1/-1">Trạng thái phê duyệt hiển thị
+              <select name="approval_state">
+                <option value="approved_published">Đã xác minh — Cho phép áp dụng chính thức</option>
+                <option value="draft_unverified">Bản nháp chờ kiểm tra</option>
+              </select>
+            </label>
+            <label style="grid-column:1/-1">Tóm tắt nội dung áp dụng<textarea name="summary" rows="3"></textarea></label>
+            <div style="grid-column:1/-1"><button class="primary" style="width:100%">Lưu văn bản pháp lý</button></div>
+          </form>
+        `);
+        $('#legalDocModalForm').onsubmit=async ev=>{
+          ev.preventDefault();
+          try{
+            await api('/api/admin/legal-documents',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(ev.target)))});
+            $('#modal')?.remove();toast('Đã lưu văn bản pháp lý.');await refresh();
+          }catch(e){sfAlert(e.data?.message||e.message)}
+        };
+      };
+      $$('[data-edit-legal]').forEach(btn=>btn.onclick=()=>{
+        const doc=legalItems.find(x=>x.id===btn.dataset.editLegal);
+        if(!doc)return;
+        modal(`Cập nhật Văn bản Pháp lý · ${esc(doc.doc_number)}`,`
+          <form id="editLegalDocForm" class="form-grid two">
+            <label>Số hiệu văn bản *<input name="doc_number" required value="${esc(doc.doc_number)}"></label>
+            <label>Trạng thái hiệu lực *
+              <select name="legal_status">
+                ${['Còn hiệu lực','Sửa đổi, bổ sung','Thay thế','Hết hiệu lực','Chưa xác minh hiệu lực'].map(st=>`<option value="${esc(st)}" ${doc.legal_status===st?'selected':''}>${esc(st)}</option>`).join('')}
+              </select>
+            </label>
+            <label style="grid-column:1/-1">Tiêu đề văn bản *<input name="title" required value="${esc(doc.title)}"></label>
+            <label>Nguồn chính thức *<input name="source_name" required value="${esc(doc.source_name)}"></label>
+            <label>URL văn bản gốc *<input name="official_url" required value="${esc(doc.official_url)}"></label>
+            <label>Ngày ban hành<input type="date" name="issued_date" value="${esc(doc.issued_date||'')}"></label>
+            <label>Ngày có hiệu lực<input type="date" name="effective_date" value="${esc(doc.effective_date||'')}"></label>
+            <label style="grid-column:1/-1">Trạng thái phê duyệt hiển thị
+              <select name="approval_state">
+                <option value="approved_published" ${doc.approval_state==='approved_published'?'selected':''}>Đã xác minh — Cho phép áp dụng chính thức</option>
+                <option value="draft_unverified" ${doc.approval_state==='draft_unverified'?'selected':''}>Bản nháp chờ kiểm tra</option>
+              </select>
+            </label>
+            <label style="grid-column:1/-1">Tóm tắt nội dung<textarea name="summary" rows="3">${esc(doc.summary||'')}</textarea></label>
+            <div style="grid-column:1/-1"><button class="primary" style="width:100%">Cập nhật văn bản pháp lý</button></div>
+          </form>
+        `);
+        $('#editLegalDocForm').onsubmit=async ev=>{
+          ev.preventDefault();
+          try{
+            await api('/api/admin/legal-documents/'+encodeURIComponent(doc.id),{method:'PATCH',body:JSON.stringify({...Object.fromEntries(new FormData(ev.target)),sync_source_type:'manual_admin'})});
+            $('#modal')?.remove();toast('Đã cập nhật văn bản pháp lý.');await refresh();
+          }catch(e){sfAlert(e.data?.message||e.message)}
+        };
+      });
     }catch{}
   };
 
@@ -9859,7 +9970,9 @@ async function renderPublicQrCheckinPage(slug){
     const d=await api(infoUrl);
     const ev=d.event||{};
     const tokState=d.token_state;
-    const effectiveQrToken=(Boolean(effectiveQrToken))?scannedToken:(d.active_qr_token||'');
+    const hasValidScannedToken=Boolean(scannedToken&&(!tokState||tokState.valid));
+    const effectiveQrToken=hasValidScannedToken?scannedToken:(d.active_qr_token||'');
+    const qrImgSrc=d.qr_image_url||(`/api/public/q-r/${encodeURIComponent(ev.slug||cleanSlug)}/qr-image`+(effectiveQrToken?`?t=${encodeURIComponent(effectiveQrToken)}`:''));
     const idemKey='chk_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
 
     panel.innerHTML=`
@@ -9867,10 +9980,11 @@ async function renderPublicQrCheckinPage(slug){
       <h1 style="margin:6px 0 8px">${esc(ev.name)}</h1>
       <p class="muted" style="margin:0 0 16px">${esc(ev.purpose||'Xác nhận tham dự hoạt động chính thức của Mạng lưới Giáo dục và Phát triển Cộng đồng Sky First.')}</p>
 
-      <div class="request-note" style="margin-bottom:18px">
-        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px">
-          <div><b>Mã hoạt động:</b> <code>${esc(ev.event_code)}</code><br><b>Đường dẫn QR:</b> <code>/q-r/${esc(ev.slug)}</code></div>
-          <div><b>Thời gian:</b> ${esc(ev.starts_at||'—')} → ${esc(ev.ends_at||'—')}<br><b>Địa điểm:</b> ${esc(ev.location_or_platform||'—')}</div>
+      <div class="request-note" style="margin-bottom:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <img src="${esc(qrImgSrc)}" alt="Mã QR Điểm danh ${esc(ev.name)}" width="112" height="112" style="border:1px solid #dbe7f3;border-radius:12px;background:#fff;padding:4px;flex:0 0 112px;object-fit:contain">
+        <div class="grid" style="flex:1;min-width:240px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+          <div><b>Mã hoạt động:</b> <code>${esc(ev.event_code)}</code><br><b>Đường dẫn QR:</b> <code>/q-r/${esc(ev.slug)}</code><br><b>Cổng điểm danh:</b> <span class="badge ${d.checkin_open?'ok':'warn'}">${d.checkin_open?'Đang mở điểm danh':'Chưa mở phiên'}</span></div>
+          <div><b>Thời gian:</b> ${esc(ev.starts_at||'—')} → ${esc(ev.ends_at||'—')}<br><b>Địa điểm:</b> ${esc(ev.location_or_platform||'—')}${d.active_manual_code?`<br><b>Mã điểm danh:</b> <code>${esc(d.active_manual_code)}</code>`:''}</div>
           <div><b>Đơn vị tổ chức:</b> ${esc(ev.host_org_name||'Sky First Network')}<br><b>Người phụ trách điểm danh:</b> <b>${esc(ev.attendance_manager_name||ev.lead_person_name||'Ban Tổ chức')}</b></div>
         </div>
       </div>
@@ -10347,7 +10461,7 @@ async function renderAdminAccountLifecycle(c){
       <div>
         <div class="eyebrow">QUẢN TRỊ ĐỊNH DANH &amp; THỜI HẠN</div>
         <h1>Loại tài khoản &amp; Thời hạn sử dụng</h1>
-        <p class="muted">Quản lý gói thời hạn 24 giờ, 48 giờ, 12 tháng (01 năm) và tài khoản nhân sự; theo dõi thời gian còn lại, gia hạn, khóa/thu hồi và kiểm soát tách biệt với vai trò phân quyền.</p>
+        <p class="muted">Quản lý gói thời hạn 24 giờ, 48 giờ, 12 tháng và tài khoản nhân sự; theo dõi thời gian còn lại, gia hạn, khóa/thu hồi và kiểm soát tách biệt với vai trò phân quyền.</p>
       </div>
       <div class="toolbar">
         <button class="primary" id="newAdminLifecycleAccBtn">Cấp tài khoản theo thời hạn</button>
@@ -10378,7 +10492,7 @@ async function renderAdminAccountLifecycle(c){
           <option value="">Tất cả loại thời hạn</option>
           <option value="trial_24h" ${filters.account_type_code==='trial_24h'?'selected':''}>Tài khoản 24 giờ</option>
           <option value="trial_48h" ${filters.account_type_code==='trial_48h'?'selected':''}>Tài khoản 48 giờ</option>
-          <option value="annual_12m_1y" ${filters.account_type_code==='annual_12m_1y'?'selected':''}>Tài khoản 12 tháng (01 năm)</option>
+          <option value="annual_12m_1y" ${filters.account_type_code==='annual_12m_1y'?'selected':''}>12 tháng</option>
           <option value="staff_custom" ${filters.account_type_code==='staff_custom'?'selected':''}>Tài khoản nhân sự (Tùy chỉnh)</option>
         </select>
         <select id="alcStatus">
@@ -10433,7 +10547,7 @@ async function renderAdminAccountLifecycle(c){
           <label>Loại tài khoản<select name="account_type_code">
             <option value="trial_24h" ${lc.account_type_code==='trial_24h'?'selected':''}>Tài khoản 24 giờ</option>
             <option value="trial_48h" ${lc.account_type_code==='trial_48h'?'selected':''}>Tài khoản 48 giờ</option>
-            <option value="annual_12m_1y" ${(lc.account_type_code||'annual_12m_1y')==='annual_12m_1y'?'selected':''}>Tài khoản 12 tháng (01 năm)</option>
+            <option value="annual_12m_1y" ${(lc.account_type_code||'annual_12m_1y')==='annual_12m_1y'?'selected':''}>12 tháng</option>
             <option value="staff_custom" ${lc.account_type_code==='staff_custom'?'selected':''}>Tài khoản nhân sự (Tùy chỉnh)</option>
           </select></label>
           <label style="grid-column:1/-1">Mốc hết hạn cụ thể (YYYY-MM-DD HH:MM:SS, để trống nếu tính tự động theo gói)<input name="custom_expires_at" value="${esc(lc.expires_at||'')}"></label>
@@ -10465,7 +10579,7 @@ async function renderAdminAccountLifecycle(c){
         <label>Loại tài khoản (Thời hạn) *<select name="account_type_code">
           <option value="trial_24h">Tài khoản 24 giờ</option>
           <option value="trial_48h">Tài khoản 48 giờ</option>
-          <option value="annual_12m_1y" selected>Tài khoản 12 tháng (01 năm)</option>
+          <option value="annual_12m_1y" selected>12 tháng</option>
           <option value="staff_custom">Tài khoản nhân sự (Thiết lập hạn riêng)</option>
         </select></label>
         <label>Mốc hết hạn (nếu là Tài khoản nhân sự)<input name="custom_expires_at" placeholder="2027-12-31 23:59:59"></label>
@@ -10816,6 +10930,8 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
       <button type="button" class="primary" data-sk-wf="approve">3. Phê duyệt chính thức</button>
       <button type="button" class="primary" data-sk-wf="publish">4. Công bố hoạt động</button>
       <button type="button" class="primary" data-sk-wf="open_registration">5. Mở đăng ký</button>
+      <button type="button" class="primary" data-sk-wf="open_checkin">🔓 Mở cổng điểm danh QR</button>
+      <button type="button" class="secondary" data-sk-wf="close_checkin">🔒 Đóng cổng điểm danh</button>
       <button type="button" class="secondary" data-sk-wf="close_registration">Đóng đăng ký</button>
       <button type="button" class="secondary" data-sk-wf="complete">Hoàn thành</button>
       <button type="button" class="secondary" data-sk-wf="submit_summary">Nộp tổng kết</button>
@@ -10827,13 +10943,22 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
 
     <div class="section-grid">
       <div class="card">
-        <h3>Cấu hình Đường dẫn QR (/q-r/tenhd) &amp; Người phụ trách điểm danh</h3>
+        <h3>Cấu hình Đường dẫn QR (/q-r/tenhd), Cổng Điểm danh &amp; Người phụ trách</h3>
         <form id="skUpdateManagerForm" class="form-grid two" style="margin-top:10px">
           <label>Mã định danh đường dẫn (tenhd) *<input name="slug" required value="${esc(slug)}"></label>
+          <label>Trạng thái cổng điểm danh *
+            <select name="checkin_gate_state">
+              <option value="auto" ${(ev.checkin_gate_state||'auto')==='auto'?'selected':''}>Tự động theo trạng thái hoạt động</option>
+              <option value="open" ${ev.checkin_gate_state==='open'?'selected':''}>Đang mở cổng điểm danh (Ưu tiên mở)</option>
+              <option value="closed" ${ev.checkin_gate_state==='closed'?'selected':''}>Đã đóng cổng điểm danh</option>
+            </select>
+          </label>
+          <label>Thời gian mở cổng điểm danh<input name="checkin_opens_at" placeholder="YYYY-MM-DD HH:MM:SS" value="${esc(ev.checkin_opens_at||ev.starts_at||'')}"></label>
+          <label>Thời gian đóng cổng điểm danh<input name="checkin_closes_at" placeholder="YYYY-MM-DD HH:MM:SS" value="${esc(ev.checkin_closes_at||ev.ends_at||'')}"></label>
           <label>Người phụ trách điểm danh *<input name="attendance_manager_name" required value="${esc(ev.attendance_manager_name||ev.lead_person_name||'')}"></label>
           <label>Email người phụ trách<input type="email" name="attendance_manager_email" value="${esc(ev.attendance_manager_email||ev.contact_email||'')}"></label>
-          <label>SĐT người phụ trách<input name="attendance_manager_phone" value="${esc(ev.attendance_manager_phone||'')}"></label>
-          <div style="grid-column:1/-1"><button class="secondary" style="width:100%">Lưu cấu hình Đường dẫn QR &amp; Người phụ trách</button></div>
+          <label style="grid-column:1/-1">SĐT người phụ trách<input name="attendance_manager_phone" value="${esc(ev.attendance_manager_phone||'')}"></label>
+          <div style="grid-column:1/-1"><button class="secondary" style="width:100%">Lưu cấu hình Đường dẫn QR, Cổng Điểm danh &amp; Người phụ trách</button></div>
         </form>
       </div>
 
@@ -10842,6 +10967,8 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
         <form id="skAddQrForm" class="form-grid two" style="margin-top:10px">
           <label>Tên phiên điểm danh *<input name="session_name" required value="Phiên điểm danh chính thức"></label>
           <label>Mã thủ công (tùy chọn)<input name="manual_code" placeholder="Để trống tự sinh mã SKM-..."></label>
+          <label>Thời gian mở phiên<input name="starts_at" value="${esc(ev.checkin_opens_at||ev.starts_at||'2025-01-01 00:00:00')}"></label>
+          <label>Thời gian đóng phiên<input name="ends_at" value="${esc(ev.checkin_closes_at||ev.ends_at||'2030-12-31 23:59:59')}"></label>
           <input type="hidden" name="attendance_manager_name" value="${esc(ev.attendance_manager_name||ev.lead_person_name||'')}">
           <div style="grid-column:1/-1"><button class="primary" style="width:100%">Phát hành Phiên QR &amp; Mã Thủ công</button></div>
         </form>
@@ -10872,7 +10999,16 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
           <h3>Danh sách Người tham dự &amp; Minh chứng Điểm danh (${attList.length})</h3>
           <div class="meta">Phân biệt rõ Người tham dự với Người phụ trách điểm danh (${esc(ev.attendance_manager_name||ev.lead_person_name||'Ban Tổ chức')}). Chỉ Quản trị viên có thẩm quyền mới xem được thông tin cá nhân và ảnh minh chứng.</div>
         </div>
-        <input id="skAttSearchInput" placeholder="Tìm họ tên, SĐT, email, phương thức..." style="max-width:280px">
+        <div class="toolbar" style="margin:0">
+          <select id="skAttStatusFilter" style="width:auto;min-width:170px">
+            <option value="">Tất cả trạng thái xử lý</option>
+            <option value="checked_in">Hợp lệ (Đã điểm danh)</option>
+            <option value="manual_present">Có mặt (Xác nhận)</option>
+            <option value="late">Điểm danh muộn</option>
+            <option value="invalidated">Không hợp lệ / Hủy</option>
+          </select>
+          <input id="skAttSearchInput" placeholder="Tìm họ tên, SĐT, email, phương thức..." style="max-width:260px">
+        </div>
       </div>
       <div class="table-wrap" style="max-height:300px;overflow:auto">
         <table>
@@ -10963,6 +11099,318 @@ async function openSkEventWorkspaceModal(eventId,onRefresh){
 /* =========================================================
    KÊNH THÔNG BÁO CHÍNH THỨC (MỘT CHIỀU — KHÔNG TRÒ CHUYỆN CÁ NHÂN / NHÓM)
    ========================================================= */
+async function renderAdminAnnouncements(c){
+  c.innerHTML=`
+    <div class="section-title">
+      <div>
+        <div class="eyebrow">QUẢN TRỊ TRUYỀN THÔNG &amp; THÔNG BÁO NỘI BỘ MỘT CHIỀU</div>
+        <h1>Quản trị Kênh Thông báo</h1>
+        <p class="muted">Tạo, xem trước, xuất bản, gỡ xuất bản, lưu trữ, ghim thông báo quan trọng, đính kèm tệp và phân phối tới toàn bộ thành viên hoặc theo đơn vị.</p>
+      </div>
+      <div class="toolbar">
+        <button type="button" class="secondary" id="adminOpenMemberChannelBtn">Xem giao diện Thành viên</button>
+        <button type="button" class="primary" id="adminNewAnnouncementBtn">+ Tạo thông báo mới</button>
+      </div>
+    </div>
+    <div class="grid" id="annAdminKpiGrid" style="margin-bottom:14px"></div>
+    <div class="card">
+      <div class="toolbar" style="justify-content:space-between">
+        <div class="toolbar" style="margin:0;flex:1">
+          <input id="annAdminQ" placeholder="Tìm theo tiêu đề, nội dung, người tạo..." style="max-width:260px">
+          <select id="annAdminStatus" style="width:auto">
+            <option value="">Tất cả trạng thái</option>
+            <option value="published">Đã xuất bản</option>
+            <option value="draft">Bản nháp</option>
+            <option value="archived">Đã lưu trữ</option>
+          </select>
+          <select id="annAdminCategory" style="width:auto">
+            <option value="">Tất cả phân loại</option>
+            <option value="Điều hành chung">Điều hành chung</option>
+            <option value="Sự kiện & Hoạt động">Sự kiện &amp; Hoạt động</option>
+            <option value="Nhân sự & Tổ chức">Nhân sự &amp; Tổ chức</option>
+            <option value="Chính sách & Quy định">Chính sách &amp; Quy định</option>
+            <option value="Khẩn cấp">Khẩn cấp</option>
+          </select>
+          <select id="annAdminPriority" style="width:auto">
+            <option value="">Mọi mức ưu tiên</option>
+            <option value="urgent">Khẩn cấp</option>
+            <option value="important">Quan trọng</option>
+            <option value="normal">Thông thường</option>
+          </select>
+          <button type="button" class="secondary" id="annAdminFilterBtn">Lọc</button>
+        </div>
+        <div class="toolbar" style="margin:0" id="annAdminPager"></div>
+      </div>
+      <div id="annAdminTableHost">Đang tải danh sách thông báo...</div>
+    </div>
+  `;
+
+  let curPage=1;
+  let orgNodes=[];
+  try{
+    const metaRes=await api('/api/admin/meta').catch(()=>({orgs:[]}));
+    orgNodes=metaRes.orgs||[];
+  }catch{}
+
+  const prioBadge=p=>p==='urgent'?'<span class="badge off" style="background:#fee2e2;color:#991b1b">🔥 Khẩn cấp</span>':p==='important'?'<span class="badge warn">⚡ Quan trọng</span>':'<span class="badge">Thông thường</span>';
+  const statusBadge=s=>s==='published'?'<span class="badge ok">Đã xuất bản</span>':s==='draft'||s==='pending_approval'?'<span class="badge warn">Bản nháp</span>':'<span class="badge off">Đã lưu trữ</span>';
+
+  const openEditorModal=(existing=null)=>{
+    const isEdit=Boolean(existing);
+    let uploadedUrl=existing?.media_url||'';
+    let uploadedName=existing?.attachment_name||'';
+    let uploadedSize=existing?.attachment_size||'';
+    modal(isEdit?`Chỉnh sửa Thông báo · ${esc(existing.title)}`:'Tạo & Xuất bản Thông báo Chính thức',`
+      <form id="annEditorForm" class="form-grid two">
+        <label style="grid-column:1/-1">Tiêu đề thông báo *<input name="title" required maxlength="240" value="${esc(existing?.title||'')}" placeholder="Nhập tiêu đề thông báo chính thức..."></label>
+        <label>Phân loại thông báo *
+          <select name="category">
+            ${['Điều hành chung','Sự kiện & Hoạt động','Nhân sự & Tổ chức','Chính sách & Quy định','Khẩn cấp'].map(c=>`<option value="${esc(c)}" ${(existing?.category||'Điều hành chung')===c?'selected':''}>${esc(c)}</option>`).join('')}
+          </select>
+        </label>
+        <label>Mức độ ưu tiên *
+          <select name="priority">
+            <option value="normal" ${(existing?.priority||'normal')==='normal'?'selected':''}>Thông thường</option>
+            <option value="important" ${existing?.priority==='important'?'selected':''}>Quan trọng</option>
+            <option value="urgent" ${existing?.priority==='urgent'?'selected':''}>Khẩn cấp</option>
+          </select>
+        </label>
+        <label>Đối tượng nhận *
+          <select name="target_scope" id="annTargetScopeSelect">
+            <option value="all_members" ${(existing?.target_scope||'all_members')==='all_members'?'selected':''}>Toàn bộ thành viên</option>
+            <option value="unit" ${existing?.target_scope==='unit'?'selected':''}>Theo đơn vị trực thuộc cụ thể</option>
+          </select>
+        </label>
+        <label id="annOrgNodeWrap" style="display:${existing?.target_scope==='unit'?'grid':'none'}">Đơn vị nhận thông báo
+          <select name="org_node_id">
+            <option value="">-- Chọn đơn vị --</option>
+            ${orgNodes.map(o=>`<option value="${esc(o.id)}" ${existing?.org_node_id===o.id?'selected':''}>${esc(o.name)}</option>`).join('')}
+          </select>
+        </label>
+        <label>Trạng thái ban hành *
+          <select name="status">
+            <option value="published" ${(existing?.moderation_status||'published')==='published'?'selected':''}>Đã xuất bản (Hiển thị ngay cho thành viên)</option>
+            <option value="draft" ${existing?.moderation_status==='draft'?'selected':''}>Bản nháp (Lưu nội bộ, chưa hiển thị)</option>
+            ${isEdit?`<option value="archived" ${existing?.moderation_status==='archived'?'selected':''}>Đã lưu trữ</option>`:''}
+          </select>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding-top:24px">
+          <input type="checkbox" name="is_pinned" value="1" ${existing?.is_pinned?'checked':''} style="width:auto"> Ghim thông báo lên đầu Kênh Thông báo
+        </label>
+        <label style="grid-column:1/-1">Nội dung thông báo *<textarea name="body" rows="6" required placeholder="Nhập nội dung chi tiết của thông báo...">${esc(existing?.body||'')}</textarea></label>
+        <div class="card" style="grid-column:1/-1;padding:12px;background:#f8fbff">
+          <div style="font-weight:800;font-size:13px;margin-bottom:6px">Tệp đính kèm thông báo (PDF, PNG, JPG, WEBP · tối đa 5MB)</div>
+          <div class="toolbar" style="margin:0">
+            <input type="file" id="annAttachFileInput" accept=".pdf,application/pdf,image/png,image/jpeg,image/webp" style="flex:1">
+            <button type="button" class="secondary" id="annAttachUploadBtn">Tải tệp đính kèm</button>
+          </div>
+          <div id="annAttachStatus" class="meta" style="margin-top:6px">${uploadedUrl?`Đang đính kèm: <b>${esc(uploadedName||uploadedUrl)}</b>`:'Chưa có tệp đính kèm.'}</div>
+        </div>
+        <div id="annLivePreviewBox" class="card" style="grid-column:1/-1;display:none;background:#f0f7ff;border-color:#93c5fd"></div>
+        <div class="toolbar" style="grid-column:1/-1;justify-content:flex-end;margin:0">
+          <button type="button" class="secondary" id="annPreviewToggleBtn">👁 Xem trước thông báo</button>
+          <button type="submit" class="primary">${isEdit?'Lưu cập nhật':'Lưu & Ban hành thông báo'}</button>
+        </div>
+      </form>
+    `);
+
+    const scopeSel=$('#annTargetScopeSelect');
+    if(scopeSel)scopeSel.onchange=()=>{$('#annOrgNodeWrap').style.display=scopeSel.value==='unit'?'grid':'none'};
+
+    $('#annAttachUploadBtn').onclick=async()=>{
+      const f=$('#annAttachFileInput')?.files?.[0];
+      if(!f){sfAlert('Vui lòng chọn tệp PDF, PNG, JPG hoặc WEBP cần đính kèm.');return;}
+      if(f.size>5*1024*1024){sfAlert('Tệp đính kèm vượt quá 5MB.');return;}
+      $('#annAttachUploadBtn').disabled=true;
+      $('#annAttachStatus').textContent='Đang tải tệp đính kèm lên hệ thống...';
+      try{
+        const buf=await f.arrayBuffer();
+        const r=await fetch('/api/admin/announcements/upload',{
+          method:'POST',
+          headers:{'content-type':f.type||'application/pdf','x-file-name':encodeURIComponent(f.name)},
+          body:buf
+        });
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok)throw new Error(d.message||d.error||'Tải tệp thất bại.');
+        uploadedUrl=d.attachment_url;
+        uploadedName=d.attachment_name||f.name;
+        uploadedSize=d.attachment_size||f.size;
+        $('#annAttachStatus').innerHTML=`✓ Đã tải tệp đính kèm: <b>${esc(uploadedName)}</b> (${Math.max(1,Math.round(uploadedSize/1024))} KB)`;
+      }catch(e){
+        $('#annAttachStatus').textContent='Lỗi tải tệp: '+(e.message||'Không xác định');
+      }finally{
+        $('#annAttachUploadBtn').disabled=false;
+      }
+    };
+
+    $('#annPreviewToggleBtn').onclick=()=>{
+      const form=$('#annEditorForm');
+      const fd=Object.fromEntries(new FormData(form));
+      const pBox=$('#annLivePreviewBox');
+      pBox.style.display='block';
+      pBox.innerHTML=`
+        <div class="eyebrow">BẢN XEM TRƯỚC KHI XUẤT BẢN</div>
+        <div style="margin:6px 0">${prioBadge(fd.priority)} <span class="badge ok">${esc(fd.category)}</span> ${fd.is_pinned?'<span class="badge">📌 Đã ghim</span>':''}</div>
+        <h3 style="margin:6px 0">${esc(fd.title||'(Chưa nhập tiêu đề)')}</h3>
+        <div class="meta">Đối tượng nhận: <b>${fd.target_scope==='unit'?'Theo đơn vị trực thuộc':'Toàn bộ thành viên'}</b> · Trạng thái: <b>${fd.status==='published'?'Đã xuất bản':'Bản nháp'}</b></div>
+        <p style="white-space:pre-wrap;line-height:1.65;margin:10px 0">${esc(fd.body||'(Chưa nhập nội dung)')}</p>
+        ${uploadedUrl?`<div class="meta">📎 Tệp đính kèm: <b>${esc(uploadedName||uploadedUrl)}</b></div>`:''}
+      `;
+    };
+
+    $('#annEditorForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=Object.fromEntries(new FormData(e.target));
+      const payload={
+        ...fd,
+        is_pinned:Boolean(e.target.querySelector('[name="is_pinned"]')?.checked),
+        attachment_url:uploadedUrl||null,
+        attachment_name:uploadedName||null,
+        attachment_size:uploadedSize?Number(uploadedSize):null
+      };
+      try{
+        if(isEdit){
+          await api('/api/admin/announcements/'+encodeURIComponent(existing.id),{method:'PATCH',body:JSON.stringify(payload)});
+          toast('Đã cập nhật thông báo.');
+        }else{
+          await api('/api/admin/announcements',{method:'POST',body:JSON.stringify(payload)});
+          toast(payload.status==='published'?'Đã xuất bản thông báo chính thức.':'Đã lưu bản nháp thông báo.');
+        }
+        $('#modal')?.remove();
+        await load();
+      }catch(err){sfAlert(err.data?.message||err.message)}
+    };
+  };
+
+  const load=async()=>{
+    const q=($('#annAdminQ')?.value||'').trim();
+    const st=($('#annAdminStatus')?.value||'').trim();
+    const cat=($('#annAdminCategory')?.value||'').trim();
+    const prio=($('#annAdminPriority')?.value||'').trim();
+    const qs=new URLSearchParams({page:String(curPage),page_size:'10'});
+    if(q)qs.set('q',q);
+    if(st)qs.set('status',st);
+    if(cat)qs.set('category',cat);
+    if(prio)qs.set('priority',prio);
+    const d=await api('/api/admin/announcements?'+qs.toString());
+    const ov=d.overview||{};
+    $('#annAdminKpiGrid').innerHTML=`
+      <div class="card stat"><span>Tổng số thông báo</span><strong>${Number(ov.total||0)}</strong></div>
+      <div class="card stat"><span>Đã xuất bản</span><strong>${Number(ov.published||0)}</strong></div>
+      <div class="card stat"><span>Bản nháp</span><strong>${Number(ov.draft||0)}</strong></div>
+      <div class="card stat"><span>Đã lưu trữ / Đã ghim</span><strong>${Number(ov.archived||0)} / ${Number(ov.pinned||0)}</strong></div>
+    `;
+    const items=d.items||[];
+    $('#annAdminPager').innerHTML=`
+      <span class="meta">Trang <b>${d.page}</b> / <b>${d.total_pages}</b> (${d.total} thông báo)</span>
+      <button type="button" class="secondary" id="annPrevPage" ${d.page<=1?'disabled':''}>← Trước</button>
+      <button type="button" class="secondary" id="annNextPage" ${d.page>=d.total_pages?'disabled':''}>Sau →</button>
+    `;
+    $('#annAdminTableHost').innerHTML=`
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tiêu đề &amp; Phân loại</th>
+              <th>Mức ưu tiên &amp; Đối tượng nhận</th>
+              <th>Trạng thái</th>
+              <th>Người tạo / Cập nhật</th>
+              <th>Thời gian &amp; Lượt đọc</th>
+              <th>Thao tác quản trị</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(x=>`<tr>
+              <td>
+                <b>${esc(x.title||'Thông báo chính thức')}</b>
+                <div class="meta">
+                  <span class="badge">${esc(x.category||'Điều hành chung')}</span>
+                  ${x.is_pinned?'<span class="badge ok">📌 Đã ghim</span>':''}
+                  ${x.media_url?`<a href="${esc(x.media_url)}" target="_blank" rel="noopener">📎 ${esc(x.attachment_name||'Tệp đính kèm')}</a>`:''}
+                </div>
+              </td>
+              <td>
+                ${prioBadge(x.priority)}
+                <div class="meta">${x.target_scope==='unit'?`Đơn vị: <b>${esc(x.org_name||x.org_node_id)}</b>`:'Toàn bộ thành viên'}</div>
+              </td>
+              <td>${statusBadge(x.moderation_status)}</td>
+              <td>
+                <div>Tạo: <b>${esc(x.author_name||x.author_username)}</b></div>
+                ${x.updated_by_name||x.updated_by_username?`<div class="meta">Sửa: ${esc(x.updated_by_name||x.updated_by_username)}</div>`:''}
+              </td>
+              <td>
+                <div>Tạo: ${esc(x.created_at)}</div>
+                ${x.published_at?`<div class="meta">Xuất bản: ${esc(x.published_at)}</div>`:''}
+                <div class="meta">Đã đọc: <b>${Number(x.read_count||0)}</b> thành viên</div>
+              </td>
+              <td>
+                <div class="toolbar" style="margin:0;gap:6px">
+                  <button type="button" class="secondary" data-ann-view="${esc(x.id)}">Xem</button>
+                  <button type="button" class="secondary" data-ann-edit="${esc(x.id)}">Sửa</button>
+                  ${x.moderation_status==='published'
+                    ?`<button type="button" class="secondary" data-ann-act="${esc(x.id)}" data-op="unpublish">Gỡ xuất bản</button>`
+                    :`<button type="button" class="primary" data-ann-act="${esc(x.id)}" data-op="publish">Xuất bản</button>`}
+                  <button type="button" class="secondary" data-ann-act="${esc(x.id)}" data-op="${x.is_pinned?'unpin':'pin'}">${x.is_pinned?'Bỏ ghim':'Ghim'}</button>
+                  ${x.moderation_status!=='archived'?`<button type="button" class="secondary" data-ann-act="${esc(x.id)}" data-op="archive">Lưu trữ</button>`:''}
+                  <button type="button" class="danger" data-ann-del="${esc(x.id)}">Xóa</button>
+                </div>
+              </td>
+            </tr>`).join('')||'<tr><td colspan="6" class="empty">Không có thông báo nào khớp bộ lọc.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    if($('#annPrevPage'))$('#annPrevPage').onclick=()=>{if(curPage>1){curPage--;load();}};
+    if($('#annNextPage'))$('#annNextPage').onclick=()=>{if(curPage<d.total_pages){curPage++;load();}};
+
+    $$('[data-ann-view]').forEach(b=>b.onclick=async()=>{
+      const det=await api('/api/admin/announcements/'+encodeURIComponent(b.dataset.annView));
+      const a=det.announcement||{};
+      const readers=det.readers||[];
+      modal(`Chi tiết Thông báo · ${esc(a.title)}`,`
+        <div class="request-note" style="margin-bottom:12px">
+          ${statusBadge(a.moderation_status)} ${prioBadge(a.priority)} <span class="badge">${esc(a.category||'Điều hành chung')}</span> ${a.is_pinned?'<span class="badge ok">📌 Đã ghim</span>':''}<br>
+          <b>Người tạo:</b> ${esc(a.author_name||a.author_username)} · <b>Cập nhật cuối:</b> ${esc(a.updated_by_name||a.updated_by_username||'—')}<br>
+          <b>Thời gian tạo:</b> ${esc(a.created_at)} · <b>Thời gian xuất bản:</b> ${esc(a.published_at||'Chưa xuất bản')}<br>
+          <b>Đối tượng nhận:</b> ${a.target_scope==='unit'?`Đơn vị (${esc(a.org_name||a.org_node_id)})`:'Toàn bộ thành viên'}
+        </div>
+        <div class="card" style="white-space:pre-wrap;line-height:1.65;margin-bottom:12px">${esc(a.body)}</div>
+        ${a.media_url?`<div class="request-note" style="margin-bottom:12px">📎 <b>Tệp đính kèm:</b> <a href="${esc(a.media_url)}" target="_blank" rel="noopener">${esc(a.attachment_name||a.media_url)}</a></div>`:''}
+        <h4>Danh sách thành viên đã đọc (${readers.length})</h4>
+        <div class="list" style="max-height:180px;overflow:auto">
+          ${readers.map(r=>`<div class="list-item" style="padding:8px 12px"><b>${esc(r.full_name||r.username)}</b> (${esc(r.member_code||r.username)}) · <span class="meta">Đã đọc lúc ${esc(r.read_at)}</span></div>`).join('')||'<div class="empty">Chưa có thành viên nào xác nhận đã đọc.</div>'}
+        </div>
+      `);
+    });
+
+    $$('[data-ann-edit]').forEach(b=>b.onclick=()=>{
+      const item=items.find(x=>x.id===b.dataset.annEdit);
+      if(item)openEditorModal(item);
+    });
+
+    $$('[data-ann-act]').forEach(b=>b.onclick=async()=>{
+      const op=b.dataset.op;
+      await api('/api/admin/announcements/'+encodeURIComponent(b.dataset.annAct),{method:'PATCH',body:JSON.stringify({action:op})});
+      toast('Đã cập nhật trạng thái thông báo.');
+      await load();
+    });
+
+    $$('[data-ann-del]').forEach(b=>b.onclick=async()=>{
+      if(!await sfConfirm('Bạn có chắc chắn muốn xóa vĩnh viễn thông báo này không?'))return;
+      await api('/api/admin/announcements/'+encodeURIComponent(b.dataset.annDel),{method:'DELETE'});
+      toast('Đã xóa thông báo.');
+      await load();
+    });
+  };
+
+  $('#adminNewAnnouncementBtn').onclick=()=>openEditorModal(null);
+  $('#adminOpenMemberChannelBtn').onclick=()=>go('community');
+  $('#annAdminFilterBtn').onclick=()=>{curPage=1;load();};
+  $('#annAdminQ').onkeydown=e=>{if(e.key==='Enter'){curPage=1;load();}};
+  await load();
+}
+
 async function renderInternalCommunity(c){
   c.innerHTML=`
     <div class="section-title">
@@ -10972,25 +11420,54 @@ async function renderInternalCommunity(c){
         <p class="muted">Kênh truyền đạt thông tin, quyết định và thông báo chính thức một chiều từ Ban Điều hành và các Đơn vị trực thuộc tới thành viên (không sử dụng cho trò chuyện cá nhân hoặc thảo luận nhóm hai chiều).</p>
       </div>
       <div class="toolbar" id="announcementAdminToolbar" style="display:none">
-        <button class="secondary" id="newCommGroupBtn">Tạo Kênh thông báo</button>
-        <button class="primary" id="newSocialPostBtn">Đăng Thông báo chính thức</button>
+        <button class="secondary" id="openFullAdminAnnouncementsBtn">Quản trị Kênh Thông báo</button>
+        <button class="primary" id="newSocialPostBtn">+ Đăng Thông báo chính thức</button>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="toolbar" style="justify-content:space-between;margin:0">
+        <div class="tabs" style="margin:0" id="memberAnnReadTabs">
+          <button type="button" class="active" data-read-tab="">Tất cả thông báo</button>
+          <button type="button" data-read-tab="unread">Chưa đọc</button>
+          <button type="button" data-read-tab="read">Đã đọc</button>
+        </div>
+        <div class="toolbar" style="margin:0">
+          <select id="memberAnnCategoryFilter" style="width:auto">
+            <option value="">Tất cả phân loại</option>
+            <option value="Điều hành chung">Điều hành chung</option>
+            <option value="Sự kiện & Hoạt động">Sự kiện &amp; Hoạt động</option>
+            <option value="Nhân sự & Tổ chức">Nhân sự &amp; Tổ chức</option>
+            <option value="Chính sách & Quy định">Chính sách &amp; Quy định</option>
+            <option value="Khẩn cấp">Khẩn cấp</option>
+          </select>
+          <input id="memberAnnSearchQ" placeholder="Tìm tiêu đề, nội dung..." style="max-width:220px">
+        </div>
       </div>
     </div>
     <div id="communityFeedHost">Đang tải Kênh Thông báo...</div>
   `;
   let selectedGroupId='';
+  let readStateFilter='';
   const load=async()=>{
+    const q=($('#memberAnnSearchQ')?.value||'').trim();
+    const cat=($('#memberAnnCategoryFilter')?.value||'').trim();
+    const qs=new URLSearchParams();
+    if(selectedGroupId)qs.set('group_id',selectedGroupId);
+    if(readStateFilter)qs.set('read_state',readStateFilter);
+    if(q)qs.set('q',q);
+    if(cat)qs.set('category',cat);
     const [grpsRes,postsRes]=await Promise.all([
       api('/api/community/groups'),
-      api('/api/community/posts'+(selectedGroupId?'?group_id='+encodeURIComponent(selectedGroupId):''))
+      api('/api/community/posts'+(qs.toString()?'?'+qs.toString():''))
     ]);
     const grps=grpsRes.items||[];
     const posts=postsRes.items||[];
     const canMod=Boolean(postsRes.can_moderate);
     const admBar=$('#announcementAdminToolbar');
     if(admBar)admBar.style.display=canMod?'flex':'none';
+    if($('#openFullAdminAnnouncementsBtn'))$('#openFullAdminAnnouncementsBtn').onclick=()=>go('admin-announcements');
     $('#communityFeedHost').innerHTML=`
-      <div class="section-grid" style="grid-template-columns:290px minmax(0,1fr);align-items:start">
+      <div class="section-grid" style="grid-template-columns:280px minmax(0,1fr);align-items:start">
         <div class="card">
           <h3>Danh mục Kênh Thông báo (${grps.length})</h3>
           <div class="list" style="margin-top:8px">
@@ -11002,14 +11479,15 @@ async function renderInternalCommunity(c){
           </div>
         </div>
         <div class="list">
-          ${posts.map(p=>`<div class="card" style="margin-bottom:12px">
+          ${posts.map(p=>`<div class="card" style="margin-bottom:12px;${!p.is_read?'border-left:4px solid #2563eb':''}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
               <div>
-                <span class="badge ok">📢 THÔNG BÁO CHÍNH THỨC</span>
-                <span class="badge ${p.moderation_status==='published'?'ok':'warn'}">${esc(({published:'Đã ban hành',pending_approval:'Chờ duyệt ban hành',approved:'Đã duyệt',draft:'Bản nháp',rejected:'Đã từ chối',hidden:'Đã thu hồi/ẩn'})[p.moderation_status]||p.moderation_status)}</span>
-                ${p.is_pinned?'<span class="badge">📌 Quan trọng / Đã ghim</span>':''}
+                <span class="badge ${p.is_read?'ok':'warn'}">${p.is_read?'✓ Đã đọc':'● Chưa đọc'}</span>
+                <span class="badge">${esc(p.category||'Điều hành chung')}</span>
+                ${p.priority==='urgent'?'<span class="badge off" style="background:#fee2e2;color:#991b1b">🔥 Khẩn cấp</span>':p.priority==='important'?'<span class="badge warn">⚡ Quan trọng</span>':''}
+                ${p.is_pinned?'<span class="badge ok">📌 Đã ghim</span>':''}
                 <h3 style="margin:8px 0 4px">${esc(p.title||'Thông báo chính thức')}</h3>
-                <div class="meta">Người đăng: <b>${esc(p.author_name||p.author_username)}</b> (${esc(p.author_member_code||'Ban Điều hành')}) · Kênh phân phối: <b>${esc(p.group_name||'Toàn hệ thống')}</b> · Thời gian: <b>${esc(p.published_at||p.created_at)}</b></div>
+                <div class="meta">Người đăng: <b>${esc(p.author_name||p.author_username)}</b> (${esc(p.author_member_code||'Ban Điều hành')}) · Đối tượng: <b>${p.target_scope==='unit'?esc(p.org_name||'Theo đơn vị'):'Toàn bộ thành viên'}</b> · Thời gian xuất bản: <b>${esc(p.published_at||p.created_at)}</b></div>
               </div>
               ${canMod?`<div class="toolbar">
                 ${p.moderation_status!=='published'?`<button class="primary" data-post-mod="${esc(p.id)}" data-op="publish">Duyệt &amp; Ban hành</button>`:''}
@@ -11017,17 +11495,20 @@ async function renderInternalCommunity(c){
                 <button class="danger" data-post-mod="${esc(p.id)}" data-op="hide">Ẩn thông báo</button>
               </div>`:''}
             </div>
-            <p style="margin:12px 0 4px;white-space:pre-wrap;line-height:1.65">${esc(p.body)}</p>
-            <div class="toolbar" style="border-top:1px solid #eef3f8;padding-top:10px;margin-top:10px">
-              <button type="button" class="secondary" data-post-react="${esc(p.id)}">✓ Đã xem &amp; Xác nhận nắm thông tin (${Number(p.reaction_count||0)})</button>
+            <p style="margin:12px 0 8px;white-space:pre-wrap;line-height:1.65">${esc(p.body)}</p>
+            ${p.media_url?`<div class="request-note" style="margin:8px 0;padding:10px 12px">📎 <b>Tệp đính kèm:</b> <a href="${esc(p.media_url)}" target="_blank" rel="noopener noreferrer">${esc(p.attachment_name||'Tải tệp đính kèm chính thức')}</a></div>`:''}
+            <div class="toolbar" style="border-top:1px solid #eef3f8;padding-top:10px;margin-top:10px;justify-content:space-between">
+              <div class="meta">${p.is_read?`Đã đọc lúc: ${esc(p.read_at)}`:'Bấm xác nhận bên cạnh để lưu trạng thái đã đọc thông báo này.'} · Tổng lượt đã đọc: <b>${Number(p.read_count||0)}</b></div>
+              <button type="button" class="${p.is_read?'secondary':'primary'}" data-post-read="${esc(p.id)}">${p.is_read?'✓ Đã đọc & Nắm thông tin':'Đánh dấu Đã đọc & Xác nhận'}</button>
             </div>
-          </div>`).join('')||'<div class="card empty">Hiện chưa có thông báo chính thức nào trong kênh này.</div>'}
+          </div>`).join('')||'<div class="card empty">Hiện chưa có thông báo chính thức nào trong mục này.</div>'}
         </div>
       </div>
     `;
     $$('[data-grp-pick]').forEach(el=>el.onclick=()=>{selectedGroupId=el.dataset.grpPick;load()});
-    $$('[data-post-react]').forEach(b=>b.onclick=async()=>{
-      await api('/api/community/posts/'+encodeURIComponent(b.dataset.postReact)+'/react',{method:'POST',body:JSON.stringify({reaction_type:'like'})});
+    $$('[data-post-read]').forEach(b=>b.onclick=async()=>{
+      await api('/api/community/posts/'+encodeURIComponent(b.dataset.postRead)+'/read',{method:'POST',body:JSON.stringify({reaction_type:'like'})});
+      toast('Đã ghi nhận trạng thái Đã đọc thông báo.');
       await load();
     });
     $$('[data-post-mod]').forEach(b=>b.onclick=async()=>{
@@ -11035,45 +11516,15 @@ async function renderInternalCommunity(c){
       toast('Đã cập nhật trạng thái thông báo.');await load();
     });
   };
-  $('#newCommGroupBtn').onclick=()=>{
-    modal('Tạo Kênh Thông báo Chính thức mới',`
-      <form id="createCommGrpForm" class="form-grid">
-        <label>Tên Kênh thông báo *<input name="name" required placeholder="Kênh Thông báo Điều hành & Sự kiện"></label>
-        <input type="hidden" name="group_type" value="announcement_channel">
-        <label>Phạm vi đối tượng nhận thông báo<select name="visibility"><option value="public_internal">Toàn bộ thành viên trong hệ thống</option><option value="private">Theo đơn vị trực thuộc</option><option value="invite_only">Nhóm đối tượng được phân quyền</option></select></label>
-        <label style="grid-column:1/-1">Mô tả phạm vi kênh<input name="description" placeholder="Kênh truyền đạt thông báo một chiều chính thức"></label>
-        <button class="primary">Lưu Kênh thông báo</button>
-      </form>
-    `);
-    $('#createCommGrpForm').onsubmit=async e=>{
-      e.preventDefault();
-      try{
-        await api('/api/community/groups',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
-        $('#modal')?.remove();toast('Đã tạo Kênh thông báo mới.');await load();
-      }catch(err){sfAlert(err.data?.message||err.message)}
-    };
-  };
-  $('#newSocialPostBtn').onclick=async()=>{
-    const grps=(await api('/api/community/groups')).items||[];
-    modal('Đăng Thông báo Chính thức',`
-      <form id="createSocialPostForm" class="form-grid">
-        <label>Kênh phân phối thông báo *<select name="group_id">${grps.map(g=>`<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('')}</select></label>
-        <input type="hidden" name="post_kind" value="official_announcement">
-        <label style="grid-column:1/-1">Tiêu đề thông báo *<input name="title" required placeholder="Thông báo kế hoạch hoạt động tháng..."></label>
-        <label style="grid-column:1/-1">Nội dung thông báo chính thức *<textarea name="body" rows="5" required></textarea></label>
-        <label style="grid-column:1/-1;display:flex;align-items:center;gap:8px"><input type="checkbox" name="publish_immediately" value="1" checked style="width:auto"> Ban hành chính thức ngay sau khi đăng</label>
-        <button class="primary">Đăng Thông báo</button>
-      </form>
-    `);
-    $('#createSocialPostForm').onsubmit=async e=>{
-      e.preventDefault();
-      try{
-        const fd=Object.fromEntries(new FormData(e.target));
-        const r=await api('/api/community/posts',{method:'POST',body:JSON.stringify({...fd,post_kind:'official_announcement',publish_immediately:Boolean(fd.publish_immediately)})});
-        $('#modal')?.remove();toast(r.moderation_status==='published'?'Đã ban hành thông báo chính thức.':'Đã lưu thông báo vào danh sách chờ duyệt.');await load();
-      }catch(err){sfAlert(err.data?.message||err.message)}
-    };
-  };
+  $$('#memberAnnReadTabs button[data-read-tab]').forEach(btn=>btn.onclick=()=>{
+    $$('#memberAnnReadTabs button').forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    readStateFilter=btn.dataset.readTab||'';
+    load();
+  });
+  if($('#memberAnnCategoryFilter'))$('#memberAnnCategoryFilter').onchange=()=>load();
+  if($('#memberAnnSearchQ'))$('#memberAnnSearchQ').oninput=()=>load();
+  if($('#newSocialPostBtn'))$('#newSocialPostBtn').onclick=()=>go('admin-announcements');
   await load();
 }
 
